@@ -68,6 +68,10 @@ pub struct BriefArgs {
     #[arg(long)]
     pub no_constants: bool,
 
+    /// Exclude unions
+    #[arg(long)]
+    pub no_unions: bool,
+
     /// Exclude macros
     #[arg(long)]
     pub no_macros: bool,

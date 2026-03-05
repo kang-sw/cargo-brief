@@ -1,6 +1,6 @@
 use rustdoc_types::{
     Constant, Enum, Function, GenericArg, GenericArgs, GenericBound, GenericParamDefKind, Item,
-    ItemEnum, Struct, StructKind, Trait, Type, TypeAlias, VariantKind, Visibility,
+    ItemEnum, Static, Struct, StructKind, Trait, Type, TypeAlias, Union, VariantKind, Visibility,
 };
 
 use crate::cli::BriefArgs;
@@ -188,6 +188,28 @@ fn render_module_contents(
                     output,
                 );
             }
+            ItemEnum::Static(_) if !args.no_constants => {
+                render_item(
+                    model,
+                    child,
+                    child_id,
+                    &child_indent,
+                    observer,
+                    same_crate,
+                    output,
+                );
+            }
+            ItemEnum::Union(_) if !args.no_unions => {
+                render_item(
+                    model,
+                    child,
+                    child_id,
+                    &child_indent,
+                    observer,
+                    same_crate,
+                    output,
+                );
+            }
             ItemEnum::Macro(_) if !args.no_macros => {
                 render_item(
                     model,
@@ -353,6 +375,12 @@ fn render_item(
         }
         ItemEnum::Constant { type_, const_: c } => {
             render_constant(item, type_, c, indent, &vis, output);
+        }
+        ItemEnum::Static(s) => {
+            render_static(item, s, indent, &vis, output);
+        }
+        ItemEnum::Union(u) => {
+            render_union(model, item, u, indent, &vis, observer, same_crate, output);
         }
         ItemEnum::Macro(_) => {
             let name = item.name.as_deref().unwrap_or("?");
@@ -592,11 +620,58 @@ fn render_constant(
 ) {
     let name = item.name.as_deref().unwrap_or("?");
     let val = c.value.as_deref().unwrap_or("_");
-    let keyword = if c.is_literal { "const" } else { "const" };
     output.push_str(&format!(
-        "{indent}{vis}{keyword} {name}: {} = {val};\n",
+        "{indent}{vis}const {name}: {} = {val};\n",
         format_type(type_)
     ));
+}
+
+fn render_static(item: &Item, s: &Static, indent: &str, vis: &str, output: &mut String) {
+    let name = item.name.as_deref().unwrap_or("?");
+    let mutability = if s.is_mutable { "mut " } else { "" };
+    let val = if s.expr.is_empty() { "_" } else { &s.expr };
+    output.push_str(&format!(
+        "{indent}{vis}static {mutability}{name}: {} = {val};\n",
+        format_type(&s.type_)
+    ));
+}
+
+fn render_union(
+    model: &CrateModel,
+    item: &Item,
+    u: &Union,
+    indent: &str,
+    vis: &str,
+    observer: &str,
+    same_crate: bool,
+    output: &mut String,
+) {
+    let name = item.name.as_deref().unwrap_or("?");
+    let generics = format_generics(&u.generics);
+    output.push_str(&format!("{indent}{vis}union {name}{generics} {{\n"));
+
+    for field_id in &u.fields {
+        if let Some(field_item) = model.krate.index.get(field_id) {
+            if !is_visible_from(model, field_item, field_id, observer, same_crate)
+                && !matches!(field_item.visibility, Visibility::Public)
+            {
+                continue;
+            }
+            if let ItemEnum::StructField(ty) = &field_item.inner {
+                let fname = field_item.name.as_deref().unwrap_or("?");
+                let fvis = format_visibility(&field_item.visibility);
+                output.push_str(&format!(
+                    "{indent}    {fvis}{fname}: {},\n",
+                    format_type(ty)
+                ));
+            }
+        }
+    }
+
+    if u.has_stripped_fields {
+        output.push_str(&format!("{indent}    // ... private fields\n"));
+    }
+    output.push_str(&format!("{indent}}}\n"));
 }
 
 fn render_use(
