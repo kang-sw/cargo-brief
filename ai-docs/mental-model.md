@@ -163,9 +163,12 @@ To determine what is visible from `--at-mod my_mod`:
 
 ## Current State (as of 2026-03-05)
 
-- Project initialized: `Cargo.toml` (edition 2024), `src/main.rs` (Hello World placeholder).
-- No dependencies added yet.
-- Architecture and CLI interface designed; no implementation started.
+- **Core pipeline implemented and working**: CLI → rustdoc invocation → JSON parsing → visibility filtering → pseudo-Rust rendering.
+- Dependencies: `clap` 4, `rustdoc-types` 0.57, `serde_json` 1, `anyhow` 1.
+- Requires nightly toolchain (`cargo +nightly rustdoc -- --output-format json -Z unstable-options --document-private-items`).
+- Test fixture (`test_fixture/`) with various visibility levels validates output.
+- Module structure: `cli.rs`, `rustdoc_json.rs`, `model.rs`, `render.rs`, `main.rs`.
+- Remaining: more tests, `--at-mod` with specific module path, error handling polish.
 
 ---
 
