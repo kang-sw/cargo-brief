@@ -33,6 +33,12 @@
   - Technical implementation ideas and notes (when sufficiently clear)
 - Use these files to track progress across sessions and maintain continuity.
 
+## Testing Rules
+
+- Write test cases aggressively for all logic where feasible.
+- When a test fails, diagnose whether the **assumption in the test** is wrong or the **logic under test** is buggy. Fix the correct side — do not blindly modify the test to make it pass.
+- If testing requires user interaction (e.g., UI, manual CLI invocation), notify the user and request manual testing rather than skipping or faking it.
+
 ## Project-Specific Notes
 
 *(Populated as the project evolves — see `ai-docs/mental-model.md` for current state.)*
