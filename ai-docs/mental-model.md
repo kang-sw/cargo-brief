@@ -27,148 +27,80 @@ visibility is always `pub`-only). This makes external dep support architecturall
 
 ---
 
-## CLI Interface (Designed, Not Yet Implemented)
+## CLI Interface
 
 ```
-cargo brief [OPTIONS] <crate_name> <module_path>
+cargo brief <crate_name> [module_path] [OPTIONS]
 ```
 
 ### Positional Arguments
 | Argument       | Description                                      |
 |----------------|--------------------------------------------------|
 | `<crate_name>` | Name of the crate to inspect                     |
-| `<module_path>`| Module path within that crate to inspect         |
+| `[module_path]`| Module path within that crate to inspect         |
 
 ### Options
 | Flag                    | Description                                                    |
 |-------------------------|----------------------------------------------------------------|
 | `--at-package <pkg>`    | Caller's package (for visibility resolution)                   |
 | `--at-mod <mod_path>`   | Caller's module (determines what is visible)                   |
-| `--depth <n>`           | How many submodule levels to recurse into                      |
+| `--depth <n>`           | How many submodule levels to recurse into (default: 1)         |
 | `--recursive`           | Recurse into all submodules (no depth limit)                   |
-| `--all`                 | Show all item kinds (equivalent to enabling all item flags)    |
-| `--structs`             | Include structs                                                |
-| `--enums`               | Include enums                                                  |
-| `--traits`              | Include traits                                                 |
-| `--functions`           | Include free functions                                         |
-| `--aliases`             | Include type aliases                                           |
-| `--constants`           | Include constants and statics                                  |
-| `--macros`              | Include macros                                                 |
-| `--no-structs`          | Exclude structs (override default)                             |
+| `--all`                 | Show all item kinds including blanket/auto-trait impls          |
+| `--no-structs`          | Exclude structs                                                |
 | `--no-enums`            | Exclude enums                                                  |
 | `--no-traits`           | Exclude traits                                                 |
 | `--no-functions`        | Exclude free functions                                         |
 | `--no-aliases`          | Exclude type aliases                                           |
 | `--no-constants`        | Exclude constants and statics                                  |
+| `--no-unions`           | Exclude unions                                                 |
 | `--no-macros`           | Exclude macros                                                 |
-
-*(Exact flag names are provisional and can be revised before implementation.)*
-
-### Default Behavior: "Everything Minus Exclusions"
-
-By default, all common item kinds are shown. The `--all` flag additionally includes noisy
-categories that are excluded by default. Per-kind `--no-<kind>` flags allow subtractive
-filtering from the default set.
-
-**Default exclusions** (shown only with `--all`):
-- Blanket impls (`impl<T: Foo> Bar for T`) — detected via `rustdoc-types` `Impl::blanket_impl`
-- Auto-trait / synthetic impls (`Send`, `Sync`, `Unpin`, `UnwindSafe`, ...) — detected via `Impl::synthetic`
-
-**Default inclusions** (everything else):
-- Structs, enums, unions, traits, free functions, type aliases, constants, statics, macros
-- Inherent impls (`impl MyStruct { ... }`)
-- Concrete trait impls (`impl Display for MyStruct { ... }`)
-
----
-
-## Output Format
-
-```rust
-// crate my_proj
-mod my_group::other_mod {
-    mod submod_1 {
-        mod submod_2 {
-            struct MyStruct {
-                pub(crate) visible_field: i32,
-                // ... (private fields hidden)
-            }
-            impl MyStruct {
-                /// Doc comment preserved as-is.
-                pub fn my_func(arg: ()) -> i32;
-            }
-        }
-    }
-}
-```
-
-Rules:
-- Module hierarchy is preserved as nested `mod` blocks.
-- Struct/enum fields: only those visible from `--at-mod` are shown; others replaced with `// ...`.
-- Function/method bodies: replaced with `;`.
-- Doc comments (`///`, `//!`): dumped verbatim above the item.
-- Trait implementations: shown inline in `impl` blocks.
-- Blanket impls: omitted by default; shown with `--all`. Detected via `Impl::blanket_impl`.
-- Auto-trait impls (Send, Sync, ...): omitted by default; shown with `--all`. Detected via `Impl::synthetic`.
+| `--toolchain <name>`    | Nightly toolchain name (default: `nightly`)                    |
+| `--manifest-path <path>`| Path to Cargo.toml                                            |
 
 ---
 
 ## Implementation Architecture
 
-### Backend: rustdoc JSON (Primary)
+### Module Structure
+- `src/lib.rs` — re-exports all modules, `run_pipeline()` entry point
+- `src/main.rs` — CLI arg parsing, calls `run_pipeline()`, prints output
+- `src/cli.rs` — `BriefArgs` struct (clap derive)
+- `src/rustdoc_json.rs` — JSON generation and parsing
+- `src/model.rs` — `CrateModel` with module index, visibility resolution
+- `src/render.rs` — pseudo-Rust rendering of all item types
 
-`cargo rustdoc -p <crate> -- --output-format json --document-private-items`
+### Supported Item Types
+Structs (unit, tuple, plain), enums (plain, tuple, struct variants), traits,
+free functions (async, const, unsafe), type aliases, constants, statics
+(static, static mut), unions, macros (macro_rules!), re-exports (use),
+inherent impls, trait impls.
 
-- Rustdoc JSON is post-macro-expansion, so proc-macro and derive outputs are naturally
-  included — matching LSP-equivalent behavior.
-- Parsed via the `rustdoc-types` crate (official Rust project, tracks rustdoc JSON format).
-- `--document-private-items` is required to obtain full visibility metadata for
-  `--at-mod` filtering. Filtering is then applied in our code, not by rustdoc.
+### Backend: rustdoc JSON
+`cargo +nightly rustdoc -p <crate> -- --output-format json -Z unstable-options --document-private-items`
 
-### Loose Backend Coupling
-
-The backend (rustdoc JSON) should be isolated behind a trait/abstraction so that alternative
-backends (rust-analyzer, syn) can be plugged in if rustdoc JSON proves insufficient for any
-case. However, do not over-engineer this abstraction upfront — extract it when a second
-backend is actually needed.
+Parsed via `rustdoc-types` 0.57. Post-macro-expansion output.
 
 ### Visibility Resolution
+- `pub` → always visible
+- `pub(crate)` → visible if same crate
+- `pub(super)` / `pub(in path)` → visible if observer is in scope
+- `default` → hidden (except impl items, delegated to parent type)
 
-To determine what is visible from `--at-mod my_mod`:
-1. Compute the module path of `my_mod` within `--at-package`.
-2. For each item in the target module tree:
-   - `pub` → always visible
-   - `pub(crate)` → visible if `--at-package` == target crate
-   - `pub(super)` → visible if `my_mod` is a descendant of the item's parent module
-   - `pub(in path)` → visible if `my_mod` is within the specified path
-   - Re-exports (`pub use`) → trace through to the original item's visibility
-3. For external crates: only `pub` items are ever visible (skip steps 2–3).
-
-### Phase Plan
-
-**Phase 1 — Workspace crates only**
-- `cargo rustdoc -p <crate>` invocation
-- rustdoc JSON parsing via `rustdoc-types`
-- Visibility filtering for workspace crates
-- Output formatting (pseudo-Rust text)
-- All item-kind flags (`--structs`, `--functions`, etc.) and `--all`
-- `--depth` and `--recursive`
-
-**Phase 2 — External dependencies**
-- Feature-flag-aware rustdoc invocation (read from `cargo metadata`)
-- Caching layer: store `target/doc/<dep>.json`, invalidate on `Cargo.lock` change
-- External dep visibility is `pub`-only (simpler filtering)
-- Estimated complexity: ~30% additive on top of Phase 1
+### Error Handling
+- Missing nightly toolchain: actionable install command
+- Package not found: clear message with original cargo error
+- Module not found: lists available modules in the crate
+- `.with_context()` at each pipeline step
 
 ---
 
 ## Current State (as of 2026-03-05)
 
-- **Core pipeline implemented and working**: CLI → rustdoc invocation → JSON parsing → visibility filtering → pseudo-Rust rendering.
+- **v0.0.2**: Core pipeline, all item types, 36 tests, README with AI agent setup guide.
 - Dependencies: `clap` 4, `rustdoc-types` 0.57, `serde_json` 1, `anyhow` 1.
-- Requires nightly toolchain (`cargo +nightly rustdoc -- --output-format json -Z unstable-options --document-private-items`).
-- Test fixture (`test_fixture/`) with various visibility levels validates output.
-- Module structure: `cli.rs`, `rustdoc_json.rs`, `model.rs`, `render.rs`, `main.rs`.
-- Remaining: more tests, `--at-mod` with specific module path, error handling polish.
+- Test fixture (`test_fixture/`) covers all supported item types.
+- Remaining future work: external dependency support (Phase 2), caching.
 
 ---
 
@@ -180,4 +112,6 @@ To determine what is visible from `--at-mod my_mod`:
 | `--at-mod` semantics | "compiles when `use`d from here" | Matches developer mental model; includes re-exports |
 | Output format | Pseudo-Rust text (not JSON) | LLM consumption; readable as documentation |
 | Item-kind filtering | Default=show all common items; `--no-*` to exclude; `--all` adds blanket/auto-trait impls | Subtractive model is more ergonomic |
+| Statics grouped with constants | `--no-constants` hides both | Conceptually similar; avoids flag proliferation |
+| lib.rs + slim main.rs | `run_pipeline()` returns String | Enables integration tests without subprocess |
 | External deps | Phase 2 | Adds ~30% complexity; architecture supports it cleanly |
