@@ -2,6 +2,11 @@
 name = "cargo-brief"
 version = "0.1.0"
 edition = "2024"
+description = "Visibility-aware Rust API extractor — pseudo-Rust output for AI agent consumption"
+license = "MPL-2.0"
+repository = "https://github.com/kang-sw/cargo-brief"
+keywords = ["cargo", "rustdoc", "api", "cli"]
+categories = ["development-tools::cargo-plugins", "command-line-utilities"]
 
 [dependencies]
 anyhow = "1"
