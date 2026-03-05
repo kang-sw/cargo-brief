@@ -100,20 +100,27 @@ mod utils {
 
 ### Claude Code
 
-Create a skill file at `.claude/commands/brief.md`:
+Create a skill directory and file:
+
+**Project-level** (shared with team): `.claude/skills/brief/SKILL.md`
+**User-level** (all your projects): `~/.claude/skills/brief/SKILL.md`
 
 ```markdown
 ---
-description: Extract and display the API of a Rust crate as pseudo-Rust documentation
-argument: <crate_name> [module_path] [OPTIONS]
+name: brief
+description: Extract and display the pseudo-Rust API of a Rust crate using cargo-brief
+argument-hint: <crate> [module] [OPTIONS]
 ---
 
 Run `cargo brief $ARGUMENTS --recursive` and return the output to the conversation.
 
-Use this to understand a Rust crate's public API without reading source files. The output is concise pseudo-Rust that shows types, functions, traits, and their signatures.
+Use this to understand a Rust crate's public API without reading source files.
+
+For multi-workspace projects, add `--manifest-path path/to/Cargo.toml`.
+To see external visibility only, add `--at-package consumer-crate`.
 ```
 
-Then invoke it in Claude Code with `/project:brief my-crate` or `/project:brief my-crate some::module`.
+Then invoke it in Claude Code with `/brief my-crate` or `/brief my-crate some::module`.
 
 ### Generic LLM Agent
 
