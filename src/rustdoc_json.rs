@@ -25,12 +25,31 @@ pub fn generate_rustdoc_json(
         cmd.arg("--document-private-items");
     }
 
-    let output = cmd
-        .output()
-        .context("Failed to execute cargo rustdoc. Is the nightly toolchain installed?")?;
+    let output = cmd.output().with_context(|| {
+        format!(
+            "Failed to execute `cargo +{toolchain} rustdoc`. \
+             Is the '{toolchain}' toolchain installed? Try: rustup toolchain install {toolchain}"
+        )
+    })?;
 
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
+        if stderr.contains("toolchain") && stderr.contains("is not installed") {
+            bail!(
+                "The '{toolchain}' toolchain is not installed.\n\
+                 Install it with: rustup toolchain install {toolchain}"
+            );
+        }
+        if stderr.contains("did not match any packages")
+            || stderr.contains("package(s) `")
+            || stderr.contains("no packages match")
+        {
+            bail!(
+                "Package '{crate_name}' not found in the workspace.\n\
+                 Check the package name and ensure it exists in the workspace.\n\
+                 Original error:\n{stderr}"
+            );
+        }
         bail!("cargo rustdoc failed:\n{stderr}");
     }
 

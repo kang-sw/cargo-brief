@@ -17,11 +17,16 @@ pub fn run_pipeline(args: &BriefArgs) -> Result<String> {
         args.manifest_path.as_deref(),
         true, // always document private items for visibility filtering
     )
-    .context("Failed to generate rustdoc JSON")?;
+    .with_context(|| {
+        format!(
+            "Failed to generate rustdoc JSON for crate '{}'",
+            args.crate_name
+        )
+    })?;
 
     // Step 2: Parse JSON
-    let krate =
-        rustdoc_json::parse_rustdoc_json(&json_path).context("Failed to parse rustdoc JSON")?;
+    let krate = rustdoc_json::parse_rustdoc_json(&json_path)
+        .with_context(|| format!("Failed to parse rustdoc JSON at '{}'", json_path.display()))?;
 
     // Step 3: Build model
     let model = CrateModel::from_crate(krate);

@@ -7,6 +7,8 @@ use crate::cli::BriefArgs;
 use crate::model::{CrateModel, is_visible_from};
 
 /// Render the API of a target module as pseudo-Rust.
+///
+/// Returns an error if the target module path is specified but not found.
 pub fn render_module_api(
     model: &CrateModel,
     target_module_path: Option<&str>,
@@ -26,7 +28,17 @@ pub fn render_module_api(
     };
 
     let Some(target_item) = target_item else {
-        output.push_str("// module not found\n");
+        if let Some(path) = target_module_path {
+            output.push_str(&format!("// ERROR: module '{path}' not found\n"));
+            output.push_str("// Available modules:\n");
+            let mut paths: Vec<&str> = model.module_index.keys().map(|s| s.as_str()).collect();
+            paths.sort();
+            for p in paths {
+                output.push_str(&format!("//   {p}\n"));
+            }
+        } else {
+            output.push_str("// ERROR: crate root module not found\n");
+        }
         return output;
     };
 
