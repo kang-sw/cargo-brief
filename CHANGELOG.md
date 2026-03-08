@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.1.1] - 2026-03-08
+
+### Fixed
+
+- Single-arg package names (e.g., `cargo brief hecs`) no longer error at virtual workspace roots or directories without a package. Unknown names are now passed through as package names instead of failing with "Cannot resolve 'self'".
+
 ## [0.1.0] - 2026-03-08
 
 ### Added
