@@ -349,7 +349,7 @@ fn render_impl_blocks(
             render_docs(impl_item, &child_indent, output);
             if assoc_items.is_empty() {
                 // No associated types/constants → one-liner
-                output.push_str(&format!("{impl_header} {{ .. }}\n"));
+                output.push_str(&format!("{impl_header};\n"));
             } else {
                 // Has associated types/constants → show only those
                 output.push_str(&format!("{impl_header} {{\n"));
