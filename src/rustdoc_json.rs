@@ -9,6 +9,7 @@ pub fn generate_rustdoc_json(
     toolchain: &str,
     manifest_path: Option<&str>,
     document_private_items: bool,
+    target_dir: &Path,
 ) -> Result<PathBuf> {
     let mut cmd = Command::new("cargo");
     cmd.arg(format!("+{toolchain}"));
@@ -54,7 +55,6 @@ pub fn generate_rustdoc_json(
     }
 
     // Find the generated JSON file in the target directory
-    let target_dir = find_target_dir(manifest_path)?;
     let json_name = crate_name.replace('-', "_");
     let json_path = target_dir.join("doc").join(format!("{json_name}.json"));
 
@@ -75,41 +75,4 @@ pub fn parse_rustdoc_json(path: &Path) -> Result<rustdoc_types::Crate> {
     let krate: rustdoc_types::Crate =
         serde_json::from_str(&content).context("Failed to parse rustdoc JSON")?;
     Ok(krate)
-}
-
-/// Determine the cargo target directory.
-fn find_target_dir(manifest_path: Option<&str>) -> Result<PathBuf> {
-    let mut cmd = Command::new("cargo");
-    cmd.args(["metadata", "--format-version=1", "--no-deps"]);
-
-    if let Some(manifest) = manifest_path {
-        cmd.args(["--manifest-path", manifest]);
-    }
-
-    let output = cmd.output().context("Failed to run cargo metadata")?;
-
-    if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        bail!("cargo metadata failed:\n{stderr}");
-    }
-
-    let metadata: serde_json::Value =
-        serde_json::from_slice(&output.stdout).context("Failed to parse cargo metadata")?;
-
-    let target_dir = metadata["target_directory"]
-        .as_str()
-        .context("No target_directory in cargo metadata")?;
-
-    Ok(PathBuf::from(target_dir))
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_find_target_dir() {
-        let target = find_target_dir(None).unwrap();
-        assert!(target.ends_with("target") || target.to_string_lossy().contains("target"));
-    }
 }

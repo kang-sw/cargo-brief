@@ -1,15 +1,20 @@
 use cargo_brief::cli::BriefArgs;
 use cargo_brief::model::CrateModel;
 use cargo_brief::render::render_module_api;
+use cargo_brief::resolve;
 use cargo_brief::rustdoc_json;
 
 /// Generate the model from the test fixture once (per test).
 fn fixture_model() -> CrateModel {
+    let metadata = resolve::load_cargo_metadata(Some("test_fixture/Cargo.toml"))
+        .expect("Failed to load cargo metadata");
+
     let json_path = rustdoc_json::generate_rustdoc_json(
         "test-fixture",
         "nightly",
         Some("test_fixture/Cargo.toml"),
         true,
+        &metadata.target_dir,
     )
     .expect("Failed to generate rustdoc JSON for test fixture");
 
