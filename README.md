@@ -26,8 +26,19 @@ rustup toolchain install nightly
 ## Usage
 
 ```sh
-cargo brief <crate_name> [module_path] [OPTIONS]
+cargo brief <target> [module_path] [OPTIONS]
 ```
+
+The first argument is flexible — it can be a crate name, `self`, a `crate::module` path, or even a file path:
+
+| Syntax | Resolves to |
+|--------|-------------|
+| `my-crate` | Named crate (hyphen/underscore normalized) |
+| `self` | Current package (detected from cwd) |
+| `self::module` | Current package, specific module |
+| `crate::module` | Named crate + module in one arg |
+| `src/foo.rs` | File path → auto-converted to module path |
+| `unknown_name` | If not a workspace package → treated as self module |
 
 ### Examples
 
@@ -35,8 +46,13 @@ cargo brief <crate_name> [module_path] [OPTIONS]
 # Show the full API of a crate in your workspace
 cargo brief my-crate --recursive
 
-# Show a specific module
+# Inspect the current package
+cargo brief self --recursive
+
+# Show a specific module (multiple syntaxes)
 cargo brief my-crate utils::helpers
+cargo brief self::utils
+cargo brief src/utils.rs
 
 # Show only what's visible from an external crate
 cargo brief my-crate --at-package other-crate
@@ -52,8 +68,8 @@ cargo brief my-crate --no-macros --no-traits
 
 | Flag | Description |
 |------|-------------|
-| `<crate_name>` | Target crate name to inspect |
-| `[module_path]` | Module path within the crate (e.g., `my_mod::submod`) |
+| `<target>` | Target to inspect: crate name, `self`, `crate::module`, or file path |
+| `[module_path]` | Module path within the crate (e.g., `my_mod::submod` or `src/my_mod.rs`) |
 | `--at-package <pkg>` | Caller's package name (for visibility resolution) |
 | `--at-mod <path>` | Caller's module path (determines what is visible) |
 | `--depth <n>` | How many submodule levels to recurse into (default: 1) |
@@ -107,11 +123,15 @@ Add a note to your project's `CLAUDE.md` so the AI knows to use cargo-brief when
 
 Use `cargo brief` to inspect crate interfaces instead of reading source files directly:
 
-# Full recursive API
-cargo brief <crate> --recursive
+# Current package API
+cargo brief self --recursive
 
-# Specific module
-cargo brief <crate> some::module --recursive
+# Specific module (by name or file path)
+cargo brief self::some_module --recursive
+cargo brief src/some_module.rs --recursive
+
+# Named crate in workspace
+cargo brief <crate> --recursive
 
 # Multi-workspace: specify manifest path
 cargo brief <crate> --manifest-path path/to/Cargo.toml --recursive
@@ -125,11 +145,11 @@ cargo brief <crate> --at-package consumer-crate --recursive
 Pipe the output directly into your agent's context:
 
 ```sh
-# Full crate API
-cargo brief some-crate --recursive | your-agent-tool
+# Current package API
+cargo brief self --recursive | your-agent-tool
 
 # Specific module
-cargo brief some-crate network::http --recursive | your-agent-tool
+cargo brief self::network::http --recursive | your-agent-tool
 ```
 
 Or use it as a tool call that returns the output as a string to the agent.
