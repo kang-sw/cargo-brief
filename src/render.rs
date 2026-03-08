@@ -480,12 +480,14 @@ fn render_struct(
             has_stripped_fields,
         } => {
             let mut body = String::new();
+            let mut hidden_count = 0u32;
             for field_id in fields {
                 if let Some(field_item) = model.krate.index.get(field_id) {
                     // Check field visibility
                     if !is_visible_from(model, field_item, field_id, observer, same_crate)
                         && !matches!(field_item.visibility, Visibility::Public)
                     {
+                        hidden_count += 1;
                         continue;
                     }
                     if let ItemEnum::StructField(ty) = &field_item.inner {
@@ -499,12 +501,13 @@ fn render_struct(
                     }
                 }
             }
-            if body.is_empty() && *has_stripped_fields {
+            let has_hidden = *has_stripped_fields || hidden_count > 0;
+            if body.is_empty() && has_hidden {
                 output.push_str(&format!("{indent}{vis}struct {name}{generics} {{ .. }}\n"));
             } else if body.is_empty() {
                 output.push_str(&format!("{indent}{vis}struct {name}{generics} {{}}\n"));
             } else {
-                if *has_stripped_fields {
+                if has_hidden {
                     body.push_str(&format!("{indent}    // .. private fields\n"));
                 }
                 output.push_str(&format!("{indent}{vis}struct {name}{generics} {{\n"));
