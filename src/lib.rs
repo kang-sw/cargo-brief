@@ -42,9 +42,18 @@ pub fn run_pipeline(args: &BriefArgs) -> Result<String> {
     let model = CrateModel::from_crate(krate);
 
     // Step 4: Determine if observer is in the same crate
-    let observer_crate = args.at_package.as_deref().unwrap_or(&resolved.package_name);
-    let same_crate = observer_crate == resolved.package_name
-        || observer_crate.replace('-', "_") == model.crate_name();
+    // If --at-package is explicit, use that. Otherwise auto-detect:
+    // same_crate = true only when inspecting the current package (self).
+    let same_crate = if let Some(at_pkg) = args.at_package.as_deref() {
+        at_pkg == resolved.package_name || at_pkg.replace('-', "_") == model.crate_name()
+    } else {
+        // Auto-detect: same_crate only if target is the current package
+        metadata
+            .current_package
+            .as_ref()
+            .map(|cur| cur == &resolved.package_name || cur.replace('-', "_") == model.crate_name())
+            .unwrap_or(false)
+    };
 
     // Step 5: Render
     let output = render::render_module_api(
