@@ -104,7 +104,7 @@ Parsed via `rustdoc-types` 0.57. Post-macro-expansion output.
 
 ## Current State (as of 2026-03-08)
 
-- **v0.0.2**: Core pipeline, all item types, 67 tests (27 unit + 4 CLI smoke + 36 integration), README with AI agent setup guide.
+- **v0.1.0**: Core pipeline, all item types, 67 tests (27 unit + 4 CLI smoke + 36 integration), README with AI agent setup guide.
 - Flexible package name resolution: `self`, `crate::module`, single-arg fallback, file path→module conversion.
 - Dependencies: `clap` 4, `rustdoc-types` 0.57, `serde_json` 1, `anyhow` 1.
 - Test fixture (`test_fixture/`) covers all supported item types.
