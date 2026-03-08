@@ -499,12 +499,14 @@ fn render_struct(
                     }
                 }
             }
-            if *has_stripped_fields {
-                body.push_str(&format!("{indent}    // ... private fields\n"));
-            }
-            if body.is_empty() {
+            if body.is_empty() && *has_stripped_fields {
+                output.push_str(&format!("{indent}{vis}struct {name}{generics} {{ .. }}\n"));
+            } else if body.is_empty() {
                 output.push_str(&format!("{indent}{vis}struct {name}{generics} {{}}\n"));
             } else {
+                if *has_stripped_fields {
+                    body.push_str(&format!("{indent}    // .. private fields\n"));
+                }
                 output.push_str(&format!("{indent}{vis}struct {name}{generics} {{\n"));
                 output.push_str(&body);
                 output.push_str(&format!("{indent}}}\n"));
