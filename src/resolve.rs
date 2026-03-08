@@ -158,12 +158,18 @@ pub fn resolve_target(
         });
     }
 
-    // Not a known package → treat as module of self
-    let pkg = current_package_or_error(metadata)?;
-    Ok(ResolvedTarget {
-        package_name: pkg,
-        module_path: Some(first_arg.to_string()),
-    })
+    // Not a known workspace package → if we have a current package, treat as self module;
+    // otherwise assume it's an external package name
+    match &metadata.current_package {
+        Some(pkg) => Ok(ResolvedTarget {
+            package_name: pkg.clone(),
+            module_path: Some(first_arg.to_string()),
+        }),
+        None => Ok(ResolvedTarget {
+            package_name: first_arg.to_string(),
+            module_path: None,
+        }),
+    }
 }
 
 /// If the input looks like a file path, convert it to a module path; otherwise return as-is.
@@ -418,10 +424,11 @@ mod tests {
     }
 
     #[test]
-    fn test_single_arg_fallback_no_current_package_errors() {
+    fn test_single_arg_no_current_package_assumes_external() {
         let meta = test_metadata(&[], None);
-        let result = resolve_target("cli", None, &meta);
-        assert!(result.is_err());
+        let resolved = resolve_target("hecs", None, &meta).unwrap();
+        assert_eq!(resolved.package_name, "hecs");
+        assert_eq!(resolved.module_path, None);
     }
 
     #[test]
