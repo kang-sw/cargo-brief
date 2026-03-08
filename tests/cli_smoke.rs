@@ -65,3 +65,24 @@ fn cli_self_module_syntax_test() {
         "self::cli should show BriefArgs, got:\n{stdout}"
     );
 }
+
+#[test]
+fn cli_file_path_test() {
+    // "src/cli.rs" should resolve to the cli module of self
+    let output = Command::new("cargo")
+        .args(["run", "--", "src/cli.rs"])
+        .output()
+        .expect("Failed to run cargo-brief with file path");
+
+    assert!(
+        output.status.success(),
+        "cargo-brief src/cli.rs exited with error: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("BriefArgs"),
+        "src/cli.rs should show BriefArgs, got:\n{stdout}"
+    );
+}
