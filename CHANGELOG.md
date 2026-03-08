@@ -7,6 +7,7 @@ All notable changes to this project will be documented in this file.
 ### Fixed
 
 - Single-arg package names (e.g., `cargo brief hecs`) no longer error at virtual workspace roots or directories without a package. Unknown names are now passed through as package names instead of failing with "Cannot resolve 'self'".
+- Empty struct bodies (all fields private/hidden) now render as `{}` on one line instead of an empty block with a dangling newline.
 
 ## [0.1.0] - 2026-03-08
 
