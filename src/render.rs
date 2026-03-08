@@ -83,7 +83,9 @@ fn render_module_contents(
     display_path: &str,
     output: &mut String,
 ) {
-    let indent = "    ".repeat(current_depth as usize);
+    // Indent level: root (depth=0) has no wrapper, so children at depth=0 get no indent.
+    // Submodules (depth>0) get indent based on depth-1 so top-level modules start at column 0.
+    let indent = "    ".repeat(current_depth.saturating_sub(1) as usize);
 
     if current_depth > 0 {
         output.push_str(&format!("{indent}mod {} {{\n", last_segment(display_path)));
@@ -250,7 +252,6 @@ fn render_module_contents(
         model,
         module_item,
         args,
-        &indent,
         observer,
         same_crate,
         current_depth,
@@ -266,12 +267,13 @@ fn render_impl_blocks(
     model: &CrateModel,
     module_item: &Item,
     args: &BriefArgs,
-    indent: &str,
     observer: &str,
     same_crate: bool,
     current_depth: u32,
     output: &mut String,
 ) {
+    // Match the indent logic from render_module_contents
+    let indent = "    ".repeat(current_depth.saturating_sub(1) as usize);
     let child_indent = if current_depth > 0 {
         format!("{indent}    ")
     } else {
@@ -318,6 +320,7 @@ fn render_impl_blocks(
         }
 
         let generics = format_generics(&impl_block.generics);
+        let is_trait_impl = impl_block.trait_.is_some();
         let impl_header = if let Some(trait_) = &impl_block.trait_ {
             let trait_path = format_path(trait_);
             format!("{child_indent}impl{generics} {trait_path} for {type_name}")
@@ -325,32 +328,63 @@ fn render_impl_blocks(
             format!("{child_indent}impl{generics} {type_name}")
         };
 
-        // Collect visible methods/items in this impl block
-        let mut rendered_items = Vec::new();
-        let inner_indent = format!("{child_indent}    ");
+        if is_trait_impl {
+            // Trait impls: collect only associated types/constants (omit methods)
+            let mut assoc_items = Vec::new();
+            let inner_indent = format!("{child_indent}    ");
 
-        for item_id in &impl_block.items {
-            if let Some(item) = model.krate.index.get(item_id) {
-                // For impl items, check visibility
-                if !matches!(item.visibility, Visibility::Default | Visibility::Public) {
-                    if !is_visible_from(model, item, item_id, observer, same_crate) {
-                        continue;
+            for item_id in &impl_block.items {
+                if let Some(item) = model.krate.index.get(item_id) {
+                    match &item.inner {
+                        ItemEnum::AssocType { .. } | ItemEnum::AssocConst { .. } => {
+                            if let Some(r) = render_impl_item(item, &inner_indent, args) {
+                                assoc_items.push(r);
+                            }
+                        }
+                        _ => {}
                     }
                 }
+            }
 
-                if let Some(r) = render_impl_item(item, &inner_indent, args) {
-                    rendered_items.push(r);
+            render_docs(impl_item, &child_indent, output);
+            if assoc_items.is_empty() {
+                // No associated types/constants → one-liner
+                output.push_str(&format!("{impl_header};\n"));
+            } else {
+                // Has associated types/constants → show only those
+                output.push_str(&format!("{impl_header} {{\n"));
+                for item_str in &assoc_items {
+                    output.push_str(item_str);
+                }
+                output.push_str(&format!("{child_indent}}}\n"));
+            }
+        } else {
+            // Inherent impls: show all visible items (methods, types, constants)
+            let mut rendered_items = Vec::new();
+            let inner_indent = format!("{child_indent}    ");
+
+            for item_id in &impl_block.items {
+                if let Some(item) = model.krate.index.get(item_id) {
+                    if !matches!(item.visibility, Visibility::Default | Visibility::Public) {
+                        if !is_visible_from(model, item, item_id, observer, same_crate) {
+                            continue;
+                        }
+                    }
+
+                    if let Some(r) = render_impl_item(item, &inner_indent, args) {
+                        rendered_items.push(r);
+                    }
                 }
             }
-        }
 
-        if !rendered_items.is_empty() {
-            render_docs(impl_item, &child_indent, output);
-            output.push_str(&format!("{impl_header} {{\n"));
-            for item_str in &rendered_items {
-                output.push_str(item_str);
+            if !rendered_items.is_empty() {
+                render_docs(impl_item, &child_indent, output);
+                output.push_str(&format!("{impl_header} {{\n"));
+                for item_str in &rendered_items {
+                    output.push_str(item_str);
+                }
+                output.push_str(&format!("{child_indent}}}\n"));
             }
-            output.push_str(&format!("{child_indent}}}\n"));
         }
     }
 }

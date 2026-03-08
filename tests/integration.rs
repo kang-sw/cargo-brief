@@ -598,3 +598,63 @@ fn test_inherent_impl() {
         "method in impl block"
     );
 }
+
+// === Trait Impl Condensing ===
+
+#[test]
+fn test_trait_impl_is_one_liner() {
+    let model = fixture_model();
+    let args = default_args();
+    let output = render_full(&model, &args);
+
+    // Simple trait impl (no associated types) should be a one-liner with semicolon
+    assert!(
+        output.contains("impl MyTrait for PubStruct;"),
+        "trait impl should be one-liner: got:\n{output}"
+    );
+    // Should NOT contain the expanded method body
+    assert!(
+        !output.contains("impl MyTrait for PubStruct {"),
+        "trait impl should not have braces"
+    );
+}
+
+#[test]
+fn test_trait_impl_with_assoc_type_shows_type() {
+    let model = fixture_model();
+    let args = default_args();
+    let output = render_full(&model, &args);
+
+    // Trait impl with associated type should show the type but not methods
+    assert!(
+        output.contains("impl Converter for PubStruct {"),
+        "trait impl with assoc type should have braces"
+    );
+    assert!(
+        output.contains("type Output = String;"),
+        "associated type should be shown"
+    );
+    // Methods should NOT be shown in condensed trait impl
+    assert!(
+        !output.contains("fn convert(&self) -> String;"),
+        "methods should be omitted in trait impl with assoc type"
+    );
+}
+
+// === Root Indent ===
+
+#[test]
+fn test_root_items_no_indent() {
+    let model = fixture_model();
+    let args = default_args();
+    let output = render_full(&model, &args);
+
+    // Lines after the crate header should start without 4-space indent
+    let lines: Vec<&str> = output.lines().collect();
+    // Find the "mod outer {" line — it should NOT be indented
+    let mod_line = lines.iter().find(|l| l.contains("mod outer")).unwrap();
+    assert!(
+        mod_line.starts_with("mod outer"),
+        "top-level module should have no indent, got: '{mod_line}'"
+    );
+}

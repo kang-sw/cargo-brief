@@ -37,6 +37,19 @@ pub mod outer {
         }
     }
 
+    /// A trait with an associated type.
+    pub trait Converter {
+        type Output;
+        fn convert(&self) -> Self::Output;
+    }
+
+    impl Converter for PubStruct {
+        type Output = String;
+        fn convert(&self) -> String {
+            format!("{}", self.pub_field)
+        }
+    }
+
     pub type Alias = PubStruct;
 
     pub const MY_CONST: i32 = 42;
