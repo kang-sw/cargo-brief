@@ -18,6 +18,7 @@ All notable changes to this project will be documented in this file.
   - `cargo brief cli.rs` → falls back to `src/cli.rs` if not found at cwd.
   - Handles `lib.rs` (crate root), `mod.rs` (parent directory), nested paths.
 - New `src/resolve.rs` module containing all resolution logic and cargo metadata handling.
+- `--version` flag support (`cargo brief --version`).
 
 ### Changed
 

@@ -2,7 +2,7 @@ use clap::{Parser, Subcommand};
 
 /// Cargo subcommand wrapper.
 #[derive(Parser, Debug)]
-#[command(name = "cargo", bin_name = "cargo")]
+#[command(name = "cargo", bin_name = "cargo", version)]
 pub struct Cargo {
     #[command(subcommand)]
     pub command: CargoCommand,
@@ -16,6 +16,7 @@ pub enum CargoCommand {
 
 /// Core arguments for cargo-brief.
 #[derive(Parser, Debug, Clone)]
+#[command(version)]
 pub struct BriefArgs {
     /// Target crate name to inspect
     pub crate_name: String,
