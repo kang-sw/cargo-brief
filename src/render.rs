@@ -479,7 +479,7 @@ fn render_struct(
             fields,
             has_stripped_fields,
         } => {
-            output.push_str(&format!("{indent}{vis}struct {name}{generics} {{\n"));
+            let mut body = String::new();
             for field_id in fields {
                 if let Some(field_item) = model.krate.index.get(field_id) {
                     // Check field visibility
@@ -491,8 +491,8 @@ fn render_struct(
                     if let ItemEnum::StructField(ty) = &field_item.inner {
                         let fname = field_item.name.as_deref().unwrap_or("?");
                         let fvis = format_visibility(&field_item.visibility);
-                        render_docs(field_item, &format!("{indent}    "), output);
-                        output.push_str(&format!(
+                        render_docs(field_item, &format!("{indent}    "), &mut body);
+                        body.push_str(&format!(
                             "{indent}    {fvis}{fname}: {},\n",
                             format_type(ty)
                         ));
@@ -500,9 +500,15 @@ fn render_struct(
                 }
             }
             if *has_stripped_fields {
-                output.push_str(&format!("{indent}    // ... private fields\n"));
+                body.push_str(&format!("{indent}    // ... private fields\n"));
             }
-            output.push_str(&format!("{indent}}}\n"));
+            if body.is_empty() {
+                output.push_str(&format!("{indent}{vis}struct {name}{generics} {{}}\n"));
+            } else {
+                output.push_str(&format!("{indent}{vis}struct {name}{generics} {{\n"));
+                output.push_str(&body);
+                output.push_str(&format!("{indent}}}\n"));
+            }
         }
     }
 }
