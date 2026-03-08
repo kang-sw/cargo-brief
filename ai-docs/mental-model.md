@@ -108,7 +108,7 @@ Parsed via `rustdoc-types` 0.57. Post-macro-expansion output.
 - Flexible package name resolution: `self`, `crate::module`, single-arg fallback, file path→module conversion.
 - Dependencies: `clap` 4, `rustdoc-types` 0.57, `serde_json` 1, `anyhow` 1.
 - Test fixture (`test_fixture/`) covers all supported item types.
-- Remaining future work: external dependency support (Phase 2), caching.
+- Remaining future work: see `ai-docs/projects/260308-2240-visibility-and-rendering.md` for active plan (same_crate auto-detection, resolution priority, rendering fixes, external crate JSON investigation).
 
 ---
 
