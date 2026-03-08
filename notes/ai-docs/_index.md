@@ -1,4 +1,4 @@
-# cargo-brief — Mental Model
+# cargo-brief — Project State & Architecture
 
 ## What This Tool Is
 
@@ -66,16 +66,18 @@ cargo brief <target> [module_path] [OPTIONS]
 
 ---
 
-## Implementation Architecture
+## Source Layout
 
-### Module Structure
-- `src/lib.rs` — re-exports all modules, `run_pipeline()` entry point
-- `src/main.rs` — CLI arg parsing, calls `run_pipeline()`, prints output
-- `src/cli.rs` — `BriefArgs` struct (clap derive)
-- `src/resolve.rs` — flexible target resolution (`self`, `crate::module` syntax, fallback) + cargo metadata loading
-- `src/rustdoc_json.rs` — JSON generation and parsing (accepts `target_dir` from resolve)
-- `src/model.rs` — `CrateModel` with module index, visibility resolution
-- `src/render.rs` — pseudo-Rust rendering of all item types
+```
+src/
+  lib.rs           — re-exports all modules, run_pipeline() entry point
+  main.rs          — CLI arg parsing, calls run_pipeline(), prints output
+  cli.rs           — BriefArgs struct (clap derive)
+  resolve.rs       — flexible target resolution (self, crate::module, fallback) + cargo metadata
+  rustdoc_json.rs  — JSON generation and parsing (accepts target_dir from resolve)
+  model.rs         — CrateModel with module index, visibility resolution
+  render.rs        — pseudo-Rust rendering of all item types
+```
 
 ### Supported Item Types
 Structs (unit, tuple, plain), enums (plain, tuple, struct variants), traits,
@@ -102,28 +104,33 @@ Parsed via `rustdoc-types` 0.57. Post-macro-expansion output.
 
 ---
 
-## Current State (as of 2026-03-08)
+## Operational State (v0.1.2)
 
-- **v0.1.0**: Core pipeline, all item types, 67 tests (27 unit + 4 CLI smoke + 36 integration), README with AI agent setup guide.
-- Flexible package name resolution: `self`, `crate::module`, single-arg fallback, file path→module conversion.
+- Core pipeline complete. All item types supported. 67+ tests (unit + CLI smoke + integration).
+- Flexible package name resolution: `self`, `crate::module`, single-arg fallback, file path→module.
 - Dependencies: `clap` 4, `rustdoc-types` 0.57, `serde_json` 1, `anyhow` 1.
 - Test fixture (`test_fixture/`) covers all supported item types.
-- Remaining future work: see `ai-docs/projects/260308-2240-visibility-and-rendering.md` for active plan (same_crate auto-detection, resolution priority, rendering fixes, external crate JSON investigation).
 
 ---
 
-## Key Decisions Made
+## Key Decisions
 
 | Decision | Choice | Rationale |
 |---|---|---|
 | Primary backend | rustdoc JSON + `rustdoc-types` | Post-macro-expansion, official, matches LSP-level output |
 | `--at-mod` semantics | "compiles when `use`d from here" | Matches developer mental model; includes re-exports |
 | Output format | Pseudo-Rust text (not JSON) | LLM consumption; readable as documentation |
-| Item-kind filtering | Default=show all common items; `--no-*` to exclude; `--all` adds blanket/auto-trait impls | Subtractive model is more ergonomic |
+| Item-kind filtering | Default=show all common; `--no-*` to exclude; `--all` adds blanket/auto-trait impls | Subtractive model is more ergonomic |
 | Statics grouped with constants | `--no-constants` hides both | Conceptually similar; avoids flag proliferation |
 | lib.rs + slim main.rs | `run_pipeline()` returns String | Enables integration tests without subprocess |
 | External deps | Phase 2 | Adds ~30% complexity; architecture supports it cleanly |
 | Target resolution | Semantic layer between CLI and pipeline | `BriefArgs` stays unchanged; resolution in `src/resolve.rs` |
-| Single cargo metadata call | `resolve::load_cargo_metadata()` used by both resolution and `generate_rustdoc_json()` | Eliminates redundant `find_target_dir()` call |
-| Ambiguous single arg | Package wins over self-module | Documented; workspace packages checked first with hyphen/underscore normalization |
-| File path as module | Heuristic: `/` or `.rs` → file path | 2-level fallback: cwd-relative, then package `src/`-relative; `lib.rs`→None, `mod.rs`→parent, `/`→`::` |
+| Single cargo metadata call | `resolve::load_cargo_metadata()` | Eliminates redundant `find_target_dir()` call |
+| Ambiguous single arg | Package wins over self-module | Documented; workspace packages checked first |
+| File path as module | Heuristic: `/` or `.rs` → file path | 2-level fallback: cwd-relative, then package `src/`-relative |
+
+---
+
+## Active Tickets
+
+- `tickets/260308-visibility-and-rendering[wip].md` — same_crate auto-detection, resolution priority, rendering fixes, external crate JSON investigation
