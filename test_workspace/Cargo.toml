@@ -1,0 +1,3 @@
+[workspace]
+members = ["core-lib", "app"]
+resolver = "3"
