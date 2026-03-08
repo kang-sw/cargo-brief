@@ -612,15 +612,10 @@ fn test_trait_impl_is_one_liner() {
     let args = default_args();
     let output = render_full(&model, &args);
 
-    // Simple trait impl (no associated types) should be a one-liner with semicolon
+    // Simple trait impl (no associated types) should be a one-liner with { .. }
     assert!(
-        output.contains("impl MyTrait for PubStruct;"),
-        "trait impl should be one-liner: got:\n{output}"
-    );
-    // Should NOT contain the expanded method body
-    assert!(
-        !output.contains("impl MyTrait for PubStruct {"),
-        "trait impl should not have braces"
+        output.contains("impl MyTrait for PubStruct { .. }"),
+        "trait impl should be one-liner with {{ .. }}: got:\n{output}"
     );
 }
 

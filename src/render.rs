@@ -331,6 +331,7 @@ fn render_impl_blocks(
         if is_trait_impl {
             // Trait impls: collect only associated types/constants (omit methods)
             let mut assoc_items = Vec::new();
+            let mut has_other_items = false;
             let inner_indent = format!("{child_indent}    ");
 
             for item_id in &impl_block.items {
@@ -341,7 +342,9 @@ fn render_impl_blocks(
                                 assoc_items.push(r);
                             }
                         }
-                        _ => {}
+                        _ => {
+                            has_other_items = true;
+                        }
                     }
                 }
             }
@@ -349,12 +352,15 @@ fn render_impl_blocks(
             render_docs(impl_item, &child_indent, output);
             if assoc_items.is_empty() {
                 // No associated types/constants → one-liner
-                output.push_str(&format!("{impl_header};\n"));
+                output.push_str(&format!("{impl_header} {{ .. }}\n"));
             } else {
-                // Has associated types/constants → show only those
+                // Has associated types/constants → show those, plus .. if methods omitted
                 output.push_str(&format!("{impl_header} {{\n"));
                 for item_str in &assoc_items {
                     output.push_str(item_str);
+                }
+                if has_other_items {
+                    output.push_str(&format!("{inner_indent}// ..\n"));
                 }
                 output.push_str(&format!("{child_indent}}}\n"));
             }

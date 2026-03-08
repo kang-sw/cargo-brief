@@ -2,6 +2,13 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.1.2] - 2026-03-08
+
+### Changed
+
+- Trait impl rendering now uses `{ .. }` instead of `;` for impls without associated items (e.g., `impl Clone for Foo { .. }`).
+- Trait impls with associated types/constants that also have methods now show `// ..` after the listed items to indicate omitted methods.
+
 ## [0.1.1] - 2026-03-08
 
 ### Fixed
@@ -37,7 +44,7 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 
-- Condensed trait impl rendering: simple trait impls shown as one-liners (`impl Trait for Type;`), impls with associated types show only the types.
+- Condensed trait impl rendering: simple trait impls shown as one-liners, impls with associated types show only the types.
 - README with usage documentation and AI agent setup guide (CLAUDE.md snippet).
 
 ### Fixed
