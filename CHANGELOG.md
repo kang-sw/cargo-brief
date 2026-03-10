@@ -2,6 +2,14 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.1.3] - 2026-03-10
+
+### Fixed
+
+- CLI `--help` text now accurately reflects the flexible target resolution system added in v0.1.0. The first positional argument is renamed from `<CRATE_NAME>` to `<TARGET>`, and a RESOLUTION RULES section documents all 6 resolution strategies (self, self::mod, crate::mod, file paths, workspace packages, fallback).
+- `--toolchain` no longer shows a redundant default value description.
+- `--manifest-path` description clarified to "Path to Cargo.toml".
+
 ## [0.1.2] - 2026-03-08
 
 ### Changed
