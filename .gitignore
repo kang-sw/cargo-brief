@@ -1,3 +1,4 @@
 /target
 /test_fixture/target
 test_workspace/target/
+/.claude/settings.local.json
