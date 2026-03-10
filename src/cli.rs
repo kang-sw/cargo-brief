@@ -16,12 +16,26 @@ pub enum CargoCommand {
 
 /// Core arguments for cargo-brief.
 #[derive(Parser, Debug, Clone)]
-#[command(version)]
+#[command(
+    version,
+    after_help = "\
+RESOLUTION RULES:
+  The <TARGET> argument is resolved as follows:
+    1. \"self\"           → current package (cwd-based detection)
+    2. \"self::mod\"      → current package, specific module
+    3. \"crate::mod\"     → named crate + module in one argument
+    4. \"src/foo.rs\"     → file path auto-converted to module path
+    5. \"crate_name\"     → workspace package (hyphen/underscore normalized)
+    6. \"unknown_name\"   → fallback: treated as module of current package
+
+  The [MODULE_PATH] argument also accepts file paths (e.g., src/foo.rs)."
+)]
 pub struct BriefArgs {
-    /// Target crate name to inspect
+    /// Target to inspect: crate name, "self", crate::module, or file path
+    #[arg(value_name = "TARGET")]
     pub crate_name: String,
 
-    /// Module path within the crate to inspect (e.g., "my_mod::submod")
+    /// Module path or file path within the crate (e.g., "my_mod::submod" or "src/foo.rs")
     pub module_path: Option<String>,
 
     /// Caller's package name (for visibility resolution)
@@ -77,11 +91,11 @@ pub struct BriefArgs {
     #[arg(long)]
     pub no_macros: bool,
 
-    /// Nightly toolchain name (default: "nightly")
+    /// Nightly toolchain name
     #[arg(long, default_value = "nightly")]
     pub toolchain: String,
 
-    /// Manifest path (passed to cargo)
+    /// Path to Cargo.toml
     #[arg(long)]
     pub manifest_path: Option<String>,
 }
