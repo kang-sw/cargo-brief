@@ -133,4 +133,5 @@ Parsed via `rustdoc-types` 0.57. Post-macro-expansion output.
 
 ## Active Tickets
 
-- `tickets/260308-visibility-and-rendering[wip].md` — same_crate auto-detection, resolution priority, rendering fixes, external crate JSON investigation
+- `tickets/wip/260308-visibility-and-rendering.md` — same_crate auto-detection, resolution priority, rendering fixes, external crate JSON investigation
+- `tickets/todo/260310-remote-crate-support.md` — `--crates` flag for crates.io crates without local dependency
