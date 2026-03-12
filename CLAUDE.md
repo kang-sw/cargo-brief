@@ -101,6 +101,7 @@ Project-specific memory (build memos, recent context, workspace ref) lives in th
 Auto-create git commits broken down by logical units.
 Commit messages must include an **AI context** section recording design decisions,
 alternatives considered, and trade-offs — focus on _why_ this approach was chosen.
+**Version bumps must always include a `CHANGELOG.md` update.**
 
 ```
 <type>(<scope>): <summary>
