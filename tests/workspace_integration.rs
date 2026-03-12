@@ -47,7 +47,8 @@ fn core_lib_same_crate_shows_pub_items() {
 
 #[test]
 fn core_lib_same_crate_shows_pub_crate_items() {
-    let args = workspace_args("core-lib");
+    let mut args = workspace_args("core-lib");
+    args.at_package = Some("core-lib".to_string());
     let output = run_pipeline(&args).unwrap();
 
     assert!(
@@ -175,6 +176,7 @@ fn core_lib_external_view_struct_has_hidden_field_indicator() {
 fn core_lib_utils_same_crate_shows_all_visible() {
     let mut args = workspace_args("core-lib");
     args.module_path = Some("utils".to_string());
+    args.at_package = Some("core-lib".to_string());
     let output = run_pipeline(&args).unwrap();
 
     assert!(
@@ -241,7 +243,8 @@ fn core_lib_reexport_visible_at_root() {
 
 #[test]
 fn app_same_crate_view() {
-    let args = workspace_args("app");
+    let mut args = workspace_args("app");
+    args.at_package = Some("app".to_string());
     let output = run_pipeline(&args).unwrap();
 
     assert!(output.contains("pub struct App"), "App struct visible");

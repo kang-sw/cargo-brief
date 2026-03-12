@@ -192,11 +192,9 @@ fn external_crate_either() {
 // F. Visibility auto-detection (no explicit --at-package)
 //
 // These test that same_crate is automatically determined from cwd context.
-// BLOCKED: same_crate is currently always true (Phase 4 will fix).
 // ===========================================================================
 
 #[test]
-#[ignore = "blocked: same_crate auto-detection not implemented (Phase 4)"]
 fn auto_visibility_cross_crate() {
     // From app/, viewing core-lib → should hide pub(crate) items
     let out = run_ok(&test_workspace().join("app"), &["core-lib"]);
@@ -216,7 +214,6 @@ fn auto_visibility_cross_crate() {
 }
 
 #[test]
-#[ignore = "blocked: same_crate auto-detection not implemented (Phase 4)"]
 fn auto_visibility_same_crate() {
     // From core-lib/, viewing core-lib → should show pub(crate) items
     let out = run_ok(&test_workspace().join("core-lib"), &["core-lib"]);
@@ -231,7 +228,6 @@ fn auto_visibility_same_crate() {
 }
 
 #[test]
-#[ignore = "blocked: same_crate auto-detection not implemented (Phase 4)"]
 fn auto_visibility_reverse() {
     // From core-lib/, viewing app → should hide pub(crate) items of app
     let out = run_ok(&test_workspace().join("core-lib"), &["app"]);

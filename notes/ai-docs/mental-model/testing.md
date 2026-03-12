@@ -48,7 +48,7 @@ Uses `test_workspace/` (workspace with `core-lib` + `app` + `either` dependency)
 - **`run_ok(cwd, args)`** — asserts success, returns stdout
 - **`run_err(cwd, args)`** — asserts failure, returns stderr
 
-### Test Categories (23 tests: 19 passing, 4 ignored)
+### Test Categories (23 tests: 22 passing, 1 ignored)
 
 | Category | Tests | Status |
 |----------|-------|--------|
@@ -57,7 +57,7 @@ Uses `test_workspace/` (workspace with `core-lib` + `app` + `either` dependency)
 | C. `crate::module` syntax | `crate_module_syntax` | passing |
 | D. File path as module | `file_path_from_package_dir`, `self_with_file_path`, `pkg_with_file_path` | 2 passing, 1 ignored |
 | E. External crate | `external_crate_either` | passing |
-| F. Visibility auto-detection | `auto_visibility_cross_crate`, `auto_visibility_same_crate`, `auto_visibility_reverse` | 3 ignored (Phase 4) |
+| F. Visibility auto-detection | `auto_visibility_cross_crate`, `auto_visibility_same_crate`, `auto_visibility_reverse` | passing |
 | G. `--at-package` override | `at_package_cross_crate`, `at_package_same_crate` | passing |
 | H. Depth/recursion | `depth_zero`, `recursive` | passing |
 | I. Item filtering | `no_structs`, `no_functions` | passing |
@@ -65,7 +65,6 @@ Uses `test_workspace/` (workspace with `core-lib` + `app` + `either` dependency)
 
 ### Ignored Tests
 
-- **F (3 tests):** `#[ignore = "blocked: same_crate auto-detection not implemented (Phase 4)"]`
 - **D.pkg_with_file_path:** `#[ignore = "blocked: file path not resolved relative to package dir when cwd != package dir"]`
 
 ## Test Fixture (`test_fixture/`)

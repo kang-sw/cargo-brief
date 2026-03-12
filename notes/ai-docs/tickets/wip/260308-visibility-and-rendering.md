@@ -216,6 +216,24 @@ covering all resolution and visibility scenarios (A–J) using `test_workspace/`
 - The `pkg_with_file_path` bug: `cargo brief core-lib src/utils.rs` from workspace root
   fails because file path is resolved relative to cwd, not the target package directory
 
+### Result — Phase 4 (same_crate auto-detection)
+
+**Implemented:** `src/lib.rs` — use `metadata.current_package` (cwd-based) as the
+default observer when no `--at-package` is provided. If cwd package matches target →
+`same_crate = true`. If different or no cwd package → `same_crate = false`.
+
+**Change:** 3-line replacement in `run_pipeline()` (lines 44-53).
+
+**Test updates:**
+- Un-ignored 3 auto-visibility subprocess tests (category F) — all pass
+- Updated 5 `external_crate_integration.rs` tests: `either` is now correctly viewed
+  as cross-crate, hiding `pub(crate)` modules (`iterator`, `into_either`)
+- Updated 3 `workspace_integration.rs` tests: added explicit `at_package` for
+  same-crate test scenarios (since in-process tests run from cargo-brief cwd)
+
+**Phases 2-3 skipped:** External crate JSON issue (sparse index) was not observed —
+`either` works correctly in both subprocess and in-process tests.
+
 ---
 
 ## Open Questions

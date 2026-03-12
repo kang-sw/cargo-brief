@@ -42,9 +42,15 @@ pub fn run_pipeline(args: &BriefArgs) -> Result<String> {
     let model = CrateModel::from_crate(krate);
 
     // Step 4: Determine if observer is in the same crate
-    let observer_crate = args.at_package.as_deref().unwrap_or(&resolved.package_name);
-    let same_crate = observer_crate == resolved.package_name
-        || observer_crate.replace('-', "_") == model.crate_name();
+    let observer_crate = args
+        .at_package
+        .as_deref()
+        .or(metadata.current_package.as_deref());
+    let same_crate = match observer_crate {
+        Some(obs) => obs == resolved.package_name || obs.replace('-', "_") == model.crate_name(),
+        // No observer context (virtual workspace root, no --at-package) → cross-crate
+        None => false,
+    };
 
     // Step 5: Render
     let output = render::render_module_api(

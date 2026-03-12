@@ -138,17 +138,15 @@ fn either_into_either_trait() {
     let args = either_args();
     let output = run_pipeline(&args).unwrap();
 
+    // IntoEither is in a pub(crate) module, but re-exported at root
     assert!(
-        output.contains("pub trait IntoEither: Sized"),
-        "IntoEither trait definition"
+        output.contains("pub use self::into_either::IntoEither"),
+        "IntoEither re-export at root"
     );
+    // The trait definition itself is hidden (pub(crate) module) in cross-crate view
     assert!(
-        output.contains("fn into_either(self, into_left: bool) -> Either<Self, Self>;"),
-        "into_either method"
-    );
-    assert!(
-        output.contains("fn into_either_with"),
-        "into_either_with method"
+        !output.contains("pub trait IntoEither: Sized"),
+        "IntoEither trait definition should be hidden in cross-crate view"
     );
 }
 
@@ -161,9 +159,15 @@ fn either_iter_either_struct() {
     let args = either_args();
     let output = run_pipeline(&args).unwrap();
 
+    // IterEither is in a pub(crate) module, but re-exported at root
     assert!(
-        output.contains("pub struct IterEither<L, R>"),
-        "IterEither struct"
+        output.contains("pub use self::iterator::IterEither"),
+        "IterEither re-export at root"
+    );
+    // The struct definition itself is hidden (pub(crate) module) in cross-crate view
+    assert!(
+        !output.contains("pub struct IterEither<L, R>"),
+        "IterEither struct should be hidden in cross-crate view"
     );
 }
 
@@ -230,24 +234,18 @@ fn either_deref_impl() {
 // ============================================================
 
 #[test]
-fn either_has_iterator_module() {
+fn either_hides_pub_crate_modules() {
     let args = either_args();
     let output = run_pipeline(&args).unwrap();
 
+    // pub(crate) modules are hidden in cross-crate view
     assert!(
-        output.contains("mod iterator {"),
-        "iterator submodule present"
+        !output.contains("mod iterator {"),
+        "iterator module should be hidden in cross-crate view"
     );
-}
-
-#[test]
-fn either_has_into_either_module() {
-    let args = either_args();
-    let output = run_pipeline(&args).unwrap();
-
     assert!(
-        output.contains("mod into_either {"),
-        "into_either submodule present"
+        !output.contains("mod into_either {"),
+        "into_either module should be hidden in cross-crate view"
     );
 }
 
@@ -291,19 +289,20 @@ fn either_has_macros() {
 // ============================================================
 
 #[test]
-fn either_depth_zero_collapses_modules() {
+fn either_depth_zero_still_shows_root_items() {
     let mut args = either_args();
     args.recursive = false;
     args.depth = 0;
     let output = run_pipeline(&args).unwrap();
 
+    // pub(crate) modules are hidden in cross-crate view, even at depth 0
     assert!(
-        output.contains("mod iterator { /* ... */ }"),
-        "iterator module collapsed at depth 0"
+        !output.contains("mod iterator"),
+        "iterator module hidden in cross-crate view"
     );
     assert!(
-        output.contains("mod into_either { /* ... */ }"),
-        "into_either module collapsed at depth 0"
+        !output.contains("mod into_either"),
+        "into_either module hidden in cross-crate view"
     );
     // Root-level items still present
     assert!(
