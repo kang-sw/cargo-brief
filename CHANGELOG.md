@@ -2,6 +2,13 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.2.0] - 2026-03-12
+
+### Changed
+
+- **Breaking**: bare unknown names (e.g., `cargo brief hecs`) now always resolve as a package name, not as a module of the current package. Use `self::module` or file paths for own-module access.
+- Visibility auto-detection: `same_crate` is now inferred from the cwd package context when `--at-package` is not specified. External crates correctly hide `pub(crate)` items.
+
 ## [0.1.3] - 2026-03-10
 
 ### Fixed
