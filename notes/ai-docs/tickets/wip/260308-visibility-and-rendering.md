@@ -1,4 +1,4 @@
-# Project: Visibility Auto-Detection, Resolution Priority, Rendering Fixes
+# Visibility Auto-Detection, Resolution Priority, Rendering Fixes
 
 ## Context
 
@@ -40,19 +40,106 @@ The fix itself is correct but needs issue 5 resolved first to avoid hiding every
 
 ## Implementation Plan
 
-### Phase 1: Investigation (plan mode)
+### Phase 1: Comprehensive subprocess integration tests
 
-Before writing any code, answer these questions by experimentation:
+**Goal:** Establish a safety net of subprocess-based integration tests covering all
+resolution and visibility scenarios BEFORE changing any behavior. Tests define the
+**desired** behavior — some may initially fail for known bugs. Failing tests are
+marked `#[ignore]` with a comment explaining why.
 
-1. Run `cargo rustdoc -p hecs -- --output-format json -Z unstable-options` (no `--document-private-items`)
-   and inspect the JSON. Compare index size with `--document-private-items`.
-2. Run with `--lib` flag added. Does it change anything?
-3. Test from a virtual workspace root vs a package directory. Any difference?
-4. Check if the issue is specific to certain crates or universal for all deps.
+**Approach:** Run the `cargo-brief` binary via `std::process::Command` with explicit
+cwd and args. This tests the full pipeline including cwd detection, `self` resolution,
+and arg parsing — things `run_pipeline()` can't exercise in-process.
 
-### Phase 2: External crate rustdoc JSON fix
+**Test file:** `tests/subprocess_integration.rs`
 
-Based on Phase 1 findings, fix `generate_rustdoc_json()`:
+**Fixture:** Existing `test_workspace/` (core-lib + app + either dependency).
+Expand fixture if needed (e.g., add `pub(in crate::utils)` items).
+
+#### Scenario categories:
+
+**A. Explicit crate name (workspace member)**
+- `cargo brief core-lib` from workspace root → shows core-lib API
+- `cargo brief app` from workspace root → shows app API
+- `cargo brief core_lib` (underscore) → normalizes to core-lib
+
+**B. `self` keyword resolution (cwd-dependent)**
+- `cargo brief self` from `test_workspace/core-lib/` → core-lib API
+- `cargo brief self` from `test_workspace/app/` → app API
+- `cargo brief self::utils` from `test_workspace/core-lib/` → utils module
+- `cargo brief self` from `test_workspace/` (virtual root) → error
+
+**C. `crate::module` syntax**
+- `cargo brief core-lib::utils` from workspace root → utils module of core-lib
+
+**D. File path as module**
+- `cargo brief src/utils.rs` from `test_workspace/core-lib/` → utils module
+- `cargo brief self src/utils.rs` from `test_workspace/core-lib/` → utils module
+- `cargo brief core-lib src/utils.rs` from workspace root → utils module
+
+**E. External crate (dependency, not workspace member)**
+- `cargo brief either` from workspace root → either's pub API
+- Should show `pub` items only (same_crate=false for deps)
+
+**F. Visibility auto-detection (no explicit `--at-package`)**
+- `cargo brief core-lib` from `test_workspace/app/` → should auto-detect
+  observer=app, hide `pub(crate)` items of core-lib
+- `cargo brief core-lib` from `test_workspace/core-lib/` → observer=core-lib,
+  show `pub(crate)` items (same crate)
+- `cargo brief app` from `test_workspace/core-lib/` → observer=core-lib,
+  hide `pub(crate)` items of app
+
+**G. `--at-package` / `--at-mod` explicit override**
+- `cargo brief core-lib --at-package app` → cross-crate view
+- `cargo brief core-lib --at-package core-lib --at-mod utils` → same-crate, from utils
+
+**H. Depth and recursion**
+- `cargo brief core-lib --depth 0` → modules collapsed
+- `cargo brief core-lib --recursive` → all modules expanded
+
+**I. Item filtering**
+- `cargo brief core-lib --no-structs` → no structs in output
+- `cargo brief core-lib --no-functions --no-traits` → combined exclusion
+
+**J. Error cases**
+- `cargo brief nonexistent-crate` → meaningful error
+- `cargo brief self` from non-package directory → error about no package
+
+#### Test helper design:
+
+```rust
+fn cargo_brief(cwd: &str, args: &[&str]) -> (String, String, bool) {
+    // Returns (stdout, stderr, success)
+    // cwd relative to project root, e.g., "test_workspace/core-lib"
+    // Builds binary path from CARGO_BIN_EXE_cargo-brief or cargo build
+}
+```
+
+#### Initially `#[ignore]` tests (known bugs, un-ignore as fixed):
+
+- **F scenarios** (visibility auto-detection) — blocked by same_crate always=true
+- **E scenarios** (external crate) — blocked by sparse JSON / --document-private-items issue
+- Possibly some file path scenarios depending on cwd behavior
+
+---
+
+### Phase 2: Investigation — external crate JSON
+
+Before writing fixes, answer these questions by experimentation:
+
+1. Run `cargo rustdoc -p either -- --output-format json -Z unstable-options`
+   (no `--document-private-items`) from `test_workspace/`. Inspect JSON index size.
+2. Compare with `--document-private-items`. Does it reduce the index?
+3. Run with `--lib` flag added. Does it change anything?
+4. Test from workspace root vs package directory. Any difference?
+
+Document findings in a `### Result` subsection.
+
+---
+
+### Phase 3: External crate rustdoc JSON fix
+
+Based on Phase 2 findings, fix `generate_rustdoc_json()`:
 
 - If `--document-private-items` causes sparse index for deps, make it conditional:
   use it only for workspace packages (where we need visibility filtering),
@@ -60,10 +147,13 @@ Based on Phase 1 findings, fix `generate_rustdoc_json()`:
 - Add `--lib` flag to avoid multi-target errors.
 - `run_pipeline()` needs to know whether the target is a workspace package to decide
   the `document_private_items` flag.
+- Un-ignore Phase 1 external crate tests (category E).
 
-**Files:** `src/rustdoc_json.rs`, `src/lib.rs`
+**Files:** `src/rustdoc_json.rs`, `src/lib.rs`, `src/resolve.rs` (expose `is_workspace_package`)
 
-### Phase 3: same_crate auto-detection
+---
+
+### Phase 4: same_crate auto-detection
 
 Re-apply the reverted logic, now safe because external crates generate proper JSON:
 
@@ -71,45 +161,41 @@ Re-apply the reverted logic, now safe because external crates generate proper JS
 - Same package → `same_crate = true`
 - Different package (workspace sibling or external) → `same_crate = false`
 - `--at-package` explicit → override as before
+- Un-ignore Phase 1 visibility auto-detection tests (category F).
 
 **Files:** `src/lib.rs`
 
-### Phase 4: Single-arg resolution priority
+---
+
+### Phase 5: Single-arg resolution priority
 
 Change the fallback for unknown single-arg names:
 
 - Current: unknown → self module (breaks external crates like `hecs`)
-- Desired: unknown → try as package first (run `cargo rustdoc`), if that fails
-  then try as self module
+- Desired: unknown → try as package first (workspace + dependency lookup),
+  if no match then try as self module
 - Alternative (simpler): unknown → always package. Users must use `self::mod`
-  or `self mod` for self modules. This is cleaner but changes existing behavior.
+  or `self mod` for self modules.
 
 Decision needed: which approach? The simpler "always package" is more predictable
 and `self::module` / file paths cover the self-module use case well.
 
 **Files:** `src/resolve.rs`
 
-### Phase 5: Rendering fixes
+---
+
+### Phase 6: Rendering fixes
 
 - `impl Trait for Type;` → `impl Trait for Type { .. }` (syntax highlighter compat)
 - Update test assertions
 
 **Files:** `src/render.rs`, `tests/integration.rs`
 
-### Phase 6: Test workspace
+---
 
-Create `test_workspace/` with multiple packages to test:
+### Phase 7: Version bump and docs
 
-- Virtual workspace root with 2+ member packages
-- Packages that depend on each other (workspace sibling visibility)
-- Integration tests exercising: self resolution, sibling visibility,
-  pub(crate) filtering, file path resolution across packages
-
-**Files:** `test_workspace/`, `tests/workspace_integration.rs`
-
-### Phase 7: CHANGELOG and version bump
-
-Update CHANGELOG.md, bump to 0.1.2, update mental model.
+Update version, update mental model docs, update `_index.md` operational state.
 
 ---
 
@@ -118,6 +204,6 @@ Update CHANGELOG.md, bump to 0.1.2, update mental model.
 1. Should `cargo brief <unknown>` be package-first or self-module-first?
    → Leaning toward package-first (simpler, more predictable)
 2. Should `--document-private-items` be conditional per-target?
-   → Likely yes, but need Phase 1 investigation to confirm
+   → Likely yes, but need Phase 2 investigation to confirm
 3. Is `--lib` always safe to add?
    → Need to verify with crates that only have bin targets
