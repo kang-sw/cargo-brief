@@ -199,6 +199,25 @@ Update version, update mental model docs, update `_index.md` operational state.
 
 ---
 
+### Result — Phase 1 (subprocess integration tests)
+
+**Implemented:** `tests/subprocess_integration.rs` — 23 subprocess-based integration tests
+covering all resolution and visibility scenarios (A–J) using `test_workspace/`.
+
+**Test results:** 19 passing, 4 ignored:
+- 3 ignored in category F (auto-visibility): blocked by same_crate always=true (Phase 4)
+- 1 ignored in category D (`pkg_with_file_path`): file path not resolved relative to
+  package dir when cwd differs from package dir — discovered bug
+
+**Key findings:**
+- External crate support (`either`) works out of the box — no `#[ignore]` needed for category E
+- `--at-package` override works correctly for both same-crate and cross-crate views
+- `self`, `self::module`, `crate::module`, file path, underscore normalization all work
+- The `pkg_with_file_path` bug: `cargo brief core-lib src/utils.rs` from workspace root
+  fails because file path is resolved relative to cwd, not the target package directory
+
+---
+
 ## Open Questions
 
 1. Should `cargo brief <unknown>` be package-first or self-module-first?

@@ -31,6 +31,43 @@
 | Visibility model | same_crate=true shows pub(crate), same_crate=false hides them |
 | Formatting | Crate header, indentation, inherent impls, trait impl one-liners |
 
+## Subprocess Integration Tests (`tests/subprocess_integration.rs`)
+
+Tests that invoke the `cargo-brief` binary via `std::process::Command` with explicit
+working directories. This exercises the full pipeline including cwd detection, `self`
+resolution, and arg parsing — things in-process tests cannot cover.
+
+### Fixture
+
+Uses `test_workspace/` (workspace with `core-lib` + `app` + `either` dependency).
+
+### Helpers
+
+- **`cargo_brief_bin()`** — binary path via `CARGO_BIN_EXE_cargo-brief`
+- **`run(cwd, args)`** — returns `(stdout, stderr, success)`
+- **`run_ok(cwd, args)`** — asserts success, returns stdout
+- **`run_err(cwd, args)`** — asserts failure, returns stderr
+
+### Test Categories (23 tests: 19 passing, 4 ignored)
+
+| Category | Tests | Status |
+|----------|-------|--------|
+| A. Explicit crate name | `explicit_core_lib`, `explicit_app`, `explicit_underscore_normalization` | passing |
+| B. `self` keyword | `self_from_core_lib`, `self_from_app`, `self_module_from_core_lib`, `self_from_virtual_root` | passing |
+| C. `crate::module` syntax | `crate_module_syntax` | passing |
+| D. File path as module | `file_path_from_package_dir`, `self_with_file_path`, `pkg_with_file_path` | 2 passing, 1 ignored |
+| E. External crate | `external_crate_either` | passing |
+| F. Visibility auto-detection | `auto_visibility_cross_crate`, `auto_visibility_same_crate`, `auto_visibility_reverse` | 3 ignored (Phase 4) |
+| G. `--at-package` override | `at_package_cross_crate`, `at_package_same_crate` | passing |
+| H. Depth/recursion | `depth_zero`, `recursive` | passing |
+| I. Item filtering | `no_structs`, `no_functions` | passing |
+| J. Error cases | `nonexistent_crate`, `self_from_non_package` | passing |
+
+### Ignored Tests
+
+- **F (3 tests):** `#[ignore = "blocked: same_crate auto-detection not implemented (Phase 4)"]`
+- **D.pkg_with_file_path:** `#[ignore = "blocked: file path not resolved relative to package dir when cwd != package dir"]`
+
 ## Test Fixture (`test_fixture/`)
 
 Single-crate library (`test_fixture/src/lib.rs`, ~151 lines) exercising all supported

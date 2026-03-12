@@ -106,7 +106,7 @@ Parsed via `rustdoc-types` 0.57. Post-macro-expansion output.
 
 ## Operational State (v0.1.3)
 
-- Core pipeline complete. All item types supported. 67+ tests (unit + CLI smoke + integration).
+- Core pipeline complete. All item types supported. 124 tests (unit + CLI smoke + integration + subprocess).
 - Flexible package name resolution: `self`, `crate::module`, single-arg fallback, file path→module.
 - Dependencies: `clap` 4, `rustdoc-types` 0.57, `serde_json` 1, `anyhow` 1.
 - Test fixture (`test_fixture/`) covers all supported item types.
