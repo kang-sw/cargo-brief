@@ -88,7 +88,7 @@ pub fn load_cargo_metadata(manifest_path: Option<&str>) -> Result<CargoMetadataI
 ///    - prefix `self` → current package + rest as module
 ///    - otherwise → prefix is package name, rest is module
 /// 3. Two args → backward compat: first=package, second=module (file path aware)
-/// 4. Single arg, no `::` → if file path, resolve to self module; else check workspace packages; else self module
+/// 4. Single arg, no `::` → if file path, resolve to self module; else check workspace packages; else treat as package
 pub fn resolve_target(
     first_arg: &str,
     second_arg: Option<&str>,
@@ -158,18 +158,12 @@ pub fn resolve_target(
         });
     }
 
-    // Not a known workspace package → if we have a current package, treat as self module;
-    // otherwise assume it's an external package name
-    match &metadata.current_package {
-        Some(pkg) => Ok(ResolvedTarget {
-            package_name: pkg.clone(),
-            module_path: Some(first_arg.to_string()),
-        }),
-        None => Ok(ResolvedTarget {
-            package_name: first_arg.to_string(),
-            module_path: None,
-        }),
-    }
+    // Not a known workspace package → treat as external package name.
+    // Users should use `self::module` or file paths for self-module access.
+    Ok(ResolvedTarget {
+        package_name: first_arg.to_string(),
+        module_path: None,
+    })
 }
 
 /// If the input looks like a file path, convert it to a module path; otherwise return as-is.
@@ -416,11 +410,11 @@ mod tests {
     }
 
     #[test]
-    fn test_single_arg_unknown_falls_back_to_self_module() {
+    fn test_single_arg_unknown_resolves_as_package() {
         let meta = test_metadata(&["my-crate"], Some("my-crate"));
         let resolved = resolve_target("cli", None, &meta).unwrap();
-        assert_eq!(resolved.package_name, "my-crate");
-        assert_eq!(resolved.module_path, Some("cli".to_string()));
+        assert_eq!(resolved.package_name, "cli");
+        assert_eq!(resolved.module_path, None);
     }
 
     #[test]

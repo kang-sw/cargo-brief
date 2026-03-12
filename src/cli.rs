@@ -26,7 +26,7 @@ RESOLUTION RULES:
     3. \"crate::mod\"     → named crate + module in one argument
     4. \"src/foo.rs\"     → file path auto-converted to module path
     5. \"crate_name\"     → workspace package (hyphen/underscore normalized)
-    6. \"unknown_name\"   → fallback: treated as module of current package
+    6. \"unknown_name\"   → treated as package name (use \"self::mod\" for modules)
 
   The [MODULE_PATH] argument also accepts file paths (e.g., src/foo.rs)."
 )]
