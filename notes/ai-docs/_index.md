@@ -40,7 +40,7 @@ cargo brief <target> [module_path] [OPTIONS]
 | `self`              | Current package (cwd-based detection)           |
 | `self::module`      | Current package, specific module                |
 | `crate::module`     | Named crate, specific module (single-arg)       |
-| `<unknown_name>`    | If not a workspace package → self module        |
+| `<unknown_name>`    | Treated as package name (use `self::mod` for modules) |
 | `<pkg> <module>`    | Two-arg backward compat: package + module       |
 | `src/cli.rs`        | File path → auto-converted to module path       |
 | `self src/foo.rs`   | Self package + file path as module              |
@@ -104,10 +104,11 @@ Parsed via `rustdoc-types` 0.57. Post-macro-expansion output.
 
 ---
 
-## Operational State (v0.1.3)
+## Operational State (v0.2.0)
 
 - Core pipeline complete. All item types supported. 124 tests (unit + CLI smoke + integration + subprocess).
-- Flexible package name resolution: `self`, `crate::module`, single-arg fallback, file path→module.
+- Flexible package name resolution: `self`, `crate::module`, file path→module. Bare names always resolve as package.
+- Visibility auto-detection: `same_crate` inferred from cwd package context.
 - Dependencies: `clap` 4, `rustdoc-types` 0.57, `serde_json` 1, `anyhow` 1.
 - Test fixture (`test_fixture/`) covers all supported item types.
 
@@ -140,12 +141,12 @@ Detailed module-level documentation in `notes/ai-docs/mental-model/`:
 | External deps | Phase 2 | Adds ~30% complexity; architecture supports it cleanly |
 | Target resolution | Semantic layer between CLI and pipeline | `BriefArgs` stays unchanged; resolution in `src/resolve.rs` |
 | Single cargo metadata call | `resolve::load_cargo_metadata()` | Eliminates redundant `find_target_dir()` call |
-| Ambiguous single arg | Package wins over self-module | Documented; workspace packages checked first |
+| Ambiguous single arg | Always package | Bare name = package; `self::mod` for own modules |
 | File path as module | Heuristic: `/` or `.rs` → file path | 2-level fallback: cwd-relative, then package `src/`-relative |
 
 ---
 
 ## Active Tickets
 
-- `tickets/wip/260308-visibility-and-rendering.md` — same_crate auto-detection, resolution priority, rendering fixes, external crate JSON investigation
+- `tickets/done/260308-visibility-and-rendering.md` — same_crate auto-detection, resolution priority, rendering fixes (completed v0.2.0)
 - `tickets/todo/260310-remote-crate-support.md` — `--crates` flag for crates.io crates without local dependency

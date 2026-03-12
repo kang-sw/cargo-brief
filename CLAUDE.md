@@ -153,9 +153,9 @@ alternatives considered, and trade-offs — focus on _why_ this approach was cho
 
 <!-- Max 3 items. What was done, what's next. -->
 
+- v0.2.0: same_crate auto-detection, bare name always resolves as package
 - v0.1.2: `{ .. }` for trait impl rendering, visibility-filtered field indicators
-- Flexible resolution: `self`, `crate::module`, file path→module conversion
-- Active ticket: visibility auto-detection & rendering fixes (260308)
+- Closed ticket: visibility auto-detection & rendering fixes (260308)
 
 ## Workspace Reference
 

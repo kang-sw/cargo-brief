@@ -234,13 +234,37 @@ default observer when no `--at-package` is provided. If cwd package matches targ
 **Phases 2-3 skipped:** External crate JSON issue (sparse index) was not observed —
 `either` works correctly in both subprocess and in-process tests.
 
+### Result — Phase 5 (single-arg resolution priority)
+
+**Implemented:** Bare unknown names now always resolve as package, not self-module.
+
+**Changes:**
+- `src/resolve.rs`: Replaced self-module fallback (lines 161-172) with unconditional
+  package resolution. Updated doc comment on `resolve_target()`.
+- `src/cli.rs`: Updated resolution rule 6 in after_help.
+- Renamed test `test_single_arg_unknown_falls_back_to_self_module` →
+  `test_single_arg_unknown_resolves_as_package`, updated assertions.
+
+**Rationale:** Bare name = external crate is the common case. Self-module access
+is well-served by `self::module`, `self module`, or file paths.
+
+### Result — Phase 6 (rendering fixes)
+
+**Already done** in prior work — `{ .. }` rendering is in `render.rs:355`.
+
+### Result — Phase 7 (version bump + docs)
+
+**Version:** `0.1.3` → `0.2.0` (minor bump for behavioral change: same_crate
+auto-detection + resolution priority change).
+
+**Doc updates:** `_index.md` operational state, resolution table, key decisions.
+`CLAUDE.md` memory section.
+
 ---
 
-## Open Questions
+## Remaining Open Questions (deferred)
 
-1. Should `cargo brief <unknown>` be package-first or self-module-first?
-   → Leaning toward package-first (simpler, more predictable)
-2. Should `--document-private-items` be conditional per-target?
-   → Likely yes, but need Phase 2 investigation to confirm
-3. Is `--lib` always safe to add?
+1. Should `--document-private-items` be conditional per-target?
+   → Likely yes, but external crate JSON works fine currently
+2. Is `--lib` always safe to add?
    → Need to verify with crates that only have bin targets
