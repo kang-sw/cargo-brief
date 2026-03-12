@@ -104,12 +104,26 @@ Parsed via `rustdoc-types` 0.57. Post-macro-expansion output.
 
 ---
 
-## Operational State (v0.1.2)
+## Operational State (v0.1.3)
 
 - Core pipeline complete. All item types supported. 67+ tests (unit + CLI smoke + integration).
 - Flexible package name resolution: `self`, `crate::module`, single-arg fallback, file path→module.
 - Dependencies: `clap` 4, `rustdoc-types` 0.57, `serde_json` 1, `anyhow` 1.
 - Test fixture (`test_fixture/`) covers all supported item types.
+
+## Mental Model Documents
+
+Detailed module-level documentation in `notes/ai-docs/mental-model/`:
+
+| Document | Covers |
+|----------|--------|
+| `index.md` | Project overview, pipeline diagram, module map, dependency flow |
+| `cli.md` | `BriefArgs`, `Cargo`/`CargoCommand`, dual invocation modes |
+| `resolve.md` | `CargoMetadataInfo`, `ResolvedTarget`, 4-case resolution algorithm |
+| `rustdoc_json.md` | Subprocess invocation, JSON parsing, error detection patterns |
+| `model.md` | `CrateModel`, module indexing, `is_visible_from()` visibility rules |
+| `render.md` | Recursive renderer, item-specific formatters, type formatting, output conventions |
+| `testing.md` | Integration test organization, test fixture coverage |
 
 ---
 
