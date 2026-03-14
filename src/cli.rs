@@ -32,7 +32,7 @@ RESOLUTION RULES:
 )]
 pub struct BriefArgs {
     /// Target to inspect: crate name, "self", crate::module, or file path
-    #[arg(value_name = "TARGET")]
+    #[arg(value_name = "TARGET", default_value = "self")]
     pub crate_name: String,
 
     /// Module path or file path within the crate (e.g., "my_mod::submod" or "src/foo.rs")

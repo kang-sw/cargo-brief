@@ -343,3 +343,27 @@ fn self_from_non_package() {
         "Expected error about virtual workspace.\nStderr:\n{stderr}"
     );
 }
+
+// ===========================================================================
+// K. Bare `cargo brief` (no TARGET — defaults to "self")
+// ===========================================================================
+
+#[test]
+fn bare_cargo_brief_from_package_dir() {
+    // Running `cargo brief` from a package dir should behave like `cargo brief self`
+    let out = run_ok(&test_workspace().join("core-lib"), &[]);
+    assert!(
+        out.contains("pub struct Config"),
+        "bare `cargo brief` from package dir should show Config struct"
+    );
+}
+
+#[test]
+fn bare_cargo_brief_from_virtual_root() {
+    // Running `cargo brief` from virtual workspace root should fail (same as `cargo brief self`)
+    let stderr = run_err(&test_workspace(), &[]);
+    assert!(
+        stderr.contains("package") || stderr.contains("workspace"),
+        "Expected error about no package at virtual root.\nStderr:\n{stderr}"
+    );
+}
