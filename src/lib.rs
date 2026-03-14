@@ -99,7 +99,7 @@ pub fn run_pipeline(args: &BriefArgs) -> Result<String> {
 /// Run the pipeline for a remote crate fetched via a cached or temp workspace.
 fn run_remote_pipeline(args: &BriefArgs, spec: &str) -> Result<String> {
     let (name, _) = remote::parse_crate_spec(spec);
-    let workspace = remote::resolve_workspace(spec, args.no_cache)
+    let workspace = remote::resolve_workspace(spec, args.features.as_deref(), args.no_cache)
         .with_context(|| format!("Failed to create workspace for '{name}'"))?;
 
     let manifest_path = workspace

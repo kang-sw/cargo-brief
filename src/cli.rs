@@ -39,12 +39,16 @@ pub struct BriefArgs {
     pub module_path: Option<String>,
 
     /// Caller's package name (for visibility resolution)
-    #[arg(long)]
+    #[arg(long, help_heading = "Local Workspace")]
     pub at_package: Option<String>,
 
     /// Caller's module path (determines what is visible)
-    #[arg(long)]
+    #[arg(long, help_heading = "Local Workspace")]
     pub at_mod: Option<String>,
+
+    /// Path to Cargo.toml
+    #[arg(long, help_heading = "Local Workspace")]
+    pub manifest_path: Option<String>,
 
     /// How many submodule levels to recurse into
     #[arg(long, default_value = "1")]
@@ -58,56 +62,60 @@ pub struct BriefArgs {
     #[arg(long)]
     pub all: bool,
 
-    // === Exclusion flags (default: all common items shown) ===
-    /// Exclude structs
-    #[arg(long)]
-    pub no_structs: bool,
-
-    /// Exclude enums
-    #[arg(long)]
-    pub no_enums: bool,
-
-    /// Exclude traits
-    #[arg(long)]
-    pub no_traits: bool,
-
-    /// Exclude free functions
-    #[arg(long)]
-    pub no_functions: bool,
-
-    /// Exclude type aliases
-    #[arg(long)]
-    pub no_aliases: bool,
-
-    /// Exclude constants and statics
-    #[arg(long)]
-    pub no_constants: bool,
-
-    /// Exclude unions
-    #[arg(long)]
-    pub no_unions: bool,
-
-    /// Exclude macros
-    #[arg(long)]
-    pub no_macros: bool,
-
-    /// Fetch a crate from crates.io (e.g., serde, tokio@1, quinn@0.11.0)
-    #[arg(long, value_name = "SPEC")]
-    pub crates: Option<String>,
-
-    /// Nightly toolchain name
-    #[arg(long, default_value = "nightly")]
-    pub toolchain: String,
-
     /// Inline full definitions from glob re-export sources
     #[arg(long)]
     pub expand_glob: bool,
 
-    /// Skip cache and use a temporary workspace (for --crates)
-    #[arg(long)]
+    // === Exclusion flags (default: all common items shown) ===
+    /// Exclude structs
+    #[arg(long, help_heading = "Filtering")]
+    pub no_structs: bool,
+
+    /// Exclude enums
+    #[arg(long, help_heading = "Filtering")]
+    pub no_enums: bool,
+
+    /// Exclude traits
+    #[arg(long, help_heading = "Filtering")]
+    pub no_traits: bool,
+
+    /// Exclude free functions
+    #[arg(long, help_heading = "Filtering")]
+    pub no_functions: bool,
+
+    /// Exclude type aliases
+    #[arg(long, help_heading = "Filtering")]
+    pub no_aliases: bool,
+
+    /// Exclude constants and statics
+    #[arg(long, help_heading = "Filtering")]
+    pub no_constants: bool,
+
+    /// Exclude unions
+    #[arg(long, help_heading = "Filtering")]
+    pub no_unions: bool,
+
+    /// Exclude macros
+    #[arg(long, help_heading = "Filtering")]
+    pub no_macros: bool,
+
+    /// Fetch a crate from crates.io (e.g., serde, tokio@1, quinn@0.11.0)
+    #[arg(long, value_name = "SPEC", help_heading = "Remote Crate (crates.io)")]
+    pub crates: Option<String>,
+
+    /// Comma-separated features to enable (e.g., rt,net,macros)
+    #[arg(
+        long,
+        value_name = "FEATURES",
+        help_heading = "Remote Crate (crates.io)"
+    )]
+    pub features: Option<String>,
+
+    /// Skip cache and use a temporary workspace
+    #[arg(long, help_heading = "Remote Crate (crates.io)")]
     pub no_cache: bool,
 
-    /// Path to Cargo.toml
-    #[arg(long)]
-    pub manifest_path: Option<String>,
+    /// Nightly toolchain name
+    #[arg(long, default_value = "nightly", help_heading = "Advanced")]
+    pub toolchain: String,
 }

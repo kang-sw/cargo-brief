@@ -26,6 +26,7 @@ fn either_args() -> BriefArgs {
         no_macros: false,
         crates: None,
         expand_glob: false,
+        features: None,
         no_cache: false,
         toolchain: "nightly".to_string(),
         manifest_path: Some("test_workspace/Cargo.toml".to_string()),
