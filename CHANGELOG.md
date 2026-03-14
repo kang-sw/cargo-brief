@@ -2,6 +2,13 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.2.1] - 2026-03-14
+
+### Fixed
+
+- Versioned package specifiers (`pkg@version`, e.g. `cargo brief rand@0.10.0`) now work correctly. Previously the `@version` suffix was included in the JSON output filename lookup, causing a "file not found" error.
+- When multiple versions of the same crate exist in the dependency tree and the bare name is ambiguous, the error message now lists the available `pkg@version` options with an example command, enabling LLM agents to retry without human intervention.
+
 ## [0.2.0] - 2026-03-12
 
 ### Changed
