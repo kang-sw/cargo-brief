@@ -95,6 +95,10 @@ pub struct BriefArgs {
     #[arg(long, default_value = "nightly")]
     pub toolchain: String,
 
+    /// Inline full definitions from glob re-export sources
+    #[arg(long)]
+    pub expand_glob: bool,
+
     /// Path to Cargo.toml
     #[arg(long)]
     pub manifest_path: Option<String>,

@@ -81,3 +81,20 @@ the definition only once.
 - How to handle glob re-exports from `pub(crate)` modules that are re-exported at root?
   (These are already resolved by rustdoc — the glob target is the actual source crate)
 - Depth limit for `--expand-glob` recursive expansion?
+
+### Result (Phase 2)
+
+**Implemented:** `--expand-glob` flag that inlines full definitions from glob re-export
+source crates. Key implementation details:
+
+- `GlobExpansionResult` struct in `lib.rs` preserves both item names (Phase 1) and source
+  `CrateModel`s (Phase 2) from the same rustdoc JSON generation.
+- `render_inlined_items()` in `render.rs` follows `Use` items to their targets to render
+  actual definitions (not just re-export lines). Source crates like `clap_builder` re-export
+  from submodules, so the root children are `Use` items, not direct definitions.
+- Impl blocks collected from inlined types (both direct and via Use targets) and rendered
+  inline with the definitions.
+- Deduplication by item name via shared `HashSet<String>` across all glob source expansions.
+- 5 new integration tests: full definitions present, no pub use lines remain, impl blocks
+  present, dedup works, non-facade crates unaffected.
+- All 139 tests pass (138 pass + 1 pre-existing ignored).

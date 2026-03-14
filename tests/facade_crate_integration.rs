@@ -22,6 +22,7 @@ fn facade_args(crate_name: &str) -> BriefArgs {
         no_constants: false,
         no_unions: false,
         no_macros: false,
+        expand_glob: false,
         toolchain: "nightly".to_string(),
         manifest_path: Some("test_workspace/Cargo.toml".to_string()),
     }
@@ -126,4 +127,86 @@ fn either_unaffected_by_glob_expansion() {
             panic!("unexpected glob re-export in either: {line}");
         }
     }
+}
+
+// ============================================================
+// --expand-glob: full definition inlining
+// ============================================================
+
+fn expand_glob_args(crate_name: &str) -> BriefArgs {
+    let mut args = facade_args(crate_name);
+    args.expand_glob = true;
+    args
+}
+
+#[test]
+fn clap_expand_glob_has_full_definitions() {
+    let args = expand_glob_args("clap");
+    let output = run_pipeline(&args).unwrap();
+
+    // Full struct definitions should appear instead of `pub use` lines
+    assert!(
+        output.contains("pub struct Command"),
+        "Command struct definition should be inlined:\n{output}"
+    );
+    assert!(
+        output.contains("pub struct Arg"),
+        "Arg struct definition should be inlined"
+    );
+}
+
+#[test]
+fn clap_expand_glob_no_pub_use_lines() {
+    let args = expand_glob_args("clap");
+    let output = run_pipeline(&args).unwrap();
+
+    // No `pub use clap_builder::*;` lines should remain
+    for line in output.lines() {
+        if line.starts_with("pub use") && line.contains("::*;") {
+            panic!("glob should be fully expanded, but found: {line}");
+        }
+    }
+    // No individual `pub use clap_builder::Name;` lines either
+    assert!(
+        !output.contains("pub use clap_builder::Command;"),
+        "individual pub use lines should not appear with --expand-glob"
+    );
+}
+
+#[test]
+fn clap_expand_glob_has_impl_blocks() {
+    let args = expand_glob_args("clap");
+    let output = run_pipeline(&args).unwrap();
+
+    // impl blocks from source crate should be included
+    assert!(
+        output.contains("impl Command"),
+        "impl blocks for Command should be inlined:\n{output}"
+    );
+}
+
+#[test]
+fn clap_expand_glob_dedup() {
+    let args = expand_glob_args("clap");
+    let output = run_pipeline(&args).unwrap();
+
+    // Items appearing in multiple glob sources should be rendered only once.
+    // Count occurrences of "pub struct Command" — should be exactly 1.
+    let count = output.matches("pub struct Command").count();
+    assert!(
+        count <= 1,
+        "Command should appear at most once, found {count} times"
+    );
+}
+
+#[test]
+fn either_expand_glob_no_effect() {
+    let args = expand_glob_args("either");
+    let output = run_pipeline(&args).unwrap();
+
+    // either is not a facade crate — --expand-glob should not change output
+    assert!(
+        output.contains("pub enum Either<L, R>"),
+        "Either enum should render normally with --expand-glob"
+    );
 }

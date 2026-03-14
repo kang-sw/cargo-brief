@@ -41,6 +41,7 @@ fn default_args() -> BriefArgs {
         no_constants: false,
         no_unions: false,
         no_macros: false,
+        expand_glob: false,
         toolchain: "nightly".to_string(),
         manifest_path: Some("test_fixture/Cargo.toml".to_string()),
     }

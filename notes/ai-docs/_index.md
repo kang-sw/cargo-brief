@@ -62,6 +62,7 @@ cargo brief <target> [module_path] [OPTIONS]
 | `--no-unions`           | Exclude unions                                                 |
 | `--no-macros`           | Exclude macros                                                 |
 | `--toolchain <name>`    | Nightly toolchain name (default: `nightly`)                    |
+| `--expand-glob`         | Inline full definitions from glob re-export sources            |
 | `--manifest-path <path>`| Path to Cargo.toml                                            |
 
 ---
@@ -104,11 +105,12 @@ Parsed via `rustdoc-types` 0.57. Post-macro-expansion output.
 
 ---
 
-## Operational State (v0.2.0)
+## Operational State (v0.2.2)
 
-- Core pipeline complete. All item types supported. 124 tests (unit + CLI smoke + integration + subprocess).
+- Core pipeline complete. All item types supported. 139 tests (unit + CLI smoke + integration + subprocess).
 - Flexible package name resolution: `self`, `crate::module`, file path→module. Bare names always resolve as package.
 - Visibility auto-detection: `same_crate` inferred from cwd package context.
+- Glob re-export expansion: Phase 1 (individual `pub use` lines) + Phase 2 (`--expand-glob` inlines full definitions).
 - Dependencies: `clap` 4, `rustdoc-types` 0.57, `serde_json` 1, `anyhow` 1.
 - Test fixture (`test_fixture/`) covers all supported item types.
 

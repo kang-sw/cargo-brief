@@ -1,3 +1,5 @@
+use std::collections::HashSet;
+
 use rustdoc_types::{
     Constant, Enum, Function, GenericArg, GenericArgs, GenericBound, GenericParamDefKind, Item,
     ItemEnum, Static, Struct, StructKind, Trait, Type, TypeAlias, Union, VariantKind, Visibility,
@@ -69,6 +71,220 @@ pub fn render_module_api(
     );
 
     output
+}
+
+/// Render full definitions from a source crate's root module for glob expansion inlining.
+///
+/// Iterates public, non-module items from the source model's root, renders each using
+/// the existing `render_item()` functions. For `Use` items (re-exports from submodules),
+/// follows the target to render the actual definition. Tracks rendered names in
+/// `seen_names` for cross-source deduplication.
+pub fn render_inlined_items(
+    source_model: &CrateModel,
+    args: &BriefArgs,
+    seen_names: &mut HashSet<String>,
+) -> String {
+    let mut output = String::new();
+
+    let Some(root) = source_model.root_module() else {
+        return output;
+    };
+
+    let observer = source_model.crate_name().to_string();
+    let children = source_model.module_children(root);
+
+    // Collect impl IDs from inlined types for later rendering
+    let mut impl_ids: Vec<Id> = Vec::new();
+
+    for (child_id, child) in &children {
+        if !matches!(child.visibility, Visibility::Public) {
+            continue;
+        }
+        if matches!(child.inner, ItemEnum::Module(_)) {
+            continue;
+        }
+
+        let name = child
+            .name
+            .as_deref()
+            .or(if let ItemEnum::Use(u) = &child.inner {
+                Some(u.name.as_str())
+            } else {
+                None
+            });
+
+        let Some(name) = name else { continue };
+
+        if !seen_names.insert(name.to_string()) {
+            continue; // already rendered from another source
+        }
+
+        // For Use items, follow the target to render the actual definition
+        if let ItemEnum::Use(use_item) = &child.inner {
+            if let Some(target_id) = &use_item.id
+                && let Some(target_item) = source_model.krate.index.get(target_id)
+            {
+                if matches!(target_item.inner, ItemEnum::Module(_)) {
+                    continue;
+                }
+                if should_render_item(target_item, args) {
+                    render_item(
+                        source_model,
+                        target_item,
+                        target_id,
+                        "",
+                        &observer,
+                        false,
+                        &mut output,
+                    );
+                }
+                collect_impl_ids(target_item, &mut impl_ids);
+            }
+            continue;
+        }
+
+        // Direct definitions (not re-exports)
+        if should_render_item(child, args) {
+            render_item(
+                source_model,
+                child,
+                child_id,
+                "",
+                &observer,
+                false,
+                &mut output,
+            );
+        }
+        collect_impl_ids(child, &mut impl_ids);
+    }
+
+    // Render collected impl blocks
+    render_inlined_impl_blocks(source_model, args, &observer, &impl_ids, &mut output);
+
+    output
+}
+
+/// Collect impl IDs from a type item (struct/enum/union).
+fn collect_impl_ids(item: &Item, impl_ids: &mut Vec<Id>) {
+    let impls = match &item.inner {
+        ItemEnum::Struct(s) => Some(&s.impls),
+        ItemEnum::Enum(e) => Some(&e.impls),
+        ItemEnum::Union(u) => Some(&u.impls),
+        _ => None,
+    };
+    if let Some(impls) = impls {
+        impl_ids.extend(impls.iter().cloned());
+    }
+}
+
+/// Render impl blocks collected from inlined types.
+fn render_inlined_impl_blocks(
+    model: &CrateModel,
+    args: &BriefArgs,
+    observer: &str,
+    impl_ids: &[Id],
+    output: &mut String,
+) {
+    for impl_id in impl_ids {
+        let Some(impl_item) = model.krate.index.get(impl_id) else {
+            continue;
+        };
+        let ItemEnum::Impl(impl_block) = &impl_item.inner else {
+            continue;
+        };
+
+        if !args.all && (impl_block.is_synthetic || impl_block.blanket_impl.is_some()) {
+            continue;
+        }
+
+        let type_name = format_type(&impl_block.for_);
+        if type_name.is_empty() {
+            continue;
+        }
+
+        let generics = format_generics(&impl_block.generics);
+        let is_trait_impl = impl_block.trait_.is_some();
+        let impl_header = if let Some(trait_) = &impl_block.trait_ {
+            let trait_path = format_path(trait_);
+            format!("impl{generics} {trait_path} for {type_name}")
+        } else {
+            format!("impl{generics} {type_name}")
+        };
+
+        if is_trait_impl {
+            let mut assoc_items = Vec::new();
+            let mut has_other_items = false;
+
+            for item_id in &impl_block.items {
+                if let Some(item) = model.krate.index.get(item_id) {
+                    match &item.inner {
+                        ItemEnum::AssocType { .. } | ItemEnum::AssocConst { .. } => {
+                            if let Some(r) = render_impl_item(item, "    ", args) {
+                                assoc_items.push(r);
+                            }
+                        }
+                        _ => {
+                            has_other_items = true;
+                        }
+                    }
+                }
+            }
+
+            render_docs(impl_item, "", output);
+            if assoc_items.is_empty() {
+                output.push_str(&format!("{impl_header} {{ .. }}\n"));
+            } else {
+                output.push_str(&format!("{impl_header} {{\n"));
+                for item_str in &assoc_items {
+                    output.push_str(item_str);
+                }
+                if has_other_items {
+                    output.push_str("    // ..\n");
+                }
+                output.push_str("}\n");
+            }
+        } else {
+            let mut rendered_items = Vec::new();
+
+            for item_id in &impl_block.items {
+                if let Some(item) = model.krate.index.get(item_id) {
+                    if !matches!(item.visibility, Visibility::Default | Visibility::Public)
+                        && !is_visible_from(model, item, item_id, observer, false)
+                    {
+                        continue;
+                    }
+                    if let Some(r) = render_impl_item(item, "    ", args) {
+                        rendered_items.push(r);
+                    }
+                }
+            }
+
+            if !rendered_items.is_empty() {
+                render_docs(impl_item, "", output);
+                output.push_str(&format!("{impl_header} {{\n"));
+                for item_str in &rendered_items {
+                    output.push_str(item_str);
+                }
+                output.push_str("}\n");
+            }
+        }
+    }
+}
+
+/// Check if an item should be rendered based on the args exclusion flags.
+fn should_render_item(item: &Item, args: &BriefArgs) -> bool {
+    match &item.inner {
+        ItemEnum::Struct(_) => !args.no_structs,
+        ItemEnum::Enum(_) => !args.no_enums,
+        ItemEnum::Trait(_) => !args.no_traits,
+        ItemEnum::Function(_) => !args.no_functions,
+        ItemEnum::TypeAlias(_) => !args.no_aliases,
+        ItemEnum::Constant { .. } => !args.no_constants,
+        ItemEnum::Static(_) => !args.no_constants,
+        ItemEnum::Union(_) => !args.no_unions,
+        ItemEnum::Macro(_) => !args.no_macros,
+        _ => true,
+    }
 }
 
 #[allow(clippy::too_many_arguments)]

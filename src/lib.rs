@@ -4,7 +4,7 @@ pub mod render;
 pub mod resolve;
 pub mod rustdoc_json;
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::Path;
 
 use anyhow::{Context, Result};
@@ -12,6 +12,15 @@ use rustdoc_types::{ItemEnum, Visibility};
 
 use cli::BriefArgs;
 use model::CrateModel;
+
+/// Result of glob re-export expansion. Contains both the item names (for Phase 1
+/// individual `pub use` lines) and the full source models (for Phase 2 inlining).
+struct GlobExpansionResult {
+    /// Phase 1 data: source crate → sorted list of public item names
+    item_names: HashMap<String, Vec<String>>,
+    /// Phase 2 data: source crate → full CrateModel
+    source_models: HashMap<String, CrateModel>,
+}
 
 /// Run the cargo-brief pipeline and return the rendered output string.
 pub fn run_pipeline(args: &BriefArgs) -> Result<String> {
@@ -67,8 +76,9 @@ pub fn run_pipeline(args: &BriefArgs) -> Result<String> {
 
     // Step 6: Expand glob re-exports
     // The renderer outputs `pub use source::*;` for glob re-exports.
-    // Replace each with individual `pub use source::Name;` lines.
-    let glob_expansions = expand_glob_reexports(
+    // Replace each with either individual `pub use` lines (default) or
+    // full inlined definitions (--expand-glob).
+    let result = expand_glob_reexports(
         &model,
         resolved.module_path.as_deref(),
         &args.toolchain,
@@ -76,8 +86,19 @@ pub fn run_pipeline(args: &BriefArgs) -> Result<String> {
         &metadata.target_dir,
     );
 
-    if !glob_expansions.is_empty() {
-        for (source, items) in &glob_expansions {
+    if args.expand_glob && !result.source_models.is_empty() {
+        // Phase 2: inline full definitions from source crates
+        let mut seen_names = HashSet::new();
+        for (source, source_model) in &result.source_models {
+            let rendered = render::render_inlined_items(source_model, args, &mut seen_names);
+            let glob_line = format!("pub use {source}::*;\n");
+            if let Some(pos) = output.find(&glob_line) {
+                output.replace_range(pos..pos + glob_line.len(), &rendered);
+            }
+        }
+    } else if !result.item_names.is_empty() {
+        // Phase 1: individual pub use lines
+        for (source, items) in &result.item_names {
             let glob_line = format!("pub use {source}::*;\n");
             if let Some(pos) = output.find(&glob_line) {
                 let mut replacement = String::new();
@@ -95,14 +116,15 @@ pub fn run_pipeline(args: &BriefArgs) -> Result<String> {
 /// Detect glob re-exports in the target module and expand each by generating
 /// rustdoc JSON for the source crate and enumerating its public items.
 ///
-/// Returns a map from source crate name to sorted list of public item names.
+/// Returns both item names (for Phase 1 `pub use` lines) and source models
+/// (for Phase 2 full definition inlining).
 fn expand_glob_reexports(
     model: &CrateModel,
     target_module_path: Option<&str>,
     toolchain: &str,
     manifest_path: Option<&str>,
     target_dir: &Path,
-) -> HashMap<String, Vec<String>> {
+) -> GlobExpansionResult {
     let target_item = if let Some(path) = target_module_path {
         model.find_module(path)
     } else {
@@ -110,10 +132,14 @@ fn expand_glob_reexports(
     };
 
     let Some(target_item) = target_item else {
-        return HashMap::new();
+        return GlobExpansionResult {
+            item_names: HashMap::new(),
+            source_models: HashMap::new(),
+        };
     };
 
-    let mut expansions = HashMap::new();
+    let mut item_names = HashMap::new();
+    let mut source_models = HashMap::new();
 
     for (_id, child) in model.module_children(target_item) {
         let ItemEnum::Use(use_item) = &child.inner else {
@@ -163,8 +189,12 @@ fn expand_glob_reexports(
 
         items.sort();
         items.dedup();
-        expansions.insert(source.clone(), items);
+        item_names.insert(source.clone(), items);
+        source_models.insert(source.clone(), source_model);
     }
 
-    expansions
+    GlobExpansionResult {
+        item_names,
+        source_models,
+    }
 }
