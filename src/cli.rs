@@ -91,6 +91,10 @@ pub struct BriefArgs {
     #[arg(long)]
     pub no_macros: bool,
 
+    /// Fetch a crate from crates.io (e.g., serde, tokio@1, quinn@0.11.0)
+    #[arg(long, value_name = "SPEC")]
+    pub crates: Option<String>,
+
     /// Nightly toolchain name
     #[arg(long, default_value = "nightly")]
     pub toolchain: String,

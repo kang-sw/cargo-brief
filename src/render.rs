@@ -460,6 +460,11 @@ fn render_module_contents(
                 } else if let Some(target_id) = &use_item.id {
                     if let Some(target_item) = model.krate.index.get(target_id) {
                         render_use(child, use_item, target_item, &child_indent, output);
+                    } else {
+                        // Target is in an external crate (not in this index).
+                        // Render as a simple `pub use source::Name;` line.
+                        let vis = format_visibility(&child.visibility);
+                        output.push_str(&format!("{child_indent}{vis}use {};\n", use_item.source));
                     }
                 }
             }

@@ -1,5 +1,6 @@
 pub mod cli;
 pub mod model;
+pub mod remote;
 pub mod render;
 pub mod resolve;
 pub mod rustdoc_json;
@@ -24,6 +25,10 @@ struct GlobExpansionResult {
 
 /// Run the cargo-brief pipeline and return the rendered output string.
 pub fn run_pipeline(args: &BriefArgs) -> Result<String> {
+    if let Some(spec) = &args.crates {
+        return run_remote_pipeline(args, spec);
+    }
+
     // Step 0: Load cargo metadata and resolve target
     let metadata = resolve::load_cargo_metadata(args.manifest_path.as_deref())
         .context("Failed to load cargo metadata")?;
@@ -86,6 +91,58 @@ pub fn run_pipeline(args: &BriefArgs) -> Result<String> {
         &metadata.target_dir,
     );
 
+    apply_glob_expansions(&mut output, &result, args);
+
+    Ok(output)
+}
+
+/// Run the pipeline for a remote crate fetched via a temp workspace.
+fn run_remote_pipeline(args: &BriefArgs, spec: &str) -> Result<String> {
+    let (name, version_req) = remote::parse_crate_spec(spec);
+    let tmp = remote::create_temp_workspace(&name, &version_req)
+        .with_context(|| format!("Failed to create temp workspace for '{name}'"))?;
+
+    let tmp_manifest = tmp.path().join("Cargo.toml");
+    let tmp_manifest_str = tmp_manifest.to_string_lossy();
+
+    let metadata = resolve::load_cargo_metadata(Some(&tmp_manifest_str))
+        .context("Failed to load cargo metadata for remote crate")?;
+
+    let json_path = rustdoc_json::generate_rustdoc_json(
+        &name,
+        &args.toolchain,
+        Some(&tmp_manifest_str),
+        false, // external crate = pub only
+        &metadata.target_dir,
+    )
+    .with_context(|| format!("Failed to generate rustdoc JSON for remote crate '{name}'"))?;
+
+    let krate = rustdoc_json::parse_rustdoc_json(&json_path)?;
+    let model = CrateModel::from_crate(krate);
+
+    let mut output = render::render_module_api(
+        &model,
+        args.module_path.as_deref(),
+        args,
+        None,  // no observer module
+        false, // always cross-crate
+    );
+
+    let result = expand_glob_reexports(
+        &model,
+        args.module_path.as_deref(),
+        &args.toolchain,
+        Some(&tmp_manifest_str),
+        &metadata.target_dir,
+    );
+
+    apply_glob_expansions(&mut output, &result, args);
+
+    Ok(output)
+}
+
+/// Apply glob expansion results to the rendered output.
+fn apply_glob_expansions(output: &mut String, result: &GlobExpansionResult, args: &BriefArgs) {
     if args.expand_glob && !result.source_models.is_empty() {
         // Phase 2: inline full definitions from source crates
         let mut seen_names = HashSet::new();
@@ -109,8 +166,6 @@ pub fn run_pipeline(args: &BriefArgs) -> Result<String> {
             }
         }
     }
-
-    Ok(output)
 }
 
 /// Detect glob re-exports in the target module and expand each by generating
