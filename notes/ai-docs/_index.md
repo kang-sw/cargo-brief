@@ -150,3 +150,4 @@ Detailed module-level documentation in `notes/ai-docs/mental-model/`:
 
 - `tickets/done/260308-visibility-and-rendering.md` — same_crate auto-detection, resolution priority, rendering fixes (completed v0.2.0)
 - `tickets/todo/260310-remote-crate-support.md` — `--crates` flag for crates.io crates without local dependency
+- `tickets/todo/260314-glob-reexport-expansion.md` — expand glob re-exports (`pub use other::*`) for facade crates like `clap`
