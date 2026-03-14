@@ -236,8 +236,12 @@ fn render_module_contents(
                 );
             }
             ItemEnum::Use(use_item) => {
-                // Render re-exports
-                if let Some(target_id) = &use_item.id {
+                if use_item.is_glob {
+                    // Glob re-exports: render as `pub use source::*;`
+                    // (run_pipeline may replace this with expanded individual items)
+                    let vis = format_visibility(&child.visibility);
+                    output.push_str(&format!("{child_indent}{vis}use {}::*;\n", use_item.source));
+                } else if let Some(target_id) = &use_item.id {
                     if let Some(target_item) = model.krate.index.get(target_id) {
                         render_use(child, use_item, target_item, &child_indent, output);
                     }

@@ -4,7 +4,11 @@ pub mod render;
 pub mod resolve;
 pub mod rustdoc_json;
 
+use std::collections::HashMap;
+use std::path::Path;
+
 use anyhow::{Context, Result};
+use rustdoc_types::{ItemEnum, Visibility};
 
 use cli::BriefArgs;
 use model::CrateModel;
@@ -53,7 +57,7 @@ pub fn run_pipeline(args: &BriefArgs) -> Result<String> {
     };
 
     // Step 5: Render
-    let output = render::render_module_api(
+    let mut output = render::render_module_api(
         &model,
         resolved.module_path.as_deref(),
         args,
@@ -61,5 +65,106 @@ pub fn run_pipeline(args: &BriefArgs) -> Result<String> {
         same_crate,
     );
 
+    // Step 6: Expand glob re-exports
+    // The renderer outputs `pub use source::*;` for glob re-exports.
+    // Replace each with individual `pub use source::Name;` lines.
+    let glob_expansions = expand_glob_reexports(
+        &model,
+        resolved.module_path.as_deref(),
+        &args.toolchain,
+        args.manifest_path.as_deref(),
+        &metadata.target_dir,
+    );
+
+    if !glob_expansions.is_empty() {
+        for (source, items) in &glob_expansions {
+            let glob_line = format!("pub use {source}::*;\n");
+            if let Some(pos) = output.find(&glob_line) {
+                let mut replacement = String::new();
+                for name in items {
+                    replacement.push_str(&format!("pub use {source}::{name};\n"));
+                }
+                output.replace_range(pos..pos + glob_line.len(), &replacement);
+            }
+        }
+    }
+
     Ok(output)
+}
+
+/// Detect glob re-exports in the target module and expand each by generating
+/// rustdoc JSON for the source crate and enumerating its public items.
+///
+/// Returns a map from source crate name to sorted list of public item names.
+fn expand_glob_reexports(
+    model: &CrateModel,
+    target_module_path: Option<&str>,
+    toolchain: &str,
+    manifest_path: Option<&str>,
+    target_dir: &Path,
+) -> HashMap<String, Vec<String>> {
+    let target_item = if let Some(path) = target_module_path {
+        model.find_module(path)
+    } else {
+        model.root_module()
+    };
+
+    let Some(target_item) = target_item else {
+        return HashMap::new();
+    };
+
+    let mut expansions = HashMap::new();
+
+    for (_id, child) in model.module_children(target_item) {
+        let ItemEnum::Use(use_item) = &child.inner else {
+            continue;
+        };
+        if !use_item.is_glob {
+            continue;
+        }
+
+        let source = &use_item.source;
+
+        // Generate JSON for the source crate (pub items only, no private items)
+        let Ok(json_path) = rustdoc_json::generate_rustdoc_json(
+            source,
+            toolchain,
+            manifest_path,
+            false,
+            target_dir,
+        ) else {
+            continue;
+        };
+        let Ok(source_krate) = rustdoc_json::parse_rustdoc_json(&json_path) else {
+            continue;
+        };
+
+        let source_model = CrateModel::from_crate(source_krate);
+        let Some(root) = source_model.root_module() else {
+            continue;
+        };
+
+        let mut items: Vec<String> = source_model
+            .module_children(root)
+            .iter()
+            .filter(|(_, item)| matches!(item.visibility, Visibility::Public))
+            .filter(|(_, item)| !matches!(item.inner, ItemEnum::Module(_)))
+            .filter_map(|(_, item)| {
+                // Use items store their name in inner.use.name, not item.name
+                item.name.clone().or_else(|| {
+                    if let ItemEnum::Use(u) = &item.inner {
+                        Some(u.name.clone())
+                    } else {
+                        None
+                    }
+                })
+            })
+            .collect();
+
+        items.sort();
+        items.dedup();
+        expansions.insert(source.clone(), items);
+    }
+
+    expansions
 }
