@@ -55,7 +55,10 @@ pub fn generate_rustdoc_json(
     }
 
     // Find the generated JSON file in the target directory
-    let json_name = crate_name.replace('-', "_");
+    // Strip `@version` suffix — cargo uses it for disambiguation but the output file
+    // is always named by the bare crate name.
+    let base_name = crate_name.split('@').next().unwrap_or(crate_name);
+    let json_name = base_name.replace('-', "_");
     let json_path = target_dir.join("doc").join(format!("{json_name}.json"));
 
     if !json_path.exists() {

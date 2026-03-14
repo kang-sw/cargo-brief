@@ -373,6 +373,26 @@ fn app_has_correct_crate_header() {
 }
 
 // ============================================================
+// Versioned package specifier (pkg@version)
+// ============================================================
+
+#[test]
+fn core_lib_versioned_specifier() {
+    let args = workspace_args("core-lib@0.1.0");
+    let output = run_pipeline(&args).unwrap();
+
+    assert!(
+        output.starts_with("// crate core_lib\n"),
+        "crate header with versioned specifier: got first line = {:?}",
+        output.lines().next()
+    );
+    assert!(
+        output.contains("pub struct Config"),
+        "Config visible with versioned specifier"
+    );
+}
+
+// ============================================================
 // Trait impl rendering
 // ============================================================
 

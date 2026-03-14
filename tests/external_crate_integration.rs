@@ -331,6 +331,27 @@ fn either_method_doc_comments() {
 }
 
 // ============================================================
+// Versioned package specifier (pkg@version)
+// ============================================================
+
+#[test]
+fn either_versioned_specifier() {
+    let mut args = either_args();
+    args.crate_name = "either@1.15.0".to_string();
+    let output = run_pipeline(&args).unwrap();
+
+    assert!(
+        output.starts_with("// crate either\n"),
+        "crate header with versioned specifier: got first line = {:?}",
+        output.lines().next()
+    );
+    assert!(
+        output.contains("pub enum Either<L, R>"),
+        "Either enum with versioned specifier"
+    );
+}
+
+// ============================================================
 // Specialized impls (Option/Result factoring)
 // ============================================================
 
