@@ -13,7 +13,7 @@ pub fn generate_rustdoc_json(
 ) -> Result<PathBuf> {
     let mut cmd = Command::new("cargo");
     cmd.arg(format!("+{toolchain}"));
-    cmd.args(["rustdoc", "-p", crate_name]);
+    cmd.args(["rustdoc", "-p", crate_name, "--lib"]);
 
     if let Some(manifest) = manifest_path {
         cmd.args(["--manifest-path", manifest]);
