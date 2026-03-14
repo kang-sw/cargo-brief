@@ -103,6 +103,10 @@ pub struct BriefArgs {
     #[arg(long)]
     pub expand_glob: bool,
 
+    /// Skip cache and use a temporary workspace (for --crates)
+    #[arg(long)]
+    pub no_cache: bool,
+
     /// Path to Cargo.toml
     #[arg(long)]
     pub manifest_path: Option<String>,

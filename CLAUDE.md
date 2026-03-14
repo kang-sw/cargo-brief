@@ -154,6 +154,7 @@ alternatives considered, and trade-offs — focus on _why_ this approach was cho
 
 <!-- Max 3 items. What was done, what's next. -->
 
+- v0.2.2+: `--no-cache` flag + workspace caching for `--crates` (persistent at `~/.cache/cargo-brief/crates/`)
 - v0.2.2+: `--crates` flag for fetching crates from crates.io; optional TARGET defaults to `self`
 - v0.2.2: `--expand-glob` flag — Phase 2 glob expansion inlines full definitions from source crates
 - v0.2.0: same_crate auto-detection, bare name always resolves as package

@@ -96,22 +96,25 @@ pub fn run_pipeline(args: &BriefArgs) -> Result<String> {
     Ok(output)
 }
 
-/// Run the pipeline for a remote crate fetched via a temp workspace.
+/// Run the pipeline for a remote crate fetched via a cached or temp workspace.
 fn run_remote_pipeline(args: &BriefArgs, spec: &str) -> Result<String> {
-    let (name, version_req) = remote::parse_crate_spec(spec);
-    let tmp = remote::create_temp_workspace(&name, &version_req)
-        .with_context(|| format!("Failed to create temp workspace for '{name}'"))?;
+    let (name, _) = remote::parse_crate_spec(spec);
+    let workspace = remote::resolve_workspace(spec, args.no_cache)
+        .with_context(|| format!("Failed to create workspace for '{name}'"))?;
 
-    let tmp_manifest = tmp.path().join("Cargo.toml");
-    let tmp_manifest_str = tmp_manifest.to_string_lossy();
+    let manifest_path = workspace
+        .path()
+        .join("Cargo.toml")
+        .to_string_lossy()
+        .into_owned();
 
-    let metadata = resolve::load_cargo_metadata(Some(&tmp_manifest_str))
+    let metadata = resolve::load_cargo_metadata(Some(&manifest_path))
         .context("Failed to load cargo metadata for remote crate")?;
 
     let json_path = rustdoc_json::generate_rustdoc_json(
         &name,
         &args.toolchain,
-        Some(&tmp_manifest_str),
+        Some(&manifest_path),
         false, // external crate = pub only
         &metadata.target_dir,
     )
@@ -132,7 +135,7 @@ fn run_remote_pipeline(args: &BriefArgs, spec: &str) -> Result<String> {
         &model,
         args.module_path.as_deref(),
         &args.toolchain,
-        Some(&tmp_manifest_str),
+        Some(&manifest_path),
         &metadata.target_dir,
     );
 
