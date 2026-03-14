@@ -121,17 +121,16 @@ Parsed via `rustdoc-types` 0.57. Post-macro-expansion output.
 
 ## Mental Model Documents
 
-Detailed module-level documentation in `notes/ai-docs/mental-model/`:
+Domain-oriented operational knowledge in `notes/ai-docs/mental-model/`:
 
-| Document | Covers |
+| Document | Domain |
 |----------|--------|
-| `index.md` | Project overview, pipeline diagram, module map, dependency flow |
-| `cli.md` | `BriefArgs`, `Cargo`/`CargoCommand`, dual invocation modes |
-| `resolve.md` | `CargoMetadataInfo`, `ResolvedTarget`, 4-case resolution algorithm |
-| `rustdoc_json.md` | Subprocess invocation, JSON parsing, error detection patterns |
-| `model.md` | `CrateModel`, module indexing, `is_visible_from()` visibility rules |
-| `render.md` | Recursive renderer, item-specific formatters, type formatting, output conventions |
-| `testing.md` | Integration test organization, test fixture coverage |
+| `overview.md` | Pipeline paths (local/remote), module graph, shared coupling patterns |
+| `visibility.md` | Visibility resolution: `is_visible_from`, `same_crate` inference, observer normalization |
+| `target-resolution.md` | CLI → package/module resolution: 4-case algorithm, dual invocation, `--crates` bypass |
+| `remote-pipeline.md` | `--crates` lifecycle: TempDir borrow chain, version semantics, remote-only constraints |
+| `glob-expansion.md` | Glob re-export expansion: string-based detection, Phase 1/2 inlining, coupling with render |
+| `testing.md` | Test infrastructure: BriefArgs coupling, fixture contracts, visibility test patterns |
 
 ---
 
