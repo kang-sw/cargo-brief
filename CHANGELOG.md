@@ -2,6 +2,16 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.2.2] - 2026-03-14
+
+### Added
+
+- **Facade crate support**: crates that use `pub use other_crate::*` (like `clap`) now show expanded individual `pub use` items instead of empty output. The source crate's public API is enumerated automatically.
+
+### Fixed
+
+- Crates with multiple targets (lib + bin + examples, like `clap`) no longer fail with "extra arguments to rustdoc can only be passed to one target". The `--lib` flag is now always passed to `cargo rustdoc`.
+
 ## [0.2.1] - 2026-03-14
 
 ### Fixed
