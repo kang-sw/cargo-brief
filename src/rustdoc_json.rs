@@ -41,6 +41,38 @@ pub fn generate_rustdoc_json(
                  Install it with: rustup toolchain install {toolchain}"
             );
         }
+        if stderr.contains("is ambiguous") {
+            // Multiple versions of the same crate exist in the dependency tree.
+            // Extract the `pkg@version` suggestions from cargo's stderr.
+            let specs: Vec<&str> = stderr
+                .lines()
+                .filter_map(|l| {
+                    let trimmed = l.trim();
+                    if trimmed.contains('@') && !trimmed.contains(' ') {
+                        Some(trimmed)
+                    } else {
+                        None
+                    }
+                })
+                .collect();
+
+            let suggestion = if specs.is_empty() {
+                format!(
+                    "Multiple versions of '{crate_name}' exist. \
+                     Use `<name>@<version>` to disambiguate (e.g. `{crate_name}@1.0.0`)."
+                )
+            } else {
+                format!(
+                    "Multiple versions of '{crate_name}' exist. \
+                     Specify one of:\n  {}\n\
+                     Example: cargo brief {}",
+                    specs.join("\n  "),
+                    specs[0],
+                )
+            };
+
+            bail!("{suggestion}");
+        }
         if stderr.contains("did not match any packages")
             || stderr.contains("package(s) `")
             || stderr.contains("no packages match")
