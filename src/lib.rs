@@ -151,24 +151,59 @@ fn apply_glob_expansions(output: &mut String, result: &GlobExpansionResult, args
         let mut seen_names = HashSet::new();
         for (source, source_model) in &result.source_models {
             let rendered = render::render_inlined_items(source_model, args, &mut seen_names);
-            let glob_line = format!("pub use {source}::*;\n");
-            if let Some(pos) = output.find(&glob_line) {
-                output.replace_range(pos..pos + glob_line.len(), &rendered);
-            }
+            let pattern = format!("pub use {source}::*;");
+            replace_glob_lines(output, &pattern, &rendered);
         }
     } else if !result.item_names.is_empty() {
         // Phase 1: individual pub use lines
         for (source, items) in &result.item_names {
-            let glob_line = format!("pub use {source}::*;\n");
-            if let Some(pos) = output.find(&glob_line) {
-                let mut replacement = String::new();
-                for name in items {
-                    replacement.push_str(&format!("pub use {source}::{name};\n"));
-                }
-                output.replace_range(pos..pos + glob_line.len(), &replacement);
+            let pattern = format!("pub use {source}::*;");
+            let mut replacement = String::new();
+            for name in items {
+                replacement.push_str(&format!("pub use {source}::{name};\n"));
             }
+            replace_glob_lines(output, &pattern, &replacement);
         }
     }
+}
+
+/// Find and replace all lines whose normalized content matches `pattern`.
+///
+/// Normalization: trim whitespace, collapse multiple spaces.
+/// Replacement lines inherit the original line's indentation.
+fn replace_glob_lines(output: &mut String, pattern: &str, replacement: &str) {
+    loop {
+        let Some((start, end, indent)) = find_normalized_line(output, pattern) else {
+            break;
+        };
+        let indented: String = replacement
+            .lines()
+            .map(|l| {
+                if l.is_empty() {
+                    "\n".to_string()
+                } else {
+                    format!("{indent}{l}\n")
+                }
+            })
+            .collect();
+        output.replace_range(start..end, &indented);
+    }
+}
+
+/// Find the first line in `text` whose trimmed, space-collapsed content equals `pattern`.
+/// Returns `(start_byte, end_byte, indent_str)`.
+fn find_normalized_line(text: &str, pattern: &str) -> Option<(usize, usize, String)> {
+    let mut start = 0;
+    for line in text.split('\n') {
+        let end = start + line.len() + 1; // +1 for '\n'
+        let normalized: String = line.split_whitespace().collect::<Vec<_>>().join(" ");
+        if normalized == pattern {
+            let indent = &line[..line.len() - line.trim_start().len()];
+            return Some((start, end.min(text.len()), indent.to_string()));
+        }
+        start = end;
+    }
+    None
 }
 
 /// Detect glob re-exports in the target module and expand each by generating
