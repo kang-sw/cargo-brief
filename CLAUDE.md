@@ -154,9 +154,9 @@ alternatives considered, and trade-offs — focus on _why_ this approach was cho
 
 <!-- Max 3 items. What was done, what's next. -->
 
+- v0.2.2+: `--crates` flag for fetching crates from crates.io; optional TARGET defaults to `self`
 - v0.2.2: `--expand-glob` flag — Phase 2 glob expansion inlines full definitions from source crates
 - v0.2.0: same_crate auto-detection, bare name always resolves as package
-- v0.1.2: `{ .. }` for trait impl rendering, visibility-filtered field indicators
 
 ## Workspace Reference
 
@@ -164,7 +164,7 @@ alternatives considered, and trade-offs — focus on _why_ this approach was cho
 
 - Crate name: `cargo-brief` (binary: `cargo-brief`, lib: `cargo_brief`)
 - Entry: `src/lib.rs` → `run_pipeline()`, `src/main.rs` → CLI
-- Modules: `cli`, `resolve`, `rustdoc_json`, `model`, `render`
+- Modules: `cli`, `remote`, `resolve`, `rustdoc_json`, `model`, `render`
 - Test fixture: `test_fixture/` (sample crate with all item types)
 - Integration tests: `tests/integration.rs`
 

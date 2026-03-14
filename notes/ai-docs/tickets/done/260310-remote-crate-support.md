@@ -129,5 +129,30 @@ Run manually: `cargo test -- --ignored`.
 
 - Should `--crates` conflict with `<TARGET>` via clap's `conflicts_with`,
   or silently ignore the positional arg?
+  - **Resolved:** silently ignored (TARGET defaults to "self" harmlessly)
 - Timeout for cargo build in temp workspace? Large crates (e.g., `bevy`)
   may take minutes on first build.
+  - **Deferred:** no timeout implemented; user can Ctrl-C
+
+---
+
+### Result (280c9a2)
+
+**Phase 1 (197f8bf):** Made `<TARGET>` optional with `default_value = "self"`.
+Bare `cargo brief` from a package dir now works like `cargo brief self`.
+Two subprocess tests added.
+
+**Phase 2 (280c9a2):** Implemented `--crates` flag with temp workspace approach.
+- `src/remote.rs`: `parse_crate_spec()` + `create_temp_workspace()` with unit tests
+- `src/lib.rs`: `run_remote_pipeline()` branches early, `apply_glob_expansions()` extracted
+- `src/render.rs`: Fixed rendering of `Use` items with external targets (serde facade fix)
+- `tempfile` added as dependency
+- 6 ignored integration/subprocess tests (network), 5 unit tests
+
+**Deviations from plan:**
+- Test assertions for serde adapted: serde 1.0.228 is now a facade over `serde_core`,
+  so output shows `pub use serde_core::Serialize;` instead of `pub trait Serialize`.
+- `remote_with_module_path` test uses `either` instead of `serde::de` (serde modules
+  are re-exported, not directly available).
+- Added external-target Use item rendering fix (not in original plan) — discovered
+  during serde testing.

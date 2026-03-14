@@ -30,7 +30,8 @@ visibility is always `pub`-only). This makes external dep support architecturall
 ## CLI Interface
 
 ```
-cargo brief <target> [module_path] [OPTIONS]
+cargo brief [target] [module_path] [OPTIONS]
+cargo brief --crates <spec> [module_path] [OPTIONS]
 ```
 
 ### Positional Arguments — Flexible Resolution
@@ -62,6 +63,7 @@ cargo brief <target> [module_path] [OPTIONS]
 | `--no-unions`           | Exclude unions                                                 |
 | `--no-macros`           | Exclude macros                                                 |
 | `--toolchain <name>`    | Nightly toolchain name (default: `nightly`)                    |
+| `--crates <spec>`       | Fetch crate from crates.io (e.g., `serde`, `tokio@1`)          |
 | `--expand-glob`         | Inline full definitions from glob re-export sources            |
 | `--manifest-path <path>`| Path to Cargo.toml                                            |
 
@@ -74,6 +76,7 @@ src/
   lib.rs           — re-exports all modules, run_pipeline() entry point
   main.rs          — CLI arg parsing, calls run_pipeline(), prints output
   cli.rs           — BriefArgs struct (clap derive)
+  remote.rs        — temp workspace creation for --crates (crates.io fetch)
   resolve.rs       — flexible target resolution (self, crate::module, fallback) + cargo metadata
   rustdoc_json.rs  — JSON generation and parsing (accepts target_dir from resolve)
   model.rs         — CrateModel with module index, visibility resolution
@@ -105,13 +108,15 @@ Parsed via `rustdoc-types` 0.57. Post-macro-expansion output.
 
 ---
 
-## Operational State (v0.2.2)
+## Operational State (v0.2.2+)
 
-- Core pipeline complete. All item types supported. 139 tests (unit + CLI smoke + integration + subprocess).
+- Core pipeline complete. All item types supported. 149 tests (unit + CLI smoke + integration + subprocess).
 - Flexible package name resolution: `self`, `crate::module`, file path→module. Bare names always resolve as package.
+- Optional TARGET: `cargo brief` defaults to `self` (current package).
+- Remote crate support: `--crates <spec>` fetches any crate from crates.io via temp workspace.
 - Visibility auto-detection: `same_crate` inferred from cwd package context.
 - Glob re-export expansion: Phase 1 (individual `pub use` lines) + Phase 2 (`--expand-glob` inlines full definitions).
-- Dependencies: `clap` 4, `rustdoc-types` 0.57, `serde_json` 1, `anyhow` 1.
+- Dependencies: `clap` 4, `rustdoc-types` 0.57, `serde_json` 1, `anyhow` 1, `tempfile` 3.
 - Test fixture (`test_fixture/`) covers all supported item types.
 
 ## Mental Model Documents
@@ -151,5 +156,5 @@ Detailed module-level documentation in `notes/ai-docs/mental-model/`:
 ## Active Tickets
 
 - `tickets/done/260308-visibility-and-rendering.md` — same_crate auto-detection, resolution priority, rendering fixes (completed v0.2.0)
-- `tickets/todo/260310-remote-crate-support.md` — `--crates` flag for crates.io crates without local dependency
+- `tickets/done/260310-remote-crate-support.md` — `--crates` flag for crates.io crates + optional TARGET (completed)
 - `tickets/todo/260314-glob-reexport-expansion.md` — expand glob re-exports (`pub use other::*`) for facade crates like `clap`
