@@ -67,6 +67,17 @@ Uses `test_workspace/` (workspace with `core-lib` + `app` + `either` dependency)
 
 - **D.pkg_with_file_path:** `#[ignore = "blocked: file path not resolved relative to package dir when cwd != package dir"]`
 
+## Remote Crate Integration Tests (`tests/remote_crate_integration.rs`)
+
+All 4 tests are `#[ignore = "network: fetches from crates.io"]`. Run with `cargo test -- --ignored`.
+
+Tests exercise `run_pipeline` with `BriefArgs { crates: Some(spec), .. }`:
+- `remote_serde_latest` / `remote_serde_pinned` — check output contains expected trait names
+- `remote_nonexistent` — expects `Err`
+- `remote_with_module_path` — verifies module-not-found error message in output
+
+When constructing `BriefArgs` directly in tests, `crate_name` must be set (e.g., `"self"`) even though it is ignored by the remote pipeline path.
+
 ## Test Fixture (`test_fixture/`)
 
 Single-crate library (`test_fixture/src/lib.rs`, ~151 lines) exercising all supported

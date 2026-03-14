@@ -2,71 +2,25 @@
 
 **File:** `src/cli.rs`
 
-## Public Types
+## Entry Points
 
-### `Cargo`
-```rust
-#[derive(Parser)]
-#[command(name = "cargo", bin_name = "cargo", version)]
-pub struct Cargo {
-    pub command: CargoCommand,  // #[command(subcommand)]
-}
-```
+`src/cli.rs` — `BriefArgs` struct (clap derive). Read `src/main.rs` for dual-invocation dispatch logic.
 
-### `CargoCommand`
-```rust
-#[derive(Subcommand)]
-pub enum CargoCommand {
-    Brief(BriefArgs),
-}
-```
+## Module Contracts
 
-### `BriefArgs`
-Core configuration struct, used throughout the pipeline.
+`cli` guarantees `BriefArgs` is `Clone` and carries all configuration consumed by every pipeline stage. No pipeline function modifies args — they are read-only inputs.
 
-```rust
-#[derive(Parser, Clone)]
-pub struct BriefArgs {
-    // Positional
-    pub crate_name: String,           // TARGET: crate name, "self", crate::module, or file path
-    pub module_path: Option<String>,  // MODULE_PATH: optional module or file path
+## Extension Points & Change Recipes
 
-    // Visibility
-    pub at_package: Option<String>,   // --at-package: caller's package
-    pub at_mod: Option<String>,       // --at-mod: caller's module path
+Adding a new flag to `BriefArgs` requires updating **all** explicit struct constructions in tests (`tests/integration.rs`, `tests/subprocess_integration.rs`, `tests/remote_crate_integration.rs`, `tests/workspace_integration.rs`). Missing a site causes a compile error, not a silent failure — but the list grows with each new test file.
 
-    // Recursion
-    pub depth: u32,                   // --depth (default: 1)
-    pub recursive: bool,             // --recursive (no depth limit)
+## Common Mistakes
 
-    // Item filtering
-    pub all: bool,                   // --all: include blanket/auto-trait impls
-    pub no_structs: bool,
-    pub no_enums: bool,
-    pub no_traits: bool,
-    pub no_functions: bool,
-    pub no_aliases: bool,
-    pub no_constants: bool,          // also hides statics
-    pub no_unions: bool,
-    pub no_macros: bool,
+- `crate_name` defaults to `"self"` — it is an optional positional arg. Constructing `BriefArgs` in tests must set `crate_name: "self".to_string()` (or appropriate value) explicitly; the default only applies via clap at the CLI layer.
+- When `crates: Some(spec)` is set, `crate_name` is **ignored** by `run_pipeline` — the remote pipeline takes over. Setting `crate_name` to anything other than `"self"` in that case has no effect.
+- `--no-constants` also suppresses statics (non-obvious grouping).
 
-    // Build
-    pub toolchain: String,           // --toolchain (default: "nightly")
-    pub manifest_path: Option<String>,
-}
-```
+## Coupling
 
-## Design Notes
-
-- Subtractive filtering: all common items shown by default, `--no-*` to exclude.
-- `--all` adds blanket/auto-trait impls (normally hidden).
-- Statics grouped under `--no-constants`.
-- `BriefArgs` is `Clone` for use in tests and across pipeline stages.
-
-## Dual Invocation (`main.rs`)
-
-`main.rs::parse_args()` handles two modes:
-1. **`cargo brief ...`** — parses `Cargo` struct, extracts `BriefArgs` from `CargoCommand::Brief`
-2. **`cargo-brief ...`** — parses `BriefArgs` directly
-
-Detection: checks if `args[1] == "brief"`.
+- `--crates` triggers `run_remote_pipeline` in `lib.rs` before any local metadata is loaded. The `remote` module owns spec parsing and temp workspace creation.
+- Dual invocation (`main.rs`): `cargo brief ...` parses `Cargo`, extracts `BriefArgs`; `cargo-brief ...` parses `BriefArgs` directly. Detection: `args[1] == "brief"`.

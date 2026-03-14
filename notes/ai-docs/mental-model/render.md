@@ -48,7 +48,7 @@ not found, returns error comment listing available modules.
 | `render_type_alias` | `type Name<G> = Type;` |
 | `render_constant` | `const NAME: Type = value;` |
 | `render_static` | `static [mut] name: Type = expr;` |
-| `render_use` | `use source [as alias];` |
+| `render_use` | `use source [as alias];` — if target ID is absent from the crate index (re-export of an external crate item), falls back to `pub use source::Name;` verbatim |
 | Macro | `macro_rules! name { /* ... */ }` |
 | Function | `[pub] [const] [async] [unsafe] fn name<G>(params) -> Ret;` |
 
