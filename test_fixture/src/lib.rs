@@ -147,4 +147,20 @@ pub mod outer {
     }
 }
 
+// --- Deprecated / Non-exhaustive test items ---
+
+#[deprecated(since = "0.1.0", note = "use new_function instead")]
+pub fn deprecated_function() -> bool {
+    true
+}
+
+#[deprecated = "old struct"]
+pub struct DeprecatedStruct;
+
+#[non_exhaustive]
+pub enum NonExhaustiveEnum {
+    A,
+    B,
+}
+
 pub use outer::PubStruct as ReExported;

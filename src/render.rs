@@ -1,8 +1,9 @@
 use std::collections::HashSet;
 
 use rustdoc_types::{
-    Constant, Enum, Function, GenericArg, GenericArgs, GenericBound, GenericParamDefKind, Id, Item,
-    ItemEnum, Static, Struct, StructKind, Trait, Type, TypeAlias, Union, VariantKind, Visibility,
+    Attribute, Constant, Enum, Function, GenericArg, GenericArgs, GenericBound,
+    GenericParamDefKind, Id, Item, ItemEnum, ReprKind, Static, Struct, StructKind, Trait, Type,
+    TypeAlias, Union, VariantKind, Visibility,
 };
 
 use crate::cli::BriefArgs;
@@ -315,6 +316,7 @@ fn render_module_contents(
     let indent = "    ".repeat(current_depth.saturating_sub(1) as usize);
 
     if current_depth > 0 {
+        render_attrs(module_item, &indent, args.verbose_metadata, output);
         output.push_str(&format!("{indent}mod {} {{\n", last_segment(display_path)));
     }
 
@@ -365,6 +367,7 @@ fn render_module_contents(
                         output,
                     );
                 } else {
+                    render_attrs(child, &child_indent, args.verbose_metadata, output);
                     output.push_str(&format!("{child_indent}mod {name} {{ /* ... */ }}\n"));
                 }
             }
@@ -670,6 +673,7 @@ fn render_item(
     same_crate: bool,
     output: &mut String,
 ) {
+    render_attrs(item, indent, args.verbose_metadata, output);
     render_docs(item, indent, args, output);
     let vis = format_visibility(&item.visibility);
 
@@ -1081,6 +1085,7 @@ fn render_impl_item(item: &Item, indent: &str, args: &BriefArgs) -> Option<Strin
         ItemEnum::Function(f) => {
             let name = item.name.as_deref().unwrap_or("?");
             let vis = format_visibility(&item.visibility);
+            render_attrs(item, indent, args.verbose_metadata, &mut out);
             render_docs(item, indent, args, &mut out);
             let sig = format_function_sig(name, f, &vis);
             out.push_str(&format!("{indent}{sig};\n"));
@@ -1092,6 +1097,7 @@ fn render_impl_item(item: &Item, indent: &str, args: &BriefArgs) -> Option<Strin
             type_,
         } => {
             let name = item.name.as_deref().unwrap_or("?");
+            render_attrs(item, indent, args.verbose_metadata, &mut out);
             if let Some(ty) = type_ {
                 out.push_str(&format!("{indent}type {name} = {};\n", format_type(ty)));
             }
@@ -1099,6 +1105,7 @@ fn render_impl_item(item: &Item, indent: &str, args: &BriefArgs) -> Option<Strin
         }
         ItemEnum::AssocConst { type_, value } => {
             let name = item.name.as_deref().unwrap_or("?");
+            render_attrs(item, indent, args.verbose_metadata, &mut out);
             let val = value.as_deref().unwrap_or("_");
             out.push_str(&format!(
                 "{indent}const {name}: {} = {val};\n",
@@ -1107,6 +1114,82 @@ fn render_impl_item(item: &Item, indent: &str, args: &BriefArgs) -> Option<Strin
             Some(out)
         }
         _ => None,
+    }
+}
+
+fn render_attrs(item: &Item, indent: &str, verbose: bool, output: &mut String) {
+    // Deprecation (always rendered)
+    if let Some(dep) = &item.deprecation {
+        match (&dep.since, &dep.note) {
+            (Some(since), Some(note)) => {
+                output.push_str(&format!(
+                    "{indent}#[deprecated(since = \"{since}\", note = \"{note}\")]\n"
+                ));
+            }
+            (None, Some(note)) => {
+                output.push_str(&format!("{indent}#[deprecated = \"{note}\"]\n"));
+            }
+            (Some(since), None) => {
+                output.push_str(&format!("{indent}#[deprecated(since = \"{since}\")]\n"));
+            }
+            (None, None) => {
+                output.push_str(&format!("{indent}#[deprecated]\n"));
+            }
+        }
+    }
+
+    for attr in &item.attrs {
+        match attr {
+            Attribute::NonExhaustive => {
+                output.push_str(&format!("{indent}#[non_exhaustive]\n"));
+            }
+            Attribute::MustUse { reason } if verbose => {
+                if let Some(reason) = reason {
+                    output.push_str(&format!("{indent}#[must_use = \"{reason}\"]\n"));
+                } else {
+                    output.push_str(&format!("{indent}#[must_use]\n"));
+                }
+            }
+            Attribute::Repr(repr) if verbose => {
+                let kind = match repr.kind {
+                    ReprKind::C => "C",
+                    ReprKind::Transparent => "transparent",
+                    ReprKind::Simd => "simd",
+                    ReprKind::Rust => "Rust",
+                };
+                let mut parts = vec![kind.to_string()];
+                if let Some(align) = repr.align {
+                    parts.push(format!("align({align})"));
+                }
+                if let Some(packed) = repr.packed {
+                    if packed == 1 {
+                        parts.push("packed".to_string());
+                    } else {
+                        parts.push(format!("packed({packed})"));
+                    }
+                }
+                if let Some(int) = &repr.int {
+                    parts.push(int.clone());
+                }
+                output.push_str(&format!("{indent}#[repr({})]\n", parts.join(", ")));
+            }
+            Attribute::NoMangle if verbose => {
+                output.push_str(&format!("{indent}#[no_mangle]\n"));
+            }
+            Attribute::MacroExport if verbose => {
+                output.push_str(&format!("{indent}#[macro_export]\n"));
+            }
+            Attribute::ExportName(name) if verbose => {
+                output.push_str(&format!("{indent}#[export_name = \"{name}\"]\n"));
+            }
+            Attribute::TargetFeature { enable } if verbose => {
+                let features = enable.join(", ");
+                output.push_str(&format!(
+                    "{indent}#[target_feature(enable = \"{features}\")]\n"
+                ));
+            }
+            _ => {} // skip AutomaticallyDerived, Other, and non-verbose attrs
+        }
     }
 }
 

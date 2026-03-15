@@ -36,6 +36,7 @@ fn default_args() -> BriefArgs {
         all: false,
         no_docs: false,
         compact: false,
+        verbose_metadata: false,
         no_structs: false,
         no_enums: false,
         no_traits: false,
@@ -1212,5 +1213,92 @@ fn methods_of_shows_only_methods_and_fields() {
     assert!(
         !output.contains("trait "),
         "should not show traits:\n{output}"
+    );
+}
+
+// === Attribute Rendering Tests ===
+
+#[test]
+fn test_deprecated_function_attr() {
+    let model = fixture_model();
+    let args = default_args();
+    let output = render_full(&model, &args);
+
+    assert!(
+        output.contains("#[deprecated(since = \"0.1.0\", note = \"use new_function instead\")]"),
+        "deprecated function should show full #[deprecated(...)]:\n{output}"
+    );
+}
+
+#[test]
+fn test_deprecated_struct_attr() {
+    let model = fixture_model();
+    let args = default_args();
+    let output = render_full(&model, &args);
+
+    assert!(
+        output.contains("#[deprecated = \"old struct\"]"),
+        "deprecated struct should show #[deprecated = \"...\"]:\n{output}"
+    );
+}
+
+#[test]
+fn test_non_exhaustive_enum_attr() {
+    let model = fixture_model();
+    let args = default_args();
+    let output = render_full(&model, &args);
+
+    assert!(
+        output.contains("#[non_exhaustive]"),
+        "non-exhaustive enum should show #[non_exhaustive]:\n{output}"
+    );
+}
+
+#[test]
+fn test_verbose_metadata_shows_repr() {
+    let model = fixture_model();
+    let mut args = default_args();
+    args.verbose_metadata = true;
+    let output = render_full(&model, &args);
+
+    assert!(
+        output.contains("#[repr(C)]"),
+        "--verbose-metadata should show #[repr(C)] on MyUnion:\n{output}"
+    );
+}
+
+#[test]
+fn test_default_hides_repr() {
+    let model = fixture_model();
+    let args = default_args();
+    let output = render_full(&model, &args);
+
+    assert!(
+        !output.contains("#[repr(C)]"),
+        "default mode should NOT show #[repr(C)]:\n{output}"
+    );
+}
+
+#[test]
+fn test_search_deprecated_marker() {
+    let model = fixture_model();
+    let args = default_args();
+    let output = search::render_search(&model, "deprecated_function", &args, None, true, None);
+
+    assert!(
+        output.contains("[deprecated]"),
+        "search should show [deprecated] marker:\n{output}"
+    );
+}
+
+#[test]
+fn test_search_non_exhaustive_marker() {
+    let model = fixture_model();
+    let args = default_args();
+    let output = search::render_search(&model, "NonExhaustiveEnum", &args, None, true, None);
+
+    assert!(
+        output.contains("[non_exhaustive]"),
+        "search should show [non_exhaustive] marker:\n{output}"
     );
 }

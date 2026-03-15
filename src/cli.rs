@@ -107,6 +107,10 @@ pub struct BriefArgs {
     #[arg(long, help_heading = "Filtering")]
     pub compact: bool,
 
+    /// Show all attributes (#[must_use], #[repr(...)], etc.) — default shows only #[deprecated] and #[non_exhaustive]
+    #[arg(long, help_heading = "Filtering")]
+    pub verbose_metadata: bool,
+
     // === Exclusion flags (default: all common items shown) ===
     /// Exclude structs
     #[arg(long, help_heading = "Filtering")]

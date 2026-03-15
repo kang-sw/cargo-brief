@@ -17,6 +17,7 @@ fn remote_args(spec: &str) -> BriefArgs {
         all: false,
         no_docs: false,
         compact: false,
+        verbose_metadata: false,
         no_structs: false,
         no_enums: false,
         no_traits: false,

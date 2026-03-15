@@ -19,6 +19,7 @@ fn hecs_args() -> BriefArgs {
         all: false,
         no_docs: false,
         compact: false,
+        verbose_metadata: false,
         no_structs: false,
         no_enums: false,
         no_traits: false,

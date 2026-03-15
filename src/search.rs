@@ -6,7 +6,9 @@
 
 use std::collections::HashSet;
 
-use rustdoc_types::{Id, Item, ItemEnum, Struct, StructKind, Type, VariantKind, Visibility};
+use rustdoc_types::{
+    Attribute, Id, Item, ItemEnum, Struct, StructKind, Type, VariantKind, Visibility,
+};
 
 use crate::cli::BriefArgs;
 use crate::model::{CrateModel, is_visible_from};
@@ -582,6 +584,19 @@ fn render_leaf(output: &mut String, model: &CrateModel, leaf: &LeafItem, args: &
         && !first_line.is_empty()
     {
         output.push_str(&format!("/// {first_line}\n"));
+    }
+
+    // Attribute markers for search results (deprecated / non_exhaustive only)
+    if leaf.item.deprecation.is_some() {
+        output.push_str("[deprecated] ");
+    }
+    if leaf
+        .item
+        .attrs
+        .iter()
+        .any(|a| matches!(a, Attribute::NonExhaustive))
+    {
+        output.push_str("[non_exhaustive] ");
     }
 
     match leaf.kind {
