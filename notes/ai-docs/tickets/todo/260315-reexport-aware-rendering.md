@@ -62,8 +62,9 @@ For `same_crate=true` (inspecting own crate), current behavior is correct.
 
 ### Revert Required
 
-Revert the `same_crate=true` workaround in `run_remote_pipeline` (commit
-0cc57d8). Keep `document_private_items=true`.
+Revert the `same_crate=true` workaround in `run_pipeline` (lib.rs) and
+`run_remote_pipeline`. Restore the commented-out `observer_crate` logic.
+Keep `document_private_items=true`.
 
 ## Files to Modify
 
@@ -71,9 +72,28 @@ Revert the `same_crate=true` workaround in `run_remote_pipeline` (commit
 |------|---------|
 | `src/model.rs` or `src/render.rs` | `compute_reachable_set(model) -> HashSet<Id>` |
 | `src/render.rs` | `render_module_contents`: module gate + use inlining |
-| `src/lib.rs` | Revert `same_crate=true`, pass reachable set |
+| `src/lib.rs` | Restore `observer_crate`/`same_crate` logic (currently commented out), pass reachable set |
 | `src/search.rs` | Apply reachable filter to search walker |
 | `tests/` | Regression test with pinned facade crate |
+
+## Post-implementation Checklist
+
+After reachability walk is implemented, **un-ignore** the 12 cross-crate
+visibility tests that were disabled by the `same_crate=true` hotfix:
+
+- `tests/external_crate_integration.rs` (4 tests):
+  `either_into_either_trait`, `either_iter_either_struct`,
+  `either_hides_pub_crate_modules`, `either_depth_zero_still_shows_root_items`
+- `tests/subprocess_integration.rs` (3 tests):
+  `auto_visibility_cross_crate`, `auto_visibility_reverse`,
+  `at_package_cross_crate`
+- `tests/workspace_integration.rs` (5 tests):
+  `core_lib_external_view_hides_pub_crate_items`,
+  `core_lib_external_view_hides_crate_method`,
+  `core_lib_external_view_struct_has_hidden_field_indicator`,
+  `app_external_view`, `core_lib_utils_external_hides_crate_items`
+
+All are tagged `#[ignore = "TODO(260315): restore after reexport-aware reachability walk"]`.
 
 ## Integration Tests
 
