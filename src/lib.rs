@@ -76,15 +76,19 @@ pub fn run_pipeline(args: &BriefArgs) -> Result<String> {
     let model = CrateModel::from_crate(krate);
 
     // Step 4: Determine if observer is in the same crate
-    let observer_crate = args
-        .at_package
-        .as_deref()
-        .or(metadata.current_package.as_deref());
-    let same_crate = match observer_crate {
-        Some(obs) => obs == resolved.package_name || obs.replace('-', "_") == model.crate_name(),
-        // No observer context (virtual workspace root, no --at-package) → cross-crate
-        None => false,
-    };
+    // TODO(260315): restore cross-crate filtering once reexport-aware reachability
+    // walk is implemented. Currently forced to true because cross-crate filtering
+    // hides private modules that contain publicly re-exported items (facade pattern).
+    //
+    // let observer_crate = args
+    //     .at_package
+    //     .as_deref()
+    //     .or(metadata.current_package.as_deref());
+    // let same_crate = match observer_crate {
+    //     Some(obs) => obs == resolved.package_name || obs.replace('-', "_") == model.crate_name(),
+    //     None => false,
+    // };
+    let same_crate = true;
 
     // Step 5: Render (search mode or normal mode)
     if let Some(pattern) = &args.search {
