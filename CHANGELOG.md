@@ -6,9 +6,17 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 
-- **Search result sorting**: results are now ordered by kind (fn → struct → enum → trait → union → field → variant → const → static → type → macro → assoc_type → assoc_const → use), then alphabetically within each kind.
-- **Re-export discovery in search**: `pub use X as Y` re-exports now appear in `--search` results. Glob re-exports are skipped; `--no-*` filters apply based on the target item's kind.
+- **Search mode** (`--search <PATTERN>`): find leaf items by name across the entire crate. Case-insensitive substring matching on full paths (e.g., `world::World::spawn`). Multiple words are AND-matched. Outputs one-line-per-item with kind prefix and full path.
+  - Searches functions, methods, struct fields, enum variants, consts, statics, type aliases, macros, associated types/consts, and container types (struct, enum, trait, union).
+  - Respects visibility filtering (`--at-mod`, same-crate detection) and `--no-*` exclusion flags.
+  - Results sorted by kind (fn → struct → enum → trait → union → field → variant → const → static → type → macro → assoc → use), then alphabetically within each kind.
+  - Re-exports (`pub use X as Y`) are surfaced in search results.
 - `--search-limit` flag to cap search output. Accepts `N` (first N results) or `OFFSET:N` (skip OFFSET, show N) for paging through large result sets.
+- `--features <FEATURES>` flag for `--crates` to enable specific crate features (comma-separated).
+
+### Fixed
+
+- Glob re-export expansion now uses normalized line matching, fixing cases where whitespace differences caused replacement failures.
 
 ## [0.3.0] - 2026-03-14
 
