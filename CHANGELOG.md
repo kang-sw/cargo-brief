@@ -2,6 +2,14 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.3.1] - 2026-03-15
+
+### Added
+
+- **Search result sorting**: results are now ordered by kind (fn → struct → enum → trait → union → field → variant → const → static → type → macro → assoc_type → assoc_const → use), then alphabetically within each kind.
+- **Re-export discovery in search**: `pub use X as Y` re-exports now appear in `--search` results. Glob re-exports are skipped; `--no-*` filters apply based on the target item's kind.
+- `--search-limit` flag to cap search output. Accepts `N` (first N results) or `OFFSET:N` (skip OFFSET, show N) for paging through large result sets.
+
 ## [0.3.0] - 2026-03-14
 
 ### Added
