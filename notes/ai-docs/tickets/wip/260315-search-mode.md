@@ -105,9 +105,24 @@ Files changed: `src/search.rs` (new), `src/lib.rs` (pipeline branch),
 
 ---
 
-## Phase 2: Polish & edge cases (if needed)
+## Phase 2: Polish & edge cases
 
 - Sort results by kind, then alphabetically
 - Limit result count (e.g., `--search-limit 50`) to avoid flooding
 - Handle re-exports (show canonical path vs re-export path)
 - Consider fuzzy matching (edit distance) if substring proves insufficient
+
+### Result (Phase 2 — 2767096)
+
+Implemented three polish items:
+1. **Sorted results**: by `LeafKind` discriminant order
+   (fn→struct→enum→trait→union→field→variant→const→static→type→macro→assoc_type→assoc_const→use),
+   then alphabetically by path within each kind.
+2. **Re-export handling**: `ItemEnum::Use` arm in walker surfaces `pub use X as Y`
+   re-exports as `LeafKind::Use`. Glob re-exports skipped. Target followed for
+   `--no-*` filter compliance.
+3. **`--search-limit <N>`**: caps displayed results, appends
+   `// ... and M more results` truncation message. Default: unlimited.
+
+Files changed: `src/search.rs` (sort + re-export + limit), `src/cli.rs` (`--search-limit`),
+`tests/integration.rs` (5 new tests), 4 other test files (`search_limit: None` field).
