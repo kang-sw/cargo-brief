@@ -143,3 +143,22 @@ available features in the crate header comment.
 2. `cargo clippy` — no new warnings
 3. Manual: `cargo brief --crates serde --compact` — output under 100 lines
 4. Manual: `cargo brief self --search "CrateModel"` — impl summary visible
+
+---
+
+### Result (804cfc7) — Phases 1–4
+
+**Implemented:**
+- `--no-docs`: suppresses all `///` doc comments in both normal and search output
+- `--compact`: implies no_docs, collapses struct fields `{ .. }`, enum variants
+  name-only (one-line if ≤120 chars), traits `{ .. }`, inherent impls `{ .. }`
+- Search impl summary: struct/enum/union search hits show inline `// impl (N methods), impl Trait1` comment
+- `--methods-of <TYPE>`: translates to `--search TYPE` + exclusion flags, showing methods/fields/variants
+
+**Deviations from plan:**
+- `args` threading required `#[allow(clippy::too_many_arguments)]` on `render_item` and `render_struct`
+- Walker modified to always walk struct fields, enum variants, and trait items even when the parent
+  container is excluded by `--no-structs`/`--no-enums`/`--no-traits`, since `--methods-of` needs them
+- `format_path_pub` wrapper added following existing `_pub` pattern
+
+**Phase 5 deferred:** requires cargo metadata changes for feature extraction.

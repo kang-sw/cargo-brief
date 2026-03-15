@@ -154,9 +154,9 @@ alternatives considered, and trade-offs — focus on _why_ this approach was cho
 
 <!-- Max 3 items. What was done, what's next. -->
 
+- v0.3.1+: `--no-docs`, `--compact`, `--methods-of <TYPE>`, search impl summary (LLM output polish Phases 1–4)
 - v0.3.0+: `--search <pattern>` — leaf item search with case-insensitive multi-word AND matching
-- v0.2.2+: `--no-cache` flag + workspace caching for `--crates` (persistent at `~/.cache/cargo-brief/crates/`)
-- v0.2.2+: `--crates` flag for fetching crates from crates.io; optional TARGET defaults to `self`
+- v0.2.2+: `--crates` flag for fetching crates from crates.io; `--no-cache` skips workspace cache
 
 ## Workspace Reference
 
