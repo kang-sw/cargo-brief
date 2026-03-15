@@ -158,7 +158,7 @@ pub fn render_search(
     }
 
     for leaf in &matched[offset..end] {
-        render_leaf(&mut output, model, leaf);
+        render_leaf(&mut output, model, leaf, args);
     }
 
     if skipped_after > 0 {
@@ -216,25 +216,29 @@ fn walk_module<'a>(
                     leaves,
                 );
             }
-            ItemEnum::Struct(s) if !args.no_structs => {
-                // Struct itself is a leaf (name match)
-                leaves.push(LeafItem {
-                    path: child_path.clone(),
-                    item: child,
-                    kind: LeafKind::Struct,
-                    context: LeafContext::None,
-                });
-                // Named struct fields are leaves
+            ItemEnum::Struct(s) => {
+                if !args.no_structs {
+                    // Struct itself is a leaf (name match)
+                    leaves.push(LeafItem {
+                        path: child_path.clone(),
+                        item: child,
+                        kind: LeafKind::Struct,
+                        context: LeafContext::None,
+                    });
+                }
+                // Named struct fields are always walked (needed for --methods-of)
                 walk_struct_fields(model, s, &child_path, observer, same_crate, leaves);
             }
-            ItemEnum::Enum(e) if !args.no_enums => {
-                leaves.push(LeafItem {
-                    path: child_path.clone(),
-                    item: child,
-                    kind: LeafKind::Enum,
-                    context: LeafContext::None,
-                });
-                // Enum variants are leaves
+            ItemEnum::Enum(e) => {
+                if !args.no_enums {
+                    leaves.push(LeafItem {
+                        path: child_path.clone(),
+                        item: child,
+                        kind: LeafKind::Enum,
+                        context: LeafContext::None,
+                    });
+                }
+                // Enum variants are always walked (needed for --methods-of)
                 for variant_id in &e.variants {
                     if let Some(variant_item) = model.krate.index.get(variant_id) {
                         let vname = variant_item.name.as_deref().unwrap_or("?");
@@ -247,14 +251,16 @@ fn walk_module<'a>(
                     }
                 }
             }
-            ItemEnum::Trait(t) if !args.no_traits => {
-                leaves.push(LeafItem {
-                    path: child_path.clone(),
-                    item: child,
-                    kind: LeafKind::Trait,
-                    context: LeafContext::None,
-                });
-                // Trait items are leaves
+            ItemEnum::Trait(t) => {
+                if !args.no_traits {
+                    leaves.push(LeafItem {
+                        path: child_path.clone(),
+                        item: child,
+                        kind: LeafKind::Trait,
+                        context: LeafContext::None,
+                    });
+                }
+                // Trait items are always walked (needed for --methods-of)
                 for item_id in &t.items {
                     if let Some(trait_item) = model.krate.index.get(item_id) {
                         let iname = trait_item.name.as_deref().unwrap_or("?");
@@ -321,14 +327,16 @@ fn walk_module<'a>(
                     context: LeafContext::None,
                 });
             }
-            ItemEnum::Union(u) if !args.no_unions => {
-                leaves.push(LeafItem {
-                    path: child_path.clone(),
-                    item: child,
-                    kind: LeafKind::Union,
-                    context: LeafContext::None,
-                });
-                // Union fields are leaves
+            ItemEnum::Union(u) => {
+                if !args.no_unions {
+                    leaves.push(LeafItem {
+                        path: child_path.clone(),
+                        item: child,
+                        kind: LeafKind::Union,
+                        context: LeafContext::None,
+                    });
+                }
+                // Union fields are always walked (needed for --methods-of)
                 for field_id in &u.fields {
                     if let Some(field_item) = model.krate.index.get(field_id) {
                         if !is_visible_from(model, field_item, field_id, observer, same_crate)
@@ -539,9 +547,11 @@ fn walk_impl_blocks<'a>(
 // === Rendering ===
 
 /// Render a single leaf item as a one-liner.
-fn render_leaf(output: &mut String, model: &CrateModel, leaf: &LeafItem) {
-    // Doc comment: first line only
-    if let Some(docs) = &leaf.item.docs
+fn render_leaf(output: &mut String, model: &CrateModel, leaf: &LeafItem, args: &BriefArgs) {
+    // Doc comment: first line only (suppressed by --no-docs / --compact)
+    if !args.no_docs
+        && !args.compact
+        && let Some(docs) = &leaf.item.docs
         && let Some(first_line) = docs.lines().next()
         && !first_line.is_empty()
     {
@@ -550,15 +560,25 @@ fn render_leaf(output: &mut String, model: &CrateModel, leaf: &LeafItem) {
 
     match leaf.kind {
         LeafKind::Function => render_function_leaf(output, leaf),
-        LeafKind::Struct => render_struct_leaf(output, model, leaf),
+        LeafKind::Struct => render_struct_leaf(output, model, leaf, args),
         LeafKind::Enum => {
-            output.push_str(&format!("enum {};\n", leaf.path));
+            let summary = collect_impl_summary(model, leaf.item, args);
+            if summary.is_empty() {
+                output.push_str(&format!("enum {};\n", leaf.path));
+            } else {
+                output.push_str(&format!("enum {}; {summary}\n", leaf.path));
+            }
         }
         LeafKind::Trait => {
             output.push_str(&format!("trait {};\n", leaf.path));
         }
         LeafKind::Union => {
-            output.push_str(&format!("union {};\n", leaf.path));
+            let summary = collect_impl_summary(model, leaf.item, args);
+            if summary.is_empty() {
+                output.push_str(&format!("union {};\n", leaf.path));
+            } else {
+                output.push_str(&format!("union {}; {summary}\n", leaf.path));
+            }
         }
         LeafKind::Field => render_field_leaf(output, leaf),
         LeafKind::Variant => render_variant_leaf(output, model, leaf),
@@ -583,11 +603,17 @@ fn render_function_leaf(output: &mut String, leaf: &LeafItem) {
     }
 }
 
-fn render_struct_leaf(output: &mut String, model: &CrateModel, leaf: &LeafItem) {
+fn render_struct_leaf(output: &mut String, model: &CrateModel, leaf: &LeafItem, args: &BriefArgs) {
     let ItemEnum::Struct(s) = &leaf.item.inner else {
         return;
     };
     let generics = render::format_generics_pub(&s.generics);
+    let summary = collect_impl_summary(model, leaf.item, args);
+    let suffix = if summary.is_empty() {
+        String::new()
+    } else {
+        format!(" {summary}")
+    };
 
     match &s.kind {
         StructKind::Unit => {
@@ -610,14 +636,17 @@ fn render_struct_leaf(output: &mut String, model: &CrateModel, leaf: &LeafItem) 
                 })
                 .collect();
             output.push_str(&format!(
-                "struct {}{}({});\n",
+                "struct {}{}({});{suffix}\n",
                 leaf.path,
                 generics,
                 field_strs.join(", ")
             ));
         }
         StructKind::Plain { .. } => {
-            output.push_str(&format!("struct {}{} {{ .. }};\n", leaf.path, generics));
+            output.push_str(&format!(
+                "struct {}{} {{ .. }};{suffix}\n",
+                leaf.path, generics
+            ));
         }
     }
 }
@@ -753,4 +782,62 @@ fn render_use_leaf(output: &mut String, leaf: &LeafItem) {
             output.push_str(&format!("use {source} as {name};\n"));
         }
     }
+}
+
+/// Build an inline `// impl (N methods), impl Trait1, impl Trait2` summary for a type.
+fn collect_impl_summary(model: &CrateModel, item: &Item, args: &BriefArgs) -> String {
+    let impls = match &item.inner {
+        ItemEnum::Struct(s) => &s.impls,
+        ItemEnum::Enum(e) => &e.impls,
+        ItemEnum::Union(u) => &u.impls,
+        _ => return String::new(),
+    };
+
+    let mut parts: Vec<String> = Vec::new();
+
+    for impl_id in impls {
+        let Some(impl_item) = model.krate.index.get(impl_id) else {
+            continue;
+        };
+        let ItemEnum::Impl(impl_block) = &impl_item.inner else {
+            continue;
+        };
+
+        if !args.all && (impl_block.is_synthetic || impl_block.blanket_impl.is_some()) {
+            continue;
+        }
+
+        if let Some(trait_) = &impl_block.trait_ {
+            parts.push(format!("impl {}", render::format_path_pub(trait_)));
+        } else {
+            // Inherent impl: count visible methods
+            let method_count = impl_block
+                .items
+                .iter()
+                .filter(|id| {
+                    model
+                        .krate
+                        .index
+                        .get(id)
+                        .map(|i| matches!(i.inner, ItemEnum::Function(_)))
+                        .unwrap_or(false)
+                })
+                .count();
+            if method_count > 0 {
+                parts.push(format!("impl ({method_count} methods)"));
+            }
+        }
+    }
+
+    if parts.is_empty() {
+        return String::new();
+    }
+
+    if parts.len() > 5 {
+        let extra = parts.len() - 5;
+        parts.truncate(5);
+        parts.push(format!("+ {extra} more"));
+    }
+
+    format!("// {}", parts.join(", "))
 }

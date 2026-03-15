@@ -94,6 +94,19 @@ pub struct BriefArgs {
     #[arg(long, value_name = "[OFFSET:]N", help_heading = "Search")]
     pub search_limit: Option<String>,
 
+    /// Show methods/fields of a type (shorthand for --search + exclusion flags)
+    #[arg(long, value_name = "TYPE", help_heading = "Search")]
+    pub methods_of: Option<String>,
+
+    // === Output density flags ===
+    /// Suppress doc comments from output
+    #[arg(long, help_heading = "Filtering")]
+    pub no_docs: bool,
+
+    /// Compact output: suppress doc comments, collapse struct fields, enum variants, and trait items
+    #[arg(long, help_heading = "Filtering")]
+    pub compact: bool,
+
     // === Exclusion flags (default: all common items shown) ===
     /// Exclude structs
     #[arg(long, help_heading = "Filtering")]

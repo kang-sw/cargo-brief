@@ -34,6 +34,8 @@ fn default_args() -> BriefArgs {
         depth: 1,
         recursive: true,
         all: false,
+        no_docs: false,
+        compact: false,
         no_structs: false,
         no_enums: false,
         no_traits: false,
@@ -46,6 +48,7 @@ fn default_args() -> BriefArgs {
         expand_glob: false,
         search: None,
         search_limit: None,
+        methods_of: None,
         features: None,
         no_cache: false,
         toolchain: "nightly".to_string(),
@@ -1035,4 +1038,179 @@ fn search_limit_paging() {
             2 + i
         );
     }
+}
+
+// === --no-docs Tests ===
+
+#[test]
+fn no_docs_suppresses_doc_comments() {
+    let model = fixture_model();
+    let mut args = default_args();
+    args.no_docs = true;
+    let output = render_full(&model, &args);
+
+    assert!(
+        !output.contains("///"),
+        "--no-docs should suppress all doc comments:\n{output}"
+    );
+    // Items themselves should still be present
+    assert!(
+        output.contains("pub struct PubStruct"),
+        "PubStruct should still appear with --no-docs"
+    );
+}
+
+#[test]
+fn no_docs_search_suppresses_doc_comments() {
+    let model = fixture_model();
+    let mut args = default_args();
+    args.no_docs = true;
+    let output = search::render_search(&model, "free_function", &args, None, true);
+
+    assert!(
+        !output.contains("///"),
+        "--no-docs should suppress doc comments in search:\n{output}"
+    );
+    assert!(
+        output.contains("fn outer::free_function"),
+        "function should still appear:\n{output}"
+    );
+}
+
+// === --compact Tests ===
+
+#[test]
+fn compact_struct_collapsed() {
+    let model = fixture_model();
+    let mut args = default_args();
+    args.compact = true;
+    let output = render_full(&model, &args);
+
+    assert!(
+        output.contains("pub struct PubStruct { .. }"),
+        "compact should collapse struct fields:\n{output}"
+    );
+    assert!(
+        !output.contains("pub_field: i32"),
+        "compact should hide field details:\n{output}"
+    );
+}
+
+#[test]
+fn compact_enum_variants_name_only() {
+    let model = fixture_model();
+    let mut args = default_args();
+    args.compact = true;
+    let output = render_full(&model, &args);
+
+    // PlainEnum should have all variants on one line
+    assert!(
+        output.contains("Alpha, Beta, Gamma"),
+        "compact enum should show variant names:\n{output}"
+    );
+}
+
+#[test]
+fn compact_trait_collapsed() {
+    let model = fixture_model();
+    let mut args = default_args();
+    args.compact = true;
+    let output = render_full(&model, &args);
+
+    assert!(
+        output.contains("pub trait MyTrait { .. }"),
+        "compact should collapse trait:\n{output}"
+    );
+    assert!(
+        !output.contains("fn do_thing"),
+        "compact should hide trait methods:\n{output}"
+    );
+}
+
+#[test]
+fn compact_impl_collapsed() {
+    let model = fixture_model();
+    let mut args = default_args();
+    args.compact = true;
+    let output = render_full(&model, &args);
+
+    assert!(
+        output.contains("impl PubStruct { .. }"),
+        "compact should collapse inherent impl:\n{output}"
+    );
+    assert!(
+        !output.contains("pub fn pub_method"),
+        "compact should hide impl methods:\n{output}"
+    );
+}
+
+#[test]
+fn compact_suppresses_docs() {
+    let model = fixture_model();
+    let mut args = default_args();
+    args.compact = true;
+    let output = render_full(&model, &args);
+
+    assert!(
+        !output.contains("///"),
+        "compact implies no_docs:\n{output}"
+    );
+}
+
+// === Search Impl Summary Tests ===
+
+#[test]
+fn search_struct_shows_impl_summary() {
+    let model = fixture_model();
+    let args = default_args();
+    let output = search::render_search(&model, "PubStruct", &args, None, true);
+
+    assert!(
+        output.contains("// impl"),
+        "search should show impl summary for struct:\n{output}"
+    );
+}
+
+// === --methods-of Tests ===
+
+#[test]
+fn methods_of_shows_only_methods_and_fields() {
+    let model = fixture_model();
+    let mut args = default_args();
+    args.methods_of = Some("PubStruct".to_string());
+    // Simulate what run_pipeline does: translate methods_of into search + exclusion flags
+    args.search = Some("PubStruct".to_string());
+    args.no_structs = true;
+    args.no_enums = true;
+    args.no_traits = true;
+    args.no_unions = true;
+    args.no_constants = true;
+    args.no_macros = true;
+    args.no_aliases = true;
+    let output = search::render_search(&model, "PubStruct", &args, None, true);
+
+    // Should contain methods
+    assert!(
+        output.contains("fn outer::PubStruct::pub_method"),
+        "should show methods:\n{output}"
+    );
+    // Should contain fields
+    assert!(
+        output.contains("field outer::PubStruct::pub_field"),
+        "should show fields:\n{output}"
+    );
+    // Should NOT contain the struct definition itself
+    assert!(
+        !output.contains("struct outer::PubStruct"),
+        "should not show struct definition:\n{output}"
+    );
+    // Should NOT contain enums or traits
+    assert!(
+        !output.contains("enum "),
+        "should not show enums:\n{output}"
+    );
+    assert!(
+        !output.contains("trait "),
+        "should not show traits:\n{output}"
+    );
 }

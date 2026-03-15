@@ -133,6 +133,7 @@ pub fn render_inlined_items(
                         target_item,
                         target_id,
                         "",
+                        args,
                         &observer,
                         false,
                         &mut output,
@@ -150,6 +151,7 @@ pub fn render_inlined_items(
                 child,
                 child_id,
                 "",
+                args,
                 &observer,
                 false,
                 &mut output,
@@ -230,7 +232,7 @@ fn render_inlined_impl_blocks(
                 }
             }
 
-            render_docs(impl_item, "", output);
+            render_docs(impl_item, "", args, output);
             if assoc_items.is_empty() {
                 output.push_str(&format!("{impl_header} {{ .. }}\n"));
             } else {
@@ -244,6 +246,12 @@ fn render_inlined_impl_blocks(
                 output.push_str("}\n");
             }
         } else {
+            if args.compact {
+                render_docs(impl_item, "", args, output);
+                output.push_str(&format!("{impl_header} {{ .. }}\n"));
+                continue;
+            }
+
             let mut rendered_items = Vec::new();
 
             for item_id in &impl_block.items {
@@ -260,7 +268,7 @@ fn render_inlined_impl_blocks(
             }
 
             if !rendered_items.is_empty() {
-                render_docs(impl_item, "", output);
+                render_docs(impl_item, "", args, output);
                 output.push_str(&format!("{impl_header} {{\n"));
                 for item_str in &rendered_items {
                     output.push_str(item_str);
@@ -358,6 +366,7 @@ fn render_module_contents(
                     child,
                     child_id,
                     &child_indent,
+                    args,
                     observer,
                     same_crate,
                     output,
@@ -369,6 +378,7 @@ fn render_module_contents(
                     child,
                     child_id,
                     &child_indent,
+                    args,
                     observer,
                     same_crate,
                     output,
@@ -380,6 +390,7 @@ fn render_module_contents(
                     child,
                     child_id,
                     &child_indent,
+                    args,
                     observer,
                     same_crate,
                     output,
@@ -391,6 +402,7 @@ fn render_module_contents(
                     child,
                     child_id,
                     &child_indent,
+                    args,
                     observer,
                     same_crate,
                     output,
@@ -402,6 +414,7 @@ fn render_module_contents(
                     child,
                     child_id,
                     &child_indent,
+                    args,
                     observer,
                     same_crate,
                     output,
@@ -413,6 +426,7 @@ fn render_module_contents(
                     child,
                     child_id,
                     &child_indent,
+                    args,
                     observer,
                     same_crate,
                     output,
@@ -424,6 +438,7 @@ fn render_module_contents(
                     child,
                     child_id,
                     &child_indent,
+                    args,
                     observer,
                     same_crate,
                     output,
@@ -435,6 +450,7 @@ fn render_module_contents(
                     child,
                     child_id,
                     &child_indent,
+                    args,
                     observer,
                     same_crate,
                     output,
@@ -446,6 +462,7 @@ fn render_module_contents(
                     child,
                     child_id,
                     &child_indent,
+                    args,
                     observer,
                     same_crate,
                     output,
@@ -574,7 +591,7 @@ fn render_impl_blocks(
                 }
             }
 
-            render_docs(impl_item, &child_indent, output);
+            render_docs(impl_item, &child_indent, args, output);
             if assoc_items.is_empty() {
                 // No associated types/constants → one-liner
                 output.push_str(&format!("{impl_header} {{ .. }}\n"));
@@ -590,6 +607,13 @@ fn render_impl_blocks(
                 output.push_str(&format!("{child_indent}}}\n"));
             }
         } else {
+            // Compact: collapse inherent impls to `impl Type { .. }`
+            if args.compact {
+                render_docs(impl_item, &child_indent, args, output);
+                output.push_str(&format!("{impl_header} {{ .. }}\n"));
+                continue;
+            }
+
             // Inherent impls: show all visible items (methods, types, constants)
             let mut rendered_items = Vec::new();
             let inner_indent = format!("{child_indent}    ");
@@ -609,7 +633,7 @@ fn render_impl_blocks(
             }
 
             if !rendered_items.is_empty() {
-                render_docs(impl_item, &child_indent, output);
+                render_docs(impl_item, &child_indent, args, output);
                 output.push_str(&format!("{impl_header} {{\n"));
                 for item_str in &rendered_items {
                     output.push_str(item_str);
@@ -620,27 +644,31 @@ fn render_impl_blocks(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn render_item(
     model: &CrateModel,
     item: &Item,
     _item_id: &Id,
     indent: &str,
+    args: &BriefArgs,
     observer: &str,
     same_crate: bool,
     output: &mut String,
 ) {
-    render_docs(item, indent, output);
+    render_docs(item, indent, args, output);
     let vis = format_visibility(&item.visibility);
 
     match &item.inner {
         ItemEnum::Struct(s) => {
-            render_struct(model, item, s, indent, &vis, observer, same_crate, output);
+            render_struct(
+                model, item, s, indent, &vis, args, observer, same_crate, output,
+            );
         }
         ItemEnum::Enum(e) => {
-            render_enum(model, item, e, indent, &vis, output);
+            render_enum(model, item, e, indent, &vis, args, output);
         }
         ItemEnum::Trait(t) => {
-            render_trait(model, item, t, indent, &vis, output);
+            render_trait(model, item, t, indent, &vis, args, output);
         }
         ItemEnum::Function(f) => {
             let name = item.name.as_deref().unwrap_or("?");
@@ -667,12 +695,14 @@ fn render_item(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn render_struct(
     model: &CrateModel,
     item: &Item,
     s: &Struct,
     indent: &str,
     vis: &str,
+    args: &BriefArgs,
     observer: &str,
     same_crate: bool,
     output: &mut String,
@@ -710,6 +740,12 @@ fn render_struct(
             fields,
             has_stripped_fields,
         } => {
+            // Compact: always collapse plain structs to `{ .. }`
+            if args.compact {
+                output.push_str(&format!("{indent}{vis}struct {name}{generics} {{ .. }}\n"));
+                return;
+            }
+
             let mut body = String::new();
             let mut hidden_count = 0u32;
             for field_id in fields {
@@ -724,7 +760,7 @@ fn render_struct(
                     if let ItemEnum::StructField(ty) = &field_item.inner {
                         let fname = field_item.name.as_deref().unwrap_or("?");
                         let fvis = format_visibility(&field_item.visibility);
-                        render_docs(field_item, &format!("{indent}    "), &mut body);
+                        render_docs(field_item, &format!("{indent}    "), args, &mut body);
                         body.push_str(&format!(
                             "{indent}    {fvis}{fname}: {},\n",
                             format_type(ty)
@@ -755,15 +791,51 @@ fn render_enum(
     e: &Enum,
     indent: &str,
     vis: &str,
+    args: &BriefArgs,
     output: &mut String,
 ) {
     let name = item.name.as_deref().unwrap_or("?");
     let generics = format_generics(&e.generics);
+
+    if args.compact {
+        // Compact: render all variants name-only on one line
+        let mut variant_parts = Vec::new();
+        for variant_id in &e.variants {
+            if let Some(variant_item) = model.krate.index.get(variant_id) {
+                let vname = variant_item.name.as_deref().unwrap_or("?");
+                if let ItemEnum::Variant(variant) = &variant_item.inner {
+                    let part = match &variant.kind {
+                        VariantKind::Plain => vname.to_string(),
+                        VariantKind::Tuple(_) => format!("{vname}(..)"),
+                        VariantKind::Struct { .. } => format!("{vname} {{ .. }}"),
+                    };
+                    variant_parts.push(part);
+                }
+            }
+        }
+        let one_liner = format!(
+            "{indent}{vis}enum {name}{generics} {{ {} }}",
+            variant_parts.join(", ")
+        );
+        if one_liner.len() > 120 {
+            // Fall back to one-variant-per-line
+            output.push_str(&format!("{indent}{vis}enum {name}{generics} {{\n"));
+            for part in &variant_parts {
+                output.push_str(&format!("{indent}    {part},\n"));
+            }
+            output.push_str(&format!("{indent}}}\n"));
+        } else {
+            output.push_str(&one_liner);
+            output.push('\n');
+        }
+        return;
+    }
+
     output.push_str(&format!("{indent}{vis}enum {name}{generics} {{\n"));
 
     for variant_id in &e.variants {
         if let Some(variant_item) = model.krate.index.get(variant_id) {
-            render_docs(variant_item, &format!("{indent}    "), output);
+            render_docs(variant_item, &format!("{indent}    "), args, output);
             let vname = variant_item.name.as_deref().unwrap_or("?");
             if let ItemEnum::Variant(variant) = &variant_item.inner {
                 match &variant.kind {
@@ -826,6 +898,7 @@ fn render_trait(
     t: &Trait,
     indent: &str,
     vis: &str,
+    args: &BriefArgs,
     output: &mut String,
 ) {
     let name = item.name.as_deref().unwrap_or("?");
@@ -838,12 +911,19 @@ fn render_trait(
         format!(": {}", bound_strs.join(" + "))
     };
 
+    if args.compact {
+        output.push_str(&format!(
+            "{indent}{vis}trait {name}{generics}{bounds} {{ .. }}\n"
+        ));
+        return;
+    }
+
     output.push_str(&format!("{indent}{vis}trait {name}{generics}{bounds} {{\n"));
 
     for item_id in &t.items {
         if let Some(trait_item) = model.krate.index.get(item_id) {
             let inner_indent = format!("{indent}    ");
-            render_docs(trait_item, &inner_indent, output);
+            render_docs(trait_item, &inner_indent, args, output);
             match &trait_item.inner {
                 ItemEnum::Function(f) => {
                     let mname = trait_item.name.as_deref().unwrap_or("?");
@@ -979,14 +1059,14 @@ fn render_use(
     }
 }
 
-fn render_impl_item(item: &Item, indent: &str, _args: &BriefArgs) -> Option<String> {
+fn render_impl_item(item: &Item, indent: &str, args: &BriefArgs) -> Option<String> {
     let mut out = String::new();
 
     match &item.inner {
         ItemEnum::Function(f) => {
             let name = item.name.as_deref().unwrap_or("?");
             let vis = format_visibility(&item.visibility);
-            render_docs(item, indent, &mut out);
+            render_docs(item, indent, args, &mut out);
             let sig = format_function_sig(name, f, &vis);
             out.push_str(&format!("{indent}{sig};\n"));
             Some(out)
@@ -1015,7 +1095,10 @@ fn render_impl_item(item: &Item, indent: &str, _args: &BriefArgs) -> Option<Stri
     }
 }
 
-fn render_docs(item: &Item, indent: &str, output: &mut String) {
+fn render_docs(item: &Item, indent: &str, args: &BriefArgs, output: &mut String) {
+    if args.no_docs || args.compact {
+        return;
+    }
     if let Some(docs) = &item.docs {
         for line in docs.lines() {
             if line.is_empty() {
@@ -1118,6 +1201,11 @@ fn format_type(ty: &Type) -> String {
             }
         }
     }
+}
+
+/// Format a `Path` as a string. Public for use by search module.
+pub fn format_path_pub(path: &rustdoc_types::Path) -> String {
+    format_path(path)
 }
 
 fn format_path(path: &rustdoc_types::Path) -> String {

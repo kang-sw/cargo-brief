@@ -26,6 +26,21 @@ struct GlobExpansionResult {
 
 /// Run the cargo-brief pipeline and return the rendered output string.
 pub fn run_pipeline(args: &BriefArgs) -> Result<String> {
+    // --methods-of: translate into --search + exclusion flags
+    if let Some(type_name) = &args.methods_of {
+        let mut args = args.clone();
+        args.search = Some(type_name.clone());
+        args.no_structs = true;
+        args.no_enums = true;
+        args.no_traits = true;
+        args.no_unions = true;
+        args.no_constants = true;
+        args.no_macros = true;
+        args.no_aliases = true;
+        // Leave no_functions = false (methods are functions)
+        return run_pipeline(&args);
+    }
+
     if let Some(spec) = &args.crates {
         return run_remote_pipeline(args, spec);
     }
