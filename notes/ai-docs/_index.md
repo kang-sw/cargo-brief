@@ -117,7 +117,7 @@ Parsed via `rustdoc-types` 0.57. Post-macro-expansion output.
 - Flexible package name resolution: `self`, `crate::module`, file path→module. Bare names always resolve as package.
 - Optional TARGET: `cargo brief` defaults to `self` (current package).
 - Remote crate support: `--crates <spec>` fetches any crate from crates.io. Workspaces cached at `~/.cache/cargo-brief/crates/` for fast repeat calls. `--no-cache` forces temp workspace.
-- Visibility auto-detection: `same_crate` inferred from cwd package context.
+- Visibility auto-detection: `same_crate` inferred from cwd package context. Cross-crate views use reachability-based filtering (private modules with reachable items shown, `pub(crate)` items hidden).
 - Glob re-export expansion: Phase 1 (individual `pub use` lines) + Phase 2 (`--expand-glob` inlines full definitions).
 - Search mode: `--search <pattern>` finds leaf items (fn, struct, field, variant, const, type, macro, assoc items) by case-insensitive substring match on full path. Multi-word patterns are AND-matched. Outputs one-line-per-item with full path.
 - Dependencies: `clap` 4, `rustdoc-types` 0.57, `serde_json` 1, `anyhow` 1, `tempfile` 3.
@@ -160,5 +160,6 @@ Domain-oriented operational knowledge in `notes/ai-docs/mental-model/`:
 
 - `tickets/done/260308-visibility-and-rendering.md` — same_crate auto-detection, resolution priority, rendering fixes (completed v0.2.0)
 - `tickets/done/260310-remote-crate-support.md` — `--crates` flag for crates.io crates + optional TARGET (completed)
+- `tickets/done/260315-reexport-aware-rendering.md` — reachability-based filtering for cross-crate views (completed)
 - `tickets/todo/260314-glob-reexport-expansion.md` — expand glob re-exports (`pub use other::*`) for facade crates like `clap`
 - `tickets/wip/260315-search-mode.md` — `--search` flag for leaf item discovery (Phase 1 complete, Phase 2 pending)

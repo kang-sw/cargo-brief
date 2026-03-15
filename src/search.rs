@@ -4,6 +4,8 @@
 //! multi-word AND on full path), and renders each match as a one-liner with
 //! a kind prefix and full path.
 
+use std::collections::HashSet;
+
 use rustdoc_types::{Id, Item, ItemEnum, Struct, StructKind, Type, VariantKind, Visibility};
 
 use crate::cli::BriefArgs;
@@ -102,6 +104,7 @@ pub fn render_search(
     args: &BriefArgs,
     observer_module_path: Option<&str>,
     same_crate: bool,
+    reachable: Option<&HashSet<Id>>,
 ) -> String {
     let crate_name = model.crate_name();
     let observer = observer_module_path
@@ -117,7 +120,16 @@ pub fn render_search(
     // Collect all leaf items
     let mut leaves = Vec::new();
     if let Some(root) = model.root_module() {
-        walk_module(model, root, "", args, &observer, same_crate, &mut leaves);
+        walk_module(
+            model,
+            root,
+            "",
+            args,
+            &observer,
+            same_crate,
+            reachable,
+            &mut leaves,
+        );
     }
 
     // Parse search tokens (case-insensitive, AND-matched)
@@ -169,6 +181,7 @@ pub fn render_search(
 }
 
 /// Walk a module recursively, collecting all leaf items.
+#[allow(clippy::too_many_arguments)]
 fn walk_module<'a>(
     model: &'a CrateModel,
     module_item: &'a Item,
@@ -176,13 +189,18 @@ fn walk_module<'a>(
     args: &BriefArgs,
     observer: &str,
     same_crate: bool,
+    reachable: Option<&HashSet<Id>>,
     leaves: &mut Vec<LeafItem<'a>>,
 ) {
     let children = model.module_children(module_item);
 
     for (child_id, child) in &children {
         // Visibility check
-        if !matches!(child.visibility, Visibility::Default)
+        if let Some(reachable) = reachable {
+            if !reachable.contains(child_id) {
+                continue;
+            }
+        } else if !matches!(child.visibility, Visibility::Default)
             && !is_visible_from(model, child, child_id, observer, same_crate)
         {
             continue;
@@ -213,6 +231,7 @@ fn walk_module<'a>(
                     args,
                     observer,
                     same_crate,
+                    reachable,
                     leaves,
                 );
             }
@@ -408,6 +427,7 @@ fn walk_module<'a>(
         args,
         observer,
         same_crate,
+        reachable,
         leaves,
     );
 }
@@ -444,6 +464,7 @@ fn walk_struct_fields<'a>(
 }
 
 /// Walk impl blocks for types defined in this module.
+#[allow(clippy::too_many_arguments)]
 fn walk_impl_blocks<'a>(
     model: &'a CrateModel,
     module_item: &'a Item,
@@ -451,13 +472,18 @@ fn walk_impl_blocks<'a>(
     args: &BriefArgs,
     observer: &str,
     same_crate: bool,
+    reachable: Option<&HashSet<Id>>,
     leaves: &mut Vec<LeafItem<'a>>,
 ) {
     let children = model.module_children(module_item);
     let mut impl_ids: Vec<Id> = Vec::new();
 
     for (child_id, child) in &children {
-        if !matches!(child.visibility, Visibility::Default)
+        if let Some(reachable) = reachable {
+            if !reachable.contains(child_id) {
+                continue;
+            }
+        } else if !matches!(child.visibility, Visibility::Default)
             && !is_visible_from(model, child, child_id, observer, same_crate)
         {
             continue;

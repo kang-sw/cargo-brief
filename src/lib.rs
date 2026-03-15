@@ -13,7 +13,7 @@ use anyhow::{Context, Result};
 use rustdoc_types::{ItemEnum, Visibility};
 
 use cli::BriefArgs;
-use model::CrateModel;
+use model::{CrateModel, compute_reachable_set};
 
 /// Result of glob re-export expansion. Contains both the item names (for Phase 1
 /// individual `pub use` lines) and the full source models (for Phase 2 inlining).
@@ -76,24 +76,30 @@ pub fn run_pipeline(args: &BriefArgs) -> Result<String> {
     let model = CrateModel::from_crate(krate);
 
     // Step 4: Determine if observer is in the same crate
-    // TODO(260315): restore cross-crate filtering once reexport-aware reachability
-    // walk is implemented. Currently forced to true because cross-crate filtering
-    // hides private modules that contain publicly re-exported items (facade pattern).
-    //
-    // let observer_crate = args
-    //     .at_package
-    //     .as_deref()
-    //     .or(metadata.current_package.as_deref());
-    // let same_crate = match observer_crate {
-    //     Some(obs) => obs == resolved.package_name || obs.replace('-', "_") == model.crate_name(),
-    //     None => false,
-    // };
-    let same_crate = true;
+    let observer_crate = args
+        .at_package
+        .as_deref()
+        .or(metadata.current_package.as_deref());
+    let same_crate = match observer_crate {
+        Some(obs) => obs == resolved.package_name || obs.replace('-', "_") == model.crate_name(),
+        None => false,
+    };
+    let reachable = if !same_crate {
+        Some(compute_reachable_set(&model))
+    } else {
+        None
+    };
 
     // Step 5: Render (search mode or normal mode)
     if let Some(pattern) = &args.search {
-        let output =
-            search::render_search(&model, pattern, args, args.at_mod.as_deref(), same_crate);
+        let output = search::render_search(
+            &model,
+            pattern,
+            args,
+            args.at_mod.as_deref(),
+            same_crate,
+            reachable.as_ref(),
+        );
         return Ok(output);
     }
 
@@ -103,6 +109,7 @@ pub fn run_pipeline(args: &BriefArgs) -> Result<String> {
         args,
         args.at_mod.as_deref(),
         same_crate,
+        reachable.as_ref(),
     );
 
     // Step 6: Expand glob re-exports
@@ -148,9 +155,10 @@ fn run_remote_pipeline(args: &BriefArgs, spec: &str) -> Result<String> {
 
     let krate = rustdoc_json::parse_rustdoc_json(&json_path)?;
     let model = CrateModel::from_crate(krate);
+    let reachable = Some(compute_reachable_set(&model));
 
     if let Some(pattern) = &args.search {
-        let output = search::render_search(&model, pattern, args, None, true);
+        let output = search::render_search(&model, pattern, args, None, false, reachable.as_ref());
         return Ok(output);
     }
 
@@ -158,8 +166,9 @@ fn run_remote_pipeline(args: &BriefArgs, spec: &str) -> Result<String> {
         &model,
         args.module_path.as_deref(),
         args,
-        None, // no observer module
-        true, // same-crate view: we generated the JSON, show all internal modules
+        None,
+        false,
+        reachable.as_ref(),
     );
 
     let result = expand_glob_reexports(

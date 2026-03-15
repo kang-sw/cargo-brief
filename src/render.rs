@@ -1,7 +1,7 @@
 use std::collections::HashSet;
 
 use rustdoc_types::{
-    Constant, Enum, Function, GenericArg, GenericArgs, GenericBound, GenericParamDefKind, Item,
+    Constant, Enum, Function, GenericArg, GenericArgs, GenericBound, GenericParamDefKind, Id, Item,
     ItemEnum, Static, Struct, StructKind, Trait, Type, TypeAlias, Union, VariantKind, Visibility,
 };
 
@@ -17,6 +17,7 @@ pub fn render_module_api(
     args: &BriefArgs,
     observer_module_path: Option<&str>,
     same_crate: bool,
+    reachable: Option<&HashSet<Id>>,
 ) -> String {
     let mut output = String::new();
 
@@ -67,6 +68,7 @@ pub fn render_module_api(
         depth,
         0,
         mod_display_path,
+        reachable,
         &mut output,
     );
 
@@ -305,6 +307,7 @@ fn render_module_contents(
     max_depth: u32,
     current_depth: u32,
     display_path: &str,
+    reachable: Option<&HashSet<Id>>,
     output: &mut String,
 ) {
     // Indent level: root (depth=0) has no wrapper, so children at depth=0 get no indent.
@@ -319,10 +322,14 @@ fn render_module_contents(
 
     for (child_id, child) in &children {
         // Check visibility (skip items that aren't visible from observer)
-        if !matches!(child.visibility, Visibility::Default) {
-            if !is_visible_from(model, child, child_id, observer, same_crate) {
+        if let Some(reachable) = reachable {
+            if !reachable.contains(child_id) {
                 continue;
             }
+        } else if !matches!(child.visibility, Visibility::Default)
+            && !is_visible_from(model, child, child_id, observer, same_crate)
+        {
+            continue;
         }
 
         // Use items may have name=None at the item level; name is inside inner.use
@@ -354,6 +361,7 @@ fn render_module_contents(
                         max_depth,
                         current_depth + 1,
                         &child_path,
+                        reachable,
                         output,
                     );
                 } else {
@@ -497,6 +505,7 @@ fn render_module_contents(
         observer,
         same_crate,
         current_depth,
+        reachable,
         output,
     );
 
@@ -505,6 +514,7 @@ fn render_module_contents(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn render_impl_blocks(
     model: &CrateModel,
     module_item: &Item,
@@ -512,6 +522,7 @@ fn render_impl_blocks(
     observer: &str,
     same_crate: bool,
     current_depth: u32,
+    reachable: Option<&HashSet<Id>>,
     output: &mut String,
 ) {
     // Match the indent logic from render_module_contents
@@ -528,10 +539,14 @@ fn render_impl_blocks(
 
     for (child_id, child) in &children {
         // Only collect impls for types visible from the observer
-        if !matches!(child.visibility, Visibility::Default) {
-            if !is_visible_from(model, child, child_id, observer, same_crate) {
+        if let Some(reachable) = reachable {
+            if !reachable.contains(child_id) {
                 continue;
             }
+        } else if !matches!(child.visibility, Visibility::Default)
+            && !is_visible_from(model, child, child_id, observer, same_crate)
+        {
+            continue;
         }
 
         let impls = match &child.inner {
@@ -1392,5 +1407,3 @@ fn format_generic_bound(bound: &GenericBound) -> String {
 fn last_segment(path: &str) -> &str {
     path.rsplit("::").next().unwrap_or(path)
 }
-
-use rustdoc_types::Id;

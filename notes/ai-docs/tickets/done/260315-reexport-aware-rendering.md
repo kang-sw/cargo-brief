@@ -119,3 +119,31 @@ remote crate tests.
 **Search mode:**
 - `--crates hecs@0.11.0 --search Archetype`: finds struct + methods, no
   `pub(crate)` items in results
+
+### Result
+
+Implemented reachability-based filtering for cross-crate views.
+
+**What was implemented:**
+- `compute_reachable_set()` in `src/model.rs`: walks from root module following
+  only `Visibility::Public` children. For `pub use` targets, marks the target
+  item, its ancestor modules, and its impl blocks as reachable.
+- Threaded `reachable: Option<&HashSet<Id>>` through `render_module_api`,
+  `render_module_contents`, `render_impl_blocks` (render.rs) and `render_search`,
+  `walk_module`, `walk_impl_blocks` (search.rs).
+- When `reachable` is `Some`, it replaces `is_visible_from()` for top-level
+  gatekeeping. Sub-item checks (struct fields, impl methods) still use
+  `is_visible_from()` with `same_crate=false`.
+- Restored `observer_crate`/`same_crate` detection in `run_pipeline()` (was
+  hardcoded to `true` as hotfix). `run_remote_pipeline()` always uses
+  `same_crate=false` + reachable set.
+
+**Tests:** All 12 previously-ignored tests un-ignored and passing. 4 either tests
+updated to expect private modules with reachable items to be shown. Added
+`tests/remote_facade_integration.rs` with 6 hecs@0.11.0 regression tests
+(network-ignored).
+
+**Deviations from design:** Did not implement "use inlining" for private module
+targets — instead, the reachability walk marks ancestor modules as reachable,
+so private modules containing reachable items are rendered normally. This is
+simpler and produces output that preserves the actual module structure.

@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use rustdoc_types::{Crate, Id, Item, ItemEnum, Visibility};
 
@@ -8,7 +8,6 @@ pub struct CrateModel {
     /// Maps module paths (e.g., "outer::inner") to their item IDs.
     pub module_index: HashMap<String, Id>,
     /// Maps item IDs to their containing module path.
-    #[allow(dead_code)]
     pub item_module_path: HashMap<Id, String>,
 }
 
@@ -175,6 +174,96 @@ pub fn is_visible_from(
             // For simplicity, we treat default as "same module only" for non-impl items,
             // and delegate impl visibility to the parent type.
             false
+        }
+    }
+}
+
+/// Compute the set of item IDs reachable through the crate's public API.
+///
+/// Walks from the root module following only `Visibility::Public` children.
+/// For `pub use` re-exports targeting local items, marks the target and its
+/// ancestor modules as reachable (so private modules containing reachable
+/// items are rendered). For reachable structs/enums/unions, marks their
+/// impl blocks as reachable.
+pub fn compute_reachable_set(model: &CrateModel) -> HashSet<Id> {
+    let mut reachable = HashSet::new();
+
+    let Some(root) = model.root_module() else {
+        return reachable;
+    };
+
+    // Root module is always reachable
+    reachable.insert(model.krate.root);
+
+    walk_public(model, root, &mut reachable);
+    reachable
+}
+
+fn walk_public(model: &CrateModel, module_item: &Item, reachable: &mut HashSet<Id>) {
+    let children = model.module_children(module_item);
+
+    for (child_id, child) in &children {
+        if !matches!(child.visibility, Visibility::Public) {
+            continue;
+        }
+
+        match &child.inner {
+            ItemEnum::Module(_) => {
+                reachable.insert(**child_id);
+                walk_public(model, child, reachable);
+            }
+            ItemEnum::Use(use_item) if !use_item.is_glob => {
+                reachable.insert(**child_id);
+                if let Some(target_id) = &use_item.id {
+                    mark_reachable_with_ancestors(model, target_id, reachable);
+                }
+            }
+            ItemEnum::Use(_) => {
+                reachable.insert(**child_id);
+            }
+            _ => {
+                reachable.insert(**child_id);
+                mark_impls(model, child, reachable);
+            }
+        }
+    }
+}
+
+/// Mark an item reachable, along with its ancestor modules and impl blocks.
+fn mark_reachable_with_ancestors(model: &CrateModel, item_id: &Id, reachable: &mut HashSet<Id>) {
+    let Some(item) = model.krate.index.get(item_id) else {
+        return;
+    };
+
+    reachable.insert(*item_id);
+    mark_impls(model, item, reachable);
+
+    // Walk ancestor modules up to root
+    if let Some(parent_path) = model.item_module_path.get(item_id) {
+        let mut path = parent_path.as_str();
+        loop {
+            if let Some(mod_id) = model.module_index.get(path) {
+                reachable.insert(*mod_id);
+            }
+            match path.rsplit_once("::") {
+                Some((parent, _)) => path = parent,
+                None => break,
+            }
+        }
+    }
+}
+
+/// Mark impl blocks of a struct/enum/union as reachable.
+fn mark_impls(model: &CrateModel, item: &Item, reachable: &mut HashSet<Id>) {
+    let impls = match &item.inner {
+        ItemEnum::Struct(s) => &s.impls,
+        ItemEnum::Enum(e) => &e.impls,
+        ItemEnum::Union(u) => &u.impls,
+        _ => return,
+    };
+    for impl_id in impls {
+        if model.krate.index.contains_key(impl_id) {
+            reachable.insert(*impl_id);
         }
     }
 }

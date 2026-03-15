@@ -57,11 +57,11 @@ fn default_args() -> BriefArgs {
 }
 
 fn render_full(model: &CrateModel, args: &BriefArgs) -> String {
-    render_module_api(model, args.module_path.as_deref(), args, None, true)
+    render_module_api(model, args.module_path.as_deref(), args, None, true, None)
 }
 
 fn render_module(model: &CrateModel, args: &BriefArgs, module: &str) -> String {
-    render_module_api(model, Some(module), args, None, true)
+    render_module_api(model, Some(module), args, None, true, None)
 }
 
 // === Struct Tests ===
@@ -101,7 +101,7 @@ fn test_struct_external_crate_view() {
     let args = default_args();
     // Simulate external crate view
     let output = render_module_api(
-        &model, None, &args, None, false, // same_crate = false
+        &model, None, &args, None, false, None, // same_crate = false
     );
 
     assert!(
@@ -557,7 +557,7 @@ fn test_target_module_inner() {
 fn test_same_crate_visibility() {
     let model = fixture_model();
     let args = default_args();
-    let output = render_module_api(&model, None, &args, None, true);
+    let output = render_module_api(&model, None, &args, None, true, None);
 
     assert!(
         output.contains("pub(crate) struct CrateStruct"),
@@ -569,7 +569,7 @@ fn test_same_crate_visibility() {
 fn test_external_visibility_hides_crate_items() {
     let model = fixture_model();
     let args = default_args();
-    let output = render_module_api(&model, None, &args, None, false);
+    let output = render_module_api(&model, None, &args, None, false, None);
 
     assert!(
         !output.contains("CrateStruct"),
@@ -673,7 +673,7 @@ fn test_root_items_no_indent() {
 
 fn search_output(model: &CrateModel, pattern: &str) -> String {
     let args = default_args();
-    search::render_search(model, pattern, &args, None, true)
+    search::render_search(model, pattern, &args, None, true, None)
 }
 
 #[test]
@@ -861,7 +861,7 @@ fn search_no_functions_excludes_methods() {
     let model = fixture_model();
     let mut args = default_args();
     args.no_functions = true;
-    let output = search::render_search(&model, "pub_method", &args, None, true);
+    let output = search::render_search(&model, "pub_method", &args, None, true, None);
     assert!(
         !output.contains("fn "),
         "--no-functions should exclude methods:\n{output}"
@@ -963,7 +963,7 @@ fn search_limit_truncates() {
     let model = fixture_model();
     let mut args = default_args();
     args.search_limit = Some("3".to_string());
-    let output = search::render_search(&model, "outer", &args, None, true);
+    let output = search::render_search(&model, "outer", &args, None, true, None);
     // Count non-comment, non-doc lines (actual results)
     let result_lines: Vec<&str> = output
         .lines()
@@ -988,7 +988,7 @@ fn search_limit_truncates() {
 fn search_limit_none_shows_all() {
     let model = fixture_model();
     let args = default_args();
-    let output = search::render_search(&model, "outer", &args, None, true);
+    let output = search::render_search(&model, "outer", &args, None, true, None);
     assert!(
         !output.contains("// ... and "),
         "No truncation without limit:\n{output}"
@@ -1000,7 +1000,7 @@ fn search_limit_paging() {
     let model = fixture_model();
     let mut args = default_args();
     // First get total to validate paging
-    let full_output = search::render_search(&model, "outer", &args, None, true);
+    let full_output = search::render_search(&model, "outer", &args, None, true, None);
     let full_lines: Vec<&str> = full_output
         .lines()
         .filter(|l| !l.starts_with("//") && !l.starts_with("///"))
@@ -1010,7 +1010,7 @@ fn search_limit_paging() {
 
     // Page: skip 2, show 3
     args.search_limit = Some("2:3".to_string());
-    let output = search::render_search(&model, "outer", &args, None, true);
+    let output = search::render_search(&model, "outer", &args, None, true, None);
 
     let result_lines: Vec<&str> = output
         .lines()
@@ -1065,7 +1065,7 @@ fn no_docs_search_suppresses_doc_comments() {
     let model = fixture_model();
     let mut args = default_args();
     args.no_docs = true;
-    let output = search::render_search(&model, "free_function", &args, None, true);
+    let output = search::render_search(&model, "free_function", &args, None, true, None);
 
     assert!(
         !output.contains("///"),
@@ -1163,7 +1163,7 @@ fn compact_suppresses_docs() {
 fn search_struct_shows_impl_summary() {
     let model = fixture_model();
     let args = default_args();
-    let output = search::render_search(&model, "PubStruct", &args, None, true);
+    let output = search::render_search(&model, "PubStruct", &args, None, true, None);
 
     assert!(
         output.contains("// impl"),
@@ -1187,7 +1187,7 @@ fn methods_of_shows_only_methods_and_fields() {
     args.no_constants = true;
     args.no_macros = true;
     args.no_aliases = true;
-    let output = search::render_search(&model, "PubStruct", &args, None, true);
+    let output = search::render_search(&model, "PubStruct", &args, None, true, None);
 
     // Should contain methods
     assert!(
