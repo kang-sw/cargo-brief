@@ -62,6 +62,11 @@ cargo brief my-crate --depth 2
 
 # Exclude certain item kinds
 cargo brief my-crate --no-macros --no-traits
+
+# Search for items by name (fuzzy / imprecise search)
+cargo brief my-crate --search spawn
+cargo brief --crates hecs --search "World spawn"
+cargo brief self --search "config timeout"
 ```
 
 ## Options
@@ -83,8 +88,42 @@ cargo brief my-crate --no-macros --no-traits
 | `--no-constants` | Exclude constants and statics |
 | `--no-unions` | Exclude unions |
 | `--no-macros` | Exclude macros |
+| `--search <pattern>` | Search leaf items by name (case-insensitive, multi-word AND) |
 | `--toolchain <name>` | Nightly toolchain name (default: `nightly`) |
 | `--manifest-path <path>` | Path to Cargo.toml |
+
+## Search Mode
+
+`--search` finds leaf items whose full path contains the given pattern (case-insensitive). Multiple words are AND-matched — all must appear somewhere in the path.
+
+```sh
+cargo brief --crates hecs --search component
+```
+
+```rust
+// crate hecs — search: "component" (11 results)
+
+/// A collection of component types
+struct query::ComponentSet;
+
+enum world::ComponentError;
+
+field world::ArchetypeInfo::component_count: u32;
+
+variant world::WorldError::ComponentNotFound;
+variant world::WorldError::ComponentAlreadyBorrowed;
+
+/// Insert a component into an entity
+fn world::World::insert_component<T: Component>(&mut self, entity: Entity, component: T) -> Result<()>;
+fn world::World::remove_component<T: Component>(&mut self, entity: Entity) -> Result<T>;
+fn world::World::get_component<T: Component>(&self, entity: Entity) -> Result<ComponentRef<'_, T>>;
+
+type world::ComponentId = u32;
+const world::MAX_COMPONENTS: usize = ..;
+macro component_bundle!;
+```
+
+**Leaf items** included in search: functions, methods, struct fields, enum variants, constants, statics, type aliases, macros, associated types/consts. Container types (struct, enum, trait, union) appear when their name matches directly.
 
 ## Output Format
 
@@ -138,6 +177,10 @@ cargo brief <crate> --manifest-path path/to/Cargo.toml --recursive
 
 # External visibility only (what other crates can see)
 cargo brief <crate> --at-package consumer-crate --recursive
+
+# Search for items by name (imprecise / fuzzy)
+cargo brief <crate> --search "spawn entity"
+cargo brief --crates serde --search "deserialize"
 ```
 
 ### Generic LLM Agent

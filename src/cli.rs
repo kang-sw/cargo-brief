@@ -28,7 +28,21 @@ RESOLUTION RULES:
     5. \"crate_name\"     → workspace package (hyphen/underscore normalized)
     6. \"unknown_name\"   → treated as package name (use \"self::mod\" for modules)
 
-  The [MODULE_PATH] argument also accepts file paths (e.g., src/foo.rs)."
+  The [MODULE_PATH] argument also accepts file paths (e.g., src/foo.rs).
+
+SEARCH MODE:
+  --search <PATTERN>  searches all leaf items in the crate by name.
+  Matching is case-insensitive substring on the full path (e.g., \"world::World::spawn\").
+  Multiple words are AND-matched: \"World spawn\" finds items whose path contains both.
+
+  Output: one line per match with full path prefix:
+    fn module::Type::method(&self, arg: T) -> Ret;
+    struct module::StructName;
+    field module::Struct::field_name: Type;
+    variant module::Enum::Variant(T1, T2);
+    const module::CONST_NAME: Type = ..;
+    type module::AliasName = ActualType;
+    macro module::macro_name!;"
 )]
 pub struct BriefArgs {
     /// Target to inspect: crate name, "self", crate::module, or file path
@@ -65,6 +79,16 @@ pub struct BriefArgs {
     /// Inline full definitions from glob re-export sources
     #[arg(long)]
     pub expand_glob: bool,
+
+    /// Search for leaf items by name (case-insensitive substring match on full path).
+    /// Multiple words are AND-matched. Outputs one-line-per-item with full path.
+    ///
+    /// Leaf items: functions, methods, struct fields, enum variants, consts,
+    /// statics, type aliases, macros, associated types/consts.
+    /// Container types (struct, enum, trait, union) are included when their
+    /// name matches directly.
+    #[arg(long, value_name = "PATTERN", help_heading = "Search")]
+    pub search: Option<String>,
 
     // === Exclusion flags (default: all common items shown) ===
     /// Exclude structs
