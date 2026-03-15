@@ -89,6 +89,20 @@ Build the item walker and search renderer.
 - Integration: multi-word AND matching
 - Integration: case-insensitive matching
 
+### Result (Phase 1)
+
+Implemented search mode in `src/search.rs`. Key design:
+- Recursive item walker collects all leaf items with full paths
+- Leaf types: fn (free + method), struct, enum, trait, union, field,
+  variant, const, static, type alias, macro, associated type/const
+- Impl blocks walked per-module to extract methods → `Type::method` paths
+- Visibility filtering and `--no-*` exclusion flags respected
+- 21 integration tests covering all leaf types + case/AND matching
+
+Files changed: `src/search.rs` (new), `src/lib.rs` (pipeline branch),
+`src/render.rs` (3 pub wrapper fns), `src/cli.rs` (spec committed earlier),
+5 test files (add `search: None` field).
+
 ---
 
 ## Phase 2: Polish & edge cases (if needed)

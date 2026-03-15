@@ -4,6 +4,7 @@ pub mod remote;
 pub mod render;
 pub mod resolve;
 pub mod rustdoc_json;
+pub mod search;
 
 use std::collections::{HashMap, HashSet};
 use std::path::Path;
@@ -70,7 +71,13 @@ pub fn run_pipeline(args: &BriefArgs) -> Result<String> {
         None => false,
     };
 
-    // Step 5: Render
+    // Step 5: Render (search mode or normal mode)
+    if let Some(pattern) = &args.search {
+        let output =
+            search::render_search(&model, pattern, args, args.at_mod.as_deref(), same_crate);
+        return Ok(output);
+    }
+
     let mut output = render::render_module_api(
         &model,
         resolved.module_path.as_deref(),
@@ -122,6 +129,11 @@ fn run_remote_pipeline(args: &BriefArgs, spec: &str) -> Result<String> {
 
     let krate = rustdoc_json::parse_rustdoc_json(&json_path)?;
     let model = CrateModel::from_crate(krate);
+
+    if let Some(pattern) = &args.search {
+        let output = search::render_search(&model, pattern, args, None, false);
+        return Ok(output);
+    }
 
     let mut output = render::render_module_api(
         &model,

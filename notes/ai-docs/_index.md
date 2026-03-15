@@ -66,6 +66,7 @@ cargo brief --crates <spec> [module_path] [OPTIONS]
 | `--crates <spec>`       | Fetch crate from crates.io (e.g., `serde`, `tokio@1`)          |
 | `--no-cache`            | Skip cache for `--crates` (use temp workspace)                 |
 | `--expand-glob`         | Inline full definitions from glob re-export sources            |
+| `--search <pattern>`    | Search leaf items by name (case-insensitive, multi-word AND)   |
 | `--manifest-path <path>`| Path to Cargo.toml                                            |
 
 ---
@@ -82,6 +83,7 @@ src/
   rustdoc_json.rs  — JSON generation and parsing (accepts target_dir from resolve)
   model.rs         — CrateModel with module index, visibility resolution
   render.rs        — pseudo-Rust rendering of all item types
+  search.rs        — search mode: leaf item walker + one-line-per-item renderer
 ```
 
 ### Supported Item Types
@@ -117,6 +119,7 @@ Parsed via `rustdoc-types` 0.57. Post-macro-expansion output.
 - Remote crate support: `--crates <spec>` fetches any crate from crates.io. Workspaces cached at `~/.cache/cargo-brief/crates/` for fast repeat calls. `--no-cache` forces temp workspace.
 - Visibility auto-detection: `same_crate` inferred from cwd package context.
 - Glob re-export expansion: Phase 1 (individual `pub use` lines) + Phase 2 (`--expand-glob` inlines full definitions).
+- Search mode: `--search <pattern>` finds leaf items (fn, struct, field, variant, const, type, macro, assoc items) by case-insensitive substring match on full path. Multi-word patterns are AND-matched. Outputs one-line-per-item with full path.
 - Dependencies: `clap` 4, `rustdoc-types` 0.57, `serde_json` 1, `anyhow` 1, `tempfile` 3.
 - Test fixture (`test_fixture/`) covers all supported item types.
 
@@ -158,3 +161,4 @@ Domain-oriented operational knowledge in `notes/ai-docs/mental-model/`:
 - `tickets/done/260308-visibility-and-rendering.md` — same_crate auto-detection, resolution priority, rendering fixes (completed v0.2.0)
 - `tickets/done/260310-remote-crate-support.md` — `--crates` flag for crates.io crates + optional TARGET (completed)
 - `tickets/todo/260314-glob-reexport-expansion.md` — expand glob re-exports (`pub use other::*`) for facade crates like `clap`
+- `tickets/wip/260315-search-mode.md` — `--search` flag for leaf item discovery (Phase 1 complete, Phase 2 pending)

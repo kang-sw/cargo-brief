@@ -3,6 +3,7 @@ use cargo_brief::model::CrateModel;
 use cargo_brief::render::render_module_api;
 use cargo_brief::resolve;
 use cargo_brief::rustdoc_json;
+use cargo_brief::search;
 
 /// Generate the model from the test fixture once (per test).
 fn fixture_model() -> CrateModel {
@@ -43,6 +44,7 @@ fn default_args() -> BriefArgs {
         no_macros: false,
         crates: None,
         expand_glob: false,
+        search: None,
         features: None,
         no_cache: false,
         toolchain: "nightly".to_string(),
@@ -660,5 +662,234 @@ fn test_root_items_no_indent() {
     assert!(
         mod_line.starts_with("mod outer"),
         "top-level module should have no indent, got: '{mod_line}'"
+    );
+}
+
+// === Search Mode Tests ===
+
+fn search_output(model: &CrateModel, pattern: &str) -> String {
+    let args = default_args();
+    search::render_search(model, pattern, &args, None, true)
+}
+
+#[test]
+fn search_finds_struct_by_name() {
+    let model = fixture_model();
+    let output = search_output(&model, "PubStruct");
+    assert!(
+        output.contains("struct outer::PubStruct"),
+        "Should find PubStruct:\n{output}"
+    );
+}
+
+#[test]
+fn search_finds_struct_field() {
+    let model = fixture_model();
+    let output = search_output(&model, "pub_field");
+    assert!(
+        output.contains("field outer::PubStruct::pub_field: i32"),
+        "Should find pub_field:\n{output}"
+    );
+}
+
+#[test]
+fn search_finds_enum_variant() {
+    let model = fixture_model();
+    let output = search_output(&model, "Alpha");
+    assert!(
+        output.contains("variant outer::PlainEnum::Alpha"),
+        "Should find Alpha variant:\n{output}"
+    );
+}
+
+#[test]
+fn search_finds_tuple_variant() {
+    let model = fixture_model();
+    let output = search_output(&model, "TupleEnum One");
+    let output_lower = output.to_lowercase();
+    assert!(
+        output_lower.contains("variant outer::tupleenum::one"),
+        "Should find One variant with multi-word AND:\n{output}"
+    );
+}
+
+#[test]
+fn search_finds_struct_variant() {
+    let model = fixture_model();
+    let output = search_output(&model, "Point");
+    assert!(
+        output.contains("variant outer::StructEnum::Point"),
+        "Should find Point variant:\n{output}"
+    );
+    assert!(
+        output.contains("x: f64"),
+        "Point variant should show fields:\n{output}"
+    );
+}
+
+#[test]
+fn search_finds_method() {
+    let model = fixture_model();
+    let output = search_output(&model, "pub_method");
+    assert!(
+        output.contains("fn outer::PubStruct::pub_method"),
+        "Should find pub_method:\n{output}"
+    );
+}
+
+#[test]
+fn search_finds_free_function() {
+    let model = fixture_model();
+    let output = search_output(&model, "free_function");
+    assert!(
+        output.contains("fn outer::free_function"),
+        "Should find free_function:\n{output}"
+    );
+}
+
+#[test]
+fn search_finds_trait() {
+    let model = fixture_model();
+    let output = search_output(&model, "MyTrait");
+    assert!(
+        output.contains("trait outer::MyTrait"),
+        "Should find MyTrait:\n{output}"
+    );
+}
+
+#[test]
+fn search_finds_trait_method() {
+    let model = fixture_model();
+    let output = search_output(&model, "do_thing");
+    assert!(
+        output.contains("fn outer::MyTrait::do_thing"),
+        "Should find trait method do_thing:\n{output}"
+    );
+}
+
+#[test]
+fn search_finds_constant() {
+    let model = fixture_model();
+    let output = search_output(&model, "MY_CONST");
+    assert!(
+        output.contains("const outer::MY_CONST"),
+        "Should find MY_CONST:\n{output}"
+    );
+}
+
+#[test]
+fn search_finds_static() {
+    let model = fixture_model();
+    let output = search_output(&model, "GLOBAL_COUNT");
+    assert!(
+        output.contains("static outer::GLOBAL_COUNT"),
+        "Should find GLOBAL_COUNT:\n{output}"
+    );
+}
+
+#[test]
+fn search_finds_type_alias() {
+    let model = fixture_model();
+    let output = search_output(&model, "Alias");
+    assert!(
+        output.contains("type outer::Alias"),
+        "Should find type alias:\n{output}"
+    );
+}
+
+#[test]
+fn search_finds_union() {
+    let model = fixture_model();
+    let output = search_output(&model, "MyUnion");
+    assert!(
+        output.contains("union outer::MyUnion"),
+        "Should find MyUnion:\n{output}"
+    );
+}
+
+#[test]
+fn search_finds_union_field() {
+    let model = fixture_model();
+    let output = search_output(&model, "int_val");
+    assert!(
+        output.contains("field outer::MyUnion::int_val"),
+        "Should find union field:\n{output}"
+    );
+}
+
+#[test]
+fn search_finds_macro() {
+    let model = fixture_model();
+    let output = search_output(&model, "my_macro");
+    assert!(
+        output.contains("macro my_macro!"),
+        "Should find macro:\n{output}"
+    );
+}
+
+#[test]
+fn search_case_insensitive() {
+    let model = fixture_model();
+    let output = search_output(&model, "pubstruct");
+    assert!(
+        output.contains("struct outer::PubStruct"),
+        "Case-insensitive search should find PubStruct:\n{output}"
+    );
+}
+
+#[test]
+fn search_multi_word_and() {
+    let model = fixture_model();
+    let output = search_output(&model, "outer method");
+    assert!(
+        output.contains("fn outer::PubStruct::pub_method"),
+        "Multi-word AND should match:\n{output}"
+    );
+    // Should not contain items that only match one word
+    assert!(
+        !output.contains("free_function"),
+        "free_function doesn't match 'method':\n{output}"
+    );
+}
+
+#[test]
+fn search_no_functions_excludes_methods() {
+    let model = fixture_model();
+    let mut args = default_args();
+    args.no_functions = true;
+    let output = search::render_search(&model, "pub_method", &args, None, true);
+    assert!(
+        !output.contains("fn "),
+        "--no-functions should exclude methods:\n{output}"
+    );
+}
+
+#[test]
+fn search_result_count_in_header() {
+    let model = fixture_model();
+    let output = search_output(&model, "Alpha");
+    assert!(
+        output.contains("(1 results)"),
+        "Header should show result count:\n{output}"
+    );
+}
+
+#[test]
+fn search_shows_doc_comment() {
+    let model = fixture_model();
+    let output = search_output(&model, "free_function");
+    assert!(
+        output.contains("/// A regular public function."),
+        "Should show first line of doc comment:\n{output}"
+    );
+}
+
+#[test]
+fn search_associated_type() {
+    let model = fixture_model();
+    let output = search_output(&model, "Converter Output");
+    assert!(
+        output.contains("type outer::Converter::Output"),
+        "Should find trait associated type:\n{output}"
     );
 }

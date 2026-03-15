@@ -24,6 +24,7 @@ fn facade_args(crate_name: &str) -> BriefArgs {
         no_macros: false,
         crates: None,
         expand_glob: false,
+        search: None,
         features: None,
         no_cache: false,
         toolchain: "nightly".to_string(),

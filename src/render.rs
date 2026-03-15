@@ -1038,6 +1038,11 @@ fn format_visibility(vis: &Visibility) -> String {
     }
 }
 
+/// Format a `Type` as a string. Public for use by search module.
+pub fn format_type_pub(ty: &Type) -> String {
+    format_type(ty)
+}
+
 fn format_type(ty: &Type) -> String {
     match ty {
         Type::ResolvedPath(path) => format_path(path),
@@ -1162,6 +1167,11 @@ fn format_generic_args(args: &GenericArgs) -> String {
     }
 }
 
+/// Format generics. Public for use by search module.
+pub fn format_generics_pub(generics: &rustdoc_types::Generics) -> String {
+    format_generics(generics)
+}
+
 fn format_generics(generics: &rustdoc_types::Generics) -> String {
     if generics.params.is_empty() {
         return String::new();
@@ -1209,6 +1219,11 @@ fn format_generics(generics: &rustdoc_types::Generics) -> String {
         .collect();
 
     format!("<{}>", params.join(", "))
+}
+
+/// Format a function signature. Public for use by search module.
+pub fn format_function_sig_pub(name: &str, f: &Function, vis: &str) -> String {
+    format_function_sig(name, f, vis)
 }
 
 fn format_function_sig(name: &str, f: &Function, vis: &str) -> String {
