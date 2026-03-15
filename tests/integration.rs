@@ -45,6 +45,7 @@ fn default_args() -> BriefArgs {
         crates: None,
         expand_glob: false,
         search: None,
+        search_limit: None,
         features: None,
         no_cache: false,
         toolchain: "nightly".to_string(),
@@ -891,5 +892,102 @@ fn search_associated_type() {
     assert!(
         output.contains("type outer::Converter::Output"),
         "Should find trait associated type:\n{output}"
+    );
+}
+
+// === Search Mode Phase 2: Sorting, Re-exports, Limit ===
+
+#[test]
+fn search_results_sorted_by_kind_then_alpha() {
+    let model = fixture_model();
+    // Search for something that matches multiple kinds
+    let output = search_output(&model, "outer");
+    let lines: Vec<&str> = output
+        .lines()
+        .filter(|l| !l.starts_with("//") && !l.starts_with("///"))
+        .collect();
+    // Verify functions come before structs, structs before enums, etc.
+    let first_fn = lines.iter().position(|l| l.starts_with("fn "));
+    let first_struct = lines.iter().position(|l| l.starts_with("struct "));
+    let first_enum = lines.iter().position(|l| l.starts_with("enum "));
+    let first_field = lines.iter().position(|l| l.starts_with("field "));
+    let first_variant = lines.iter().position(|l| l.starts_with("variant "));
+    // fn < struct < enum < field < variant
+    if let (Some(f), Some(s)) = (first_fn, first_struct) {
+        assert!(f < s, "functions should come before structs:\n{output}");
+    }
+    if let (Some(s), Some(e)) = (first_struct, first_enum) {
+        assert!(s < e, "structs should come before enums:\n{output}");
+    }
+    if let (Some(e), Some(f)) = (first_enum, first_field) {
+        assert!(e < f, "enums should come before fields:\n{output}");
+    }
+    if let (Some(f), Some(v)) = (first_field, first_variant) {
+        assert!(f < v, "fields should come before variants:\n{output}");
+    }
+}
+
+#[test]
+fn search_results_alpha_within_kind() {
+    let model = fixture_model();
+    let output = search_output(&model, "Enum");
+    let enum_lines: Vec<&str> = output.lines().filter(|l| l.starts_with("enum ")).collect();
+    if enum_lines.len() >= 2 {
+        // Verify alphabetical ordering within enums
+        for pair in enum_lines.windows(2) {
+            assert!(
+                pair[0] <= pair[1],
+                "enums should be alphabetically sorted: {:?} vs {:?}",
+                pair[0],
+                pair[1]
+            );
+        }
+    }
+}
+
+#[test]
+fn search_finds_reexport() {
+    let model = fixture_model();
+    let output = search_output(&model, "ReExported");
+    assert!(
+        output.contains("use outer::PubStruct as ReExported"),
+        "Should find re-export with alias:\n{output}"
+    );
+}
+
+#[test]
+fn search_limit_truncates() {
+    let model = fixture_model();
+    let mut args = default_args();
+    args.search_limit = Some(3);
+    let output = search::render_search(&model, "outer", &args, None, true);
+    // Count non-comment, non-doc lines (actual results)
+    let result_lines: Vec<&str> = output
+        .lines()
+        .filter(|l| !l.starts_with("//") && !l.starts_with("///"))
+        .collect();
+    assert!(
+        result_lines.len() <= 3,
+        "Should display at most 3 results, got {}:\n{output}",
+        result_lines.len()
+    );
+    assert!(
+        output.contains("// ... and "),
+        "Should show truncation message:\n{output}"
+    );
+    assert!(
+        output.contains(" more results"),
+        "Should show 'more results' suffix:\n{output}"
+    );
+}
+
+#[test]
+fn search_limit_none_shows_all() {
+    let model = fixture_model();
+    let args = default_args();
+    let output = search::render_search(&model, "outer", &args, None, true);
+    assert!(
+        !output.contains("// ... and "),
+        "No truncation without limit:\n{output}"
     );
 }

@@ -26,6 +26,7 @@ fn remote_args(spec: &str) -> BriefArgs {
         crates: Some(spec.to_string()),
         expand_glob: false,
         search: None,
+        search_limit: None,
         features: None,
         no_cache: false,
         toolchain: "nightly".to_string(),

@@ -34,6 +34,29 @@ enum LeafKind {
     Macro,
     AssocType,
     AssocConst,
+    Use,
+}
+
+impl LeafKind {
+    /// Sort key: determines display order by kind.
+    fn sort_key(&self) -> u8 {
+        match self {
+            LeafKind::Function => 0,
+            LeafKind::Struct => 1,
+            LeafKind::Enum => 2,
+            LeafKind::Trait => 3,
+            LeafKind::Union => 4,
+            LeafKind::Field => 5,
+            LeafKind::Variant => 6,
+            LeafKind::Constant => 7,
+            LeafKind::Static => 8,
+            LeafKind::TypeAlias => 9,
+            LeafKind::Macro => 10,
+            LeafKind::AssocType => 11,
+            LeafKind::AssocConst => 12,
+            LeafKind::Use => 13,
+        }
+    }
 }
 
 /// Extra context needed to render certain leaf types.
@@ -51,6 +74,10 @@ enum LeafContext<'a> {
     AssocType,
     /// For associated consts in impl blocks
     AssocConst,
+    /// For re-exports: the source path
+    Use {
+        source: String,
+    },
 }
 
 /// Run search mode: find all leaf items matching the pattern and render them.
@@ -85,7 +112,7 @@ pub fn render_search(
         .collect();
 
     // Filter by pattern
-    let matched: Vec<&LeafItem> = leaves
+    let mut matched: Vec<&LeafItem> = leaves
         .iter()
         .filter(|leaf| {
             let path_lower = leaf.path.to_lowercase();
@@ -93,14 +120,30 @@ pub fn render_search(
         })
         .collect();
 
-    // Render
-    let mut output = format!(
-        "// crate {crate_name} — search: \"{pattern}\" ({} results)\n",
-        matched.len()
-    );
+    // Sort: primary by kind, secondary by path alphabetically
+    matched.sort_by(|a, b| {
+        a.kind
+            .sort_key()
+            .cmp(&b.kind.sort_key())
+            .then_with(|| a.path.cmp(&b.path))
+    });
 
-    for leaf in &matched {
+    let total = matched.len();
+    let truncated = args
+        .search_limit
+        .map(|limit| total.saturating_sub(limit))
+        .unwrap_or(0);
+    let display_count = total - truncated;
+
+    // Render
+    let mut output = format!("// crate {crate_name} — search: \"{pattern}\" ({total} results)\n",);
+
+    for leaf in &matched[..display_count] {
         render_leaf(&mut output, model, leaf);
+    }
+
+    if truncated > 0 {
+        output.push_str(&format!("// ... and {truncated} more results\n"));
     }
 
     output
@@ -294,6 +337,38 @@ fn walk_module<'a>(
                     context: LeafContext::None,
                 });
             }
+            ItemEnum::Use(use_item) if !use_item.is_glob => {
+                // Follow the re-export target to check --no-* filters
+                let target = use_item
+                    .id
+                    .as_ref()
+                    .and_then(|id| model.krate.index.get(id));
+                let skip = target
+                    .map(|t| match &t.inner {
+                        ItemEnum::Function(_) => args.no_functions,
+                        ItemEnum::Struct(_) => args.no_structs,
+                        ItemEnum::Enum(_) => args.no_enums,
+                        ItemEnum::Trait(_) => args.no_traits,
+                        ItemEnum::Union(_) => args.no_unions,
+                        ItemEnum::Constant { .. } => args.no_constants,
+                        ItemEnum::Static(_) => args.no_constants,
+                        ItemEnum::TypeAlias(_) => args.no_aliases,
+                        ItemEnum::Macro(_) => args.no_macros,
+                        _ => false,
+                    })
+                    .unwrap_or(false);
+                if !skip {
+                    let source = &use_item.source;
+                    leaves.push(LeafItem {
+                        path: child_path,
+                        item: child,
+                        kind: LeafKind::Use,
+                        context: LeafContext::Use {
+                            source: source.clone(),
+                        },
+                    });
+                }
+            }
             _ => {}
         }
     }
@@ -476,6 +551,7 @@ fn render_leaf(output: &mut String, model: &CrateModel, leaf: &LeafItem) {
         }
         LeafKind::AssocType => render_assoc_type_leaf(output, leaf),
         LeafKind::AssocConst => render_assoc_const_leaf(output, leaf),
+        LeafKind::Use => render_use_leaf(output, leaf),
     }
 }
 
@@ -644,5 +720,18 @@ fn render_assoc_const_leaf(output: &mut String, leaf: &LeafItem) {
             leaf.path,
             render::format_type_pub(type_)
         ));
+    }
+}
+
+fn render_use_leaf(output: &mut String, leaf: &LeafItem) {
+    if let LeafContext::Use { source } = &leaf.context {
+        let name = leaf.path.rsplit("::").next().unwrap_or(&leaf.path);
+        // Check if it's an alias (name differs from source's last segment)
+        let source_name = source.rsplit("::").next().unwrap_or(source);
+        if name == source_name {
+            output.push_str(&format!("use {source};\n"));
+        } else {
+            output.push_str(&format!("use {source} as {name};\n"));
+        }
     }
 }
