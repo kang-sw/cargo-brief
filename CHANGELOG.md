@@ -2,6 +2,19 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.3.2] - 2026-03-15
+
+### Added
+
+- `--no-docs` flag: suppress all `///` doc comments from output, reducing token cost 30–50% on doc-heavy crates.
+- `--compact` flag: dense output mode — collapses struct fields to `{ .. }`, enum variants to name-only one-liners, traits to `{ .. }`, inherent impls to `{ .. }`. Implies `--no-docs`.
+- `--methods-of <TYPE>` shorthand: equivalent to `--search TYPE` with all exclusion flags except `--no-functions`, showing only methods, fields, and variants for a given type.
+- **Search impl summary**: struct/enum/union search results now include an inline `// impl (N methods), impl Trait1, ...` comment showing available impls.
+
+### Fixed
+
+- `--crates` now generates rustdoc JSON with `--document-private-items`, fixing facade crates (e.g., hecs) that re-export from private modules showing only `pub use` lines with no type definitions. (**Note:** current fix over-exposes `pub(crate)` items; proper reachability-based filtering is planned.)
+
 ## [0.3.1] - 2026-03-15
 
 ### Added
