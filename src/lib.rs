@@ -137,7 +137,7 @@ fn run_remote_pipeline(args: &BriefArgs, spec: &str) -> Result<String> {
         &name,
         &args.toolchain,
         Some(&manifest_path),
-        false, // external crate = pub only
+        true, // include private modules so facade crate internals are visible
         &metadata.target_dir,
     )
     .with_context(|| format!("Failed to generate rustdoc JSON for remote crate '{name}'"))?;
@@ -146,7 +146,7 @@ fn run_remote_pipeline(args: &BriefArgs, spec: &str) -> Result<String> {
     let model = CrateModel::from_crate(krate);
 
     if let Some(pattern) = &args.search {
-        let output = search::render_search(&model, pattern, args, None, false);
+        let output = search::render_search(&model, pattern, args, None, true);
         return Ok(output);
     }
 
@@ -154,8 +154,8 @@ fn run_remote_pipeline(args: &BriefArgs, spec: &str) -> Result<String> {
         &model,
         args.module_path.as_deref(),
         args,
-        None,  // no observer module
-        false, // always cross-crate
+        None, // no observer module
+        true, // same-crate view: we generated the JSON, show all internal modules
     );
 
     let result = expand_glob_reexports(
