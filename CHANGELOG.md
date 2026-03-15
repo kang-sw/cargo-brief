@@ -2,6 +2,13 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.3.3] - 2026-03-15
+
+### Fixed
+
+- **Reexport-aware reachability filtering**: cross-crate views now correctly show only items reachable through the public API. Private modules containing publicly re-exported items (facade pattern, e.g., `hecs`, `either`) are rendered with their reachable contents, while `pub(crate)` items no longer leak. Replaces the `same_crate=true` hotfix from v0.3.2.
+- Restored automatic `same_crate` detection from observer package context (was disabled by the v0.3.2 hotfix).
+
 ## [0.3.2] - 2026-03-15
 
 ### Added
