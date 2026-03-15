@@ -80,6 +80,21 @@ enum LeafContext<'a> {
     },
 }
 
+/// Parse `--search-limit` value: `"N"` → (0, Some(N)), `"M:N"` → (M, Some(N)), `None` → (0, None).
+fn parse_search_limit(raw: Option<&str>) -> (usize, Option<usize>) {
+    let Some(raw) = raw else {
+        return (0, None);
+    };
+    if let Some((offset_str, limit_str)) = raw.split_once(':') {
+        let offset = offset_str.parse().unwrap_or(0);
+        let limit = limit_str.parse().unwrap_or(0);
+        (offset, Some(limit))
+    } else {
+        let limit = raw.parse().unwrap_or(0);
+        (0, Some(limit))
+    }
+}
+
 /// Run search mode: find all leaf items matching the pattern and render them.
 pub fn render_search(
     model: &CrateModel,
@@ -129,21 +144,25 @@ pub fn render_search(
     });
 
     let total = matched.len();
-    let truncated = args
-        .search_limit
-        .map(|limit| total.saturating_sub(limit))
-        .unwrap_or(0);
-    let display_count = total - truncated;
+    let (offset, limit) = parse_search_limit(args.search_limit.as_deref());
+    let offset = offset.min(total);
+    let end = limit.map(|n| (offset + n).min(total)).unwrap_or(total);
+    let skipped_before = offset;
+    let skipped_after = total - end;
 
     // Render
     let mut output = format!("// crate {crate_name} — search: \"{pattern}\" ({total} results)\n",);
 
-    for leaf in &matched[..display_count] {
+    if skipped_before > 0 {
+        output.push_str(&format!("// (skipped {skipped_before} results)\n"));
+    }
+
+    for leaf in &matched[offset..end] {
         render_leaf(&mut output, model, leaf);
     }
 
-    if truncated > 0 {
-        output.push_str(&format!("// ... and {truncated} more results\n"));
+    if skipped_after > 0 {
+        output.push_str(&format!("// ... and {skipped_after} more results\n"));
     }
 
     output

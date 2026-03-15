@@ -959,7 +959,7 @@ fn search_finds_reexport() {
 fn search_limit_truncates() {
     let model = fixture_model();
     let mut args = default_args();
-    args.search_limit = Some(3);
+    args.search_limit = Some("3".to_string());
     let output = search::render_search(&model, "outer", &args, None, true);
     // Count non-comment, non-doc lines (actual results)
     let result_lines: Vec<&str> = output
@@ -990,4 +990,49 @@ fn search_limit_none_shows_all() {
         !output.contains("// ... and "),
         "No truncation without limit:\n{output}"
     );
+}
+
+#[test]
+fn search_limit_paging() {
+    let model = fixture_model();
+    let mut args = default_args();
+    // First get total to validate paging
+    let full_output = search::render_search(&model, "outer", &args, None, true);
+    let full_lines: Vec<&str> = full_output
+        .lines()
+        .filter(|l| !l.starts_with("//") && !l.starts_with("///"))
+        .collect();
+    let total = full_lines.len();
+    assert!(total > 5, "Need enough results to test paging, got {total}");
+
+    // Page: skip 2, show 3
+    args.search_limit = Some("2:3".to_string());
+    let output = search::render_search(&model, "outer", &args, None, true);
+
+    let result_lines: Vec<&str> = output
+        .lines()
+        .filter(|l| !l.starts_with("//") && !l.starts_with("///"))
+        .collect();
+    assert_eq!(
+        result_lines.len(),
+        3,
+        "Should display exactly 3 results:\n{output}"
+    );
+    assert!(
+        output.contains("// (skipped 2 results)"),
+        "Should show skipped message:\n{output}"
+    );
+    assert!(
+        output.contains("// ... and "),
+        "Should show trailing truncation:\n{output}"
+    );
+    // The 3 displayed should match positions 2..5 of the full sorted list
+    for (i, line) in result_lines.iter().enumerate() {
+        assert_eq!(
+            *line,
+            full_lines[2 + i],
+            "Paged result {i} should match full result at index {}",
+            2 + i
+        );
+    }
 }

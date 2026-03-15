@@ -90,9 +90,9 @@ pub struct BriefArgs {
     #[arg(long, value_name = "PATTERN", help_heading = "Search")]
     pub search: Option<String>,
 
-    /// Maximum number of search results to display (default: unlimited)
-    #[arg(long, value_name = "N", help_heading = "Search")]
-    pub search_limit: Option<usize>,
+    /// Limit search results: N (first N) or OFFSET:N (skip OFFSET, show N)
+    #[arg(long, value_name = "[OFFSET:]N", help_heading = "Search")]
+    pub search_limit: Option<String>,
 
     // === Exclusion flags (default: all common items shown) ===
     /// Exclude structs
