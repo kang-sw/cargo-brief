@@ -67,3 +67,11 @@ Also annotate glob expansion lines in `apply_glob_expansions()`.
 | `src/render.rs` → `render_use()` | Append kind suffix |
 | `src/lib.rs` → `apply_glob_expansions()` | Annotate Phase 1 `pub use` lines |
 | `tests/integration.rs` | Test re-export kind annotations |
+
+### Result (509818d)
+
+Implemented `render_use()` kind annotation + `item_kind_suffix()` helper.
+9 kind labels: struct, enum, trait, fn, type, const, static, union, macro.
+Deviation from plan: glob expansion Phase 1 lines (`apply_glob_expansions`)
+deliberately skipped — those are synthetic `pub use` lines without target item
+resolution. Existing `test_reexport` updated to check `// struct` suffix.

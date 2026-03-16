@@ -2,6 +2,17 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.3.5] - 2026-03-16
+
+### Fixed
+
+- **`--methods-of` stack overflow**: `run_pipeline()` no longer recurses infinitely when `--methods-of` is used — the flag is now cleared before the recursive call.
+
+### Added
+
+- **`--doc-lines N`**: limit doc comment rendering to the first N lines. `--doc-lines 0` suppresses all docs (like `--no-docs`). Useful for large crates where full docs dominate output but `--no-docs` loses too much context.
+- **Re-export kind annotations**: `pub use` lines now show `// struct`, `// trait`, `// fn`, etc. when the target item is resolved, helping LLMs understand what a re-export refers to without drilling deeper.
+
 ## [0.3.4] - 2026-03-16
 
 ### Added

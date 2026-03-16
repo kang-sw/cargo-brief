@@ -67,3 +67,10 @@ Also applies to search mode's single-line doc rendering in `search.rs`
 | `src/render.rs` | Modify `render_docs()` to respect line limit |
 | `tests/integration.rs` | Add `doc_lines: None` to `default_args()`, add tests |
 | 5 other test files | Add `doc_lines: None` to BriefArgs constructors |
+
+### Result (2971dcb)
+
+Implemented as designed. Added `doc_lines: Option<usize>` to BriefArgs, modified
+`render_docs()` to enumerate and break at the limit. `doc_lines=0` returns early
+(matches `--no-docs` behavior). All 6 test files updated, 2 new tests added.
+No deviations from plan.

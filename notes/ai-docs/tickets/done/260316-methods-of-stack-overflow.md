@@ -35,3 +35,8 @@ One line: add `args.methods_of = None;` before line 41.
 1. `cargo test` — all pass
 2. Manual: `cargo brief --crates bytes@1 --methods-of Bytes` — no crash, shows methods
 3. Manual: `cargo brief --crates http@1 --methods-of Request` — no crash
+
+### Result (559e19b)
+
+Fixed by adding `args.methods_of = None;` before the recursive `run_pipeline()` call
+in `src/lib.rs:40`. Single-line fix, all existing tests pass. No deviations from plan.
