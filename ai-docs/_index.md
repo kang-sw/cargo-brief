@@ -125,7 +125,7 @@ Parsed via `rustdoc-types` 0.57. Post-macro-expansion output.
 
 ## Mental Model Documents
 
-Domain-oriented operational knowledge in `notes/ai-docs/mental-model/`:
+Domain-oriented operational knowledge in `ai-docs/mental-model/`:
 
 | Document | Domain |
 |----------|--------|
