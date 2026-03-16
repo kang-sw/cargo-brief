@@ -1064,17 +1064,33 @@ fn render_union(
 fn render_use(
     item: &Item,
     use_item: &rustdoc_types::Use,
-    _target_item: &Item,
+    target_item: &Item,
     indent: &str,
     output: &mut String,
 ) {
     let vis = format_visibility(&item.visibility);
     let source = &use_item.source;
     let alias = &use_item.name;
+    let kind = item_kind_suffix(target_item);
     if source.ends_with(alias.as_str()) {
-        output.push_str(&format!("{indent}{vis}use {source};\n"));
+        output.push_str(&format!("{indent}{vis}use {source};{kind}\n"));
     } else {
-        output.push_str(&format!("{indent}{vis}use {source} as {alias};\n"));
+        output.push_str(&format!("{indent}{vis}use {source} as {alias};{kind}\n"));
+    }
+}
+
+fn item_kind_suffix(item: &Item) -> &'static str {
+    match &item.inner {
+        ItemEnum::Struct(_) => " // struct",
+        ItemEnum::Enum(_) => " // enum",
+        ItemEnum::Trait(_) => " // trait",
+        ItemEnum::Function(_) => " // fn",
+        ItemEnum::TypeAlias(_) => " // type",
+        ItemEnum::Constant { .. } => " // const",
+        ItemEnum::Static(_) => " // static",
+        ItemEnum::Union(_) => " // union",
+        ItemEnum::Macro(_) => " // macro",
+        _ => "",
     }
 }
 

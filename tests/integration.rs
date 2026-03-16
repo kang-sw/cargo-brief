@@ -344,8 +344,8 @@ fn test_reexport() {
     let output = render_full(&model, &args);
 
     assert!(
-        output.contains("pub use outer::PubStruct as ReExported;"),
-        "re-export with alias"
+        output.contains("pub use outer::PubStruct as ReExported; // struct"),
+        "re-export with alias and kind annotation"
     );
 }
 
