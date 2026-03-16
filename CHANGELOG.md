@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.3.6] - 2026-03-17
+
+### Added
+
+- **EXAMPLES section in `--help`**: 10 copy-pasteable example commands covering local browsing, remote crate inspection, module targeting, search, `--methods-of`, and output density flags. Significantly improves first-use success for AI agents.
+
 ## [0.3.5] - 2026-03-16
 
 ### Fixed
