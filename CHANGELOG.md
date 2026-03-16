@@ -2,6 +2,16 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.3.4] - 2026-03-16
+
+### Added
+
+- **Attribute rendering**: API-affecting attributes are now shown in pseudo-Rust output.
+  - Default: `#[deprecated]` (with `since`/`note` fields) and `#[non_exhaustive]` always rendered.
+  - `--verbose-metadata` flag: additionally shows `#[must_use]`, `#[repr(...)]`, `#[no_mangle]`, `#[macro_export]`, `#[export_name]`, `#[target_feature]`.
+  - Attributes render before doc comments, matching Rust convention.
+- **Search mode attribute markers**: search results now show `[deprecated]` and `[non_exhaustive]` inline prefixes on matching items.
+
 ## [0.3.3] - 2026-03-15
 
 ### Fixed
