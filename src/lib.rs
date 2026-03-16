@@ -37,6 +37,7 @@ pub fn run_pipeline(args: &BriefArgs) -> Result<String> {
         args.no_constants = true;
         args.no_macros = true;
         args.no_aliases = true;
+        args.methods_of = None;
         // Leave no_functions = false (methods are functions)
         return run_pipeline(&args);
     }
