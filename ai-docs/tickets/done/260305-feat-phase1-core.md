@@ -1,3 +1,9 @@
+---
+title: "Phase 1: Core Implementation"
+status: done
+completed: 2026-03-05
+---
+
 # Phase 1: Core Implementation
 
 ## Design Goals

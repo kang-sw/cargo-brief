@@ -1,3 +1,8 @@
+---
+title: "Fix: Rendering artifacts (empty trait path, $crate leak, impl Trait desugar)"
+status: todo
+---
+
 # Fix: Rendering artifacts (empty trait path, $crate leak, impl Trait desugar)
 
 ## Priority: P1

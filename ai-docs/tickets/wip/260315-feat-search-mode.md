@@ -1,3 +1,9 @@
+---
+title: "Search Mode (--search flag)"
+status: wip
+started: 2026-03-15
+---
+
 # Search Mode (`--search` flag)
 
 ## Goal

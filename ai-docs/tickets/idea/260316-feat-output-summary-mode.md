@@ -1,3 +1,8 @@
+---
+title: "--summary / TOC mode for large crates"
+status: idea
+---
+
 # Idea: `--summary` / TOC mode for large crates
 
 ## Priority: P2

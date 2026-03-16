@@ -1,3 +1,8 @@
+---
+title: "Search regex/glob pattern support"
+status: idea
+---
+
 # Search Regex/Glob Pattern Support
 
 ## Goal

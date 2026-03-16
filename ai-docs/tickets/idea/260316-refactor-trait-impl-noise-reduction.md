@@ -1,3 +1,8 @@
+---
+title: "Reduce boilerplate trait impl noise"
+status: idea
+---
+
 # Idea: Reduce boilerplate trait impl noise
 
 ## Priority: P2

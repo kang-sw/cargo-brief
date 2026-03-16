@@ -1,3 +1,9 @@
+---
+title: "--doc-lines N (doc comment line limit)"
+status: done
+completed: 2026-03-16
+---
+
 # Feature: `--doc-lines N` (doc comment line limit)
 
 ## Priority: P1

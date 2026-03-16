@@ -1,3 +1,9 @@
+---
+title: "Visibility Auto-Detection & Rendering Fixes"
+status: done
+completed: 2026-03-08
+---
+
 # Visibility Auto-Detection, Resolution Priority, Rendering Fixes
 
 ## Context

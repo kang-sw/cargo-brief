@@ -1,3 +1,9 @@
+---
+title: "Attribute / Metadata Rendering"
+status: done
+completed: 2026-03-16
+---
+
 # Attribute / Metadata Rendering
 
 ## Goal

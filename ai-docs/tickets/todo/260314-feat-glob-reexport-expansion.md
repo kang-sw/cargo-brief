@@ -1,3 +1,8 @@
+---
+title: "Glob re-export expansion"
+status: todo
+---
+
 # Glob Re-export Expansion
 
 ## Goal

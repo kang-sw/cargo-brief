@@ -158,8 +158,8 @@ Domain-oriented operational knowledge in `ai-docs/mental-model/`:
 
 ## Active Tickets
 
-- `tickets/done/260308-visibility-and-rendering.md` — same_crate auto-detection, resolution priority, rendering fixes (completed v0.2.0)
-- `tickets/done/260310-remote-crate-support.md` — `--crates` flag for crates.io crates + optional TARGET (completed)
-- `tickets/done/260315-reexport-aware-rendering.md` — reachability-based filtering for cross-crate views (completed)
-- `tickets/todo/260314-glob-reexport-expansion.md` — expand glob re-exports (`pub use other::*`) for facade crates like `clap`
-- `tickets/wip/260315-search-mode.md` — `--search` flag for leaf item discovery (Phase 1 complete, Phase 2 pending)
+- `tickets/done/260308-feat-visibility-and-rendering.md` — same_crate auto-detection, resolution priority, rendering fixes (completed v0.2.0)
+- `tickets/done/260310-feat-remote-crate-support.md` — `--crates` flag for crates.io crates + optional TARGET (completed)
+- `tickets/done/260315-feat-reexport-aware-rendering.md` — reachability-based filtering for cross-crate views (completed)
+- `tickets/todo/260314-feat-glob-reexport-expansion.md` — expand glob re-exports (`pub use other::*`) for facade crates like `clap`
+- `tickets/wip/260315-feat-search-mode.md` — `--search` flag for leaf item discovery (Phase 1 complete, Phase 2 pending)

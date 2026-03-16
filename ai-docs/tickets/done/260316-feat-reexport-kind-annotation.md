@@ -1,3 +1,9 @@
+---
+title: "Annotate re-exports with item kind"
+status: done
+completed: 2026-03-16
+---
+
 # Feature: Annotate re-exports with item kind
 
 ## Priority: P1

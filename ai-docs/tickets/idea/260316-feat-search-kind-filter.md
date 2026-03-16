@@ -1,3 +1,8 @@
+---
+title: "Search kind filter (--search-kind)"
+status: idea
+---
+
 # Idea: Search kind filter (`--search-kind`)
 
 ## Priority: P2

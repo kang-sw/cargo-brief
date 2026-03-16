@@ -1,3 +1,8 @@
+---
+title: "LLM Output Polish — Compact Modes & Contextual Hints"
+status: todo
+---
+
 # LLM Output Polish — Compact Modes & Contextual Hints
 
 ## Goal

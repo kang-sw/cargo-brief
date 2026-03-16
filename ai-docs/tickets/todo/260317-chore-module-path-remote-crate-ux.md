@@ -1,3 +1,8 @@
+---
+title: "UX: Module path targeting silently ignored for remote crates"
+status: todo
+---
+
 # UX: Module path targeting silently ignored for remote crates
 
 ## Priority: P2

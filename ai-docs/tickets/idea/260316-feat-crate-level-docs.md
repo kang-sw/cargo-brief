@@ -1,3 +1,8 @@
+---
+title: "Render crate-level //! documentation"
+status: idea
+---
+
 # Idea: Render crate-level `//!` documentation
 
 ## Priority: P2

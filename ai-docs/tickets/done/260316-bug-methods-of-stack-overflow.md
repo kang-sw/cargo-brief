@@ -1,3 +1,9 @@
+---
+title: "Fix: --methods-of stack overflow"
+status: done
+completed: 2026-03-16
+---
+
 # Fix: `--methods-of` stack overflow (infinite recursion)
 
 ## Priority: P0 (crash bug)

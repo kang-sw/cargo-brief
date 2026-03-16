@@ -1,3 +1,9 @@
+---
+title: "Re-export-aware Rendering for External Crates"
+status: done
+completed: 2026-03-15
+---
+
 # Re-export-aware Rendering for External Crates
 
 ## Goal

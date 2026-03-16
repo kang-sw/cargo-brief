@@ -1,3 +1,8 @@
+---
+title: "Render where clauses / generic bounds"
+status: todo
+---
+
 # Feature: Render where clauses / generic bounds
 
 ## Priority: P1

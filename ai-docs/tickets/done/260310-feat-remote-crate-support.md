@@ -1,3 +1,9 @@
+---
+title: "Remote Crate Support (--crates flag)"
+status: done
+completed: 2026-03-10
+---
+
 # Remote Crate Support (`--crates` flag) & Default Target
 
 ## Goal
