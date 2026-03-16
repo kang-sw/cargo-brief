@@ -19,6 +19,30 @@ pub enum CargoCommand {
 #[command(
     version,
     after_help = "\
+EXAMPLES:
+  # Browse the current crate's API (run inside a Cargo project)
+  cargo brief
+
+  # Browse a specific module in the current crate
+  cargo brief self::net::tcp
+
+  # Inspect a crates.io dependency (cached after first run)
+  cargo brief --crates serde@1 --compact
+  cargo brief --crates tokio@1 --features rt,net,io-util
+
+  # Browse a specific module of a remote crate
+  cargo brief --crates tokio@1 --features net tokio::net
+
+  # Search for items by name (case-insensitive, multi-word AND)
+  cargo brief --crates axum@0.8 --search \"Router route\"
+
+  # List all methods/fields of a type
+  cargo brief --crates bytes@1 --methods-of Bytes
+
+  # Reduce output verbosity for large crates
+  cargo brief --crates tokio@1 --features full --compact       # minimal
+  cargo brief --crates tokio@1 --features full --doc-lines 1   # one-line docs
+
 RESOLUTION RULES:
   The <TARGET> argument is resolved as follows:
     1. \"self\"           → current package (cwd-based detection)
