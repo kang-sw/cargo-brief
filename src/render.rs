@@ -1198,7 +1198,14 @@ fn render_docs(item: &Item, indent: &str, args: &BriefArgs, output: &mut String)
         return;
     }
     if let Some(docs) = &item.docs {
-        for line in docs.lines() {
+        let max = args.doc_lines.unwrap_or(usize::MAX);
+        if max == 0 {
+            return;
+        }
+        for (i, line) in docs.lines().enumerate() {
+            if i >= max {
+                break;
+            }
             if line.is_empty() {
                 output.push_str(&format!("{indent}///\n"));
             } else {

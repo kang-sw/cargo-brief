@@ -103,6 +103,10 @@ pub struct BriefArgs {
     #[arg(long, help_heading = "Filtering")]
     pub no_docs: bool,
 
+    /// Limit doc comments to first N lines (0 = suppress all)
+    #[arg(long, value_name = "N", help_heading = "Filtering")]
+    pub doc_lines: Option<usize>,
+
     /// Compact output: suppress doc comments, collapse struct fields, enum variants, and trait items
     #[arg(long, help_heading = "Filtering")]
     pub compact: bool,

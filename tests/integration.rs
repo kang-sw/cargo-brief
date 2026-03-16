@@ -35,6 +35,7 @@ fn default_args() -> BriefArgs {
         recursive: true,
         all: false,
         no_docs: false,
+        doc_lines: None,
         compact: false,
         verbose_metadata: false,
         no_structs: false,
@@ -1075,6 +1076,45 @@ fn no_docs_search_suppresses_doc_comments() {
     assert!(
         output.contains("fn outer::free_function"),
         "function should still appear:\n{output}"
+    );
+}
+
+// === --doc-lines Tests ===
+
+#[test]
+fn test_doc_lines_limits_output() {
+    let model = fixture_model();
+    let mut args = default_args();
+    args.doc_lines = Some(1);
+    let output = render_full(&model, &args);
+
+    // Should contain first line of doc comments
+    assert!(
+        output.contains("///"),
+        "--doc-lines 1 should show first doc line:\n{output}"
+    );
+    // Multi-line doc comments should be truncated to 1 line
+    // The generic struct has "A generic struct." as first line — check it's there
+    assert!(
+        output.contains("/// A generic struct."),
+        "first doc line should appear:\n{output}"
+    );
+}
+
+#[test]
+fn test_doc_lines_zero_suppresses_docs() {
+    let model = fixture_model();
+    let mut args = default_args();
+    args.doc_lines = Some(0);
+    let output = render_full(&model, &args);
+
+    assert!(
+        !output.contains("///"),
+        "--doc-lines 0 should suppress all doc comments:\n{output}"
+    );
+    assert!(
+        output.contains("pub struct PubStruct"),
+        "items should still appear:\n{output}"
     );
 }
 

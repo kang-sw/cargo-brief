@@ -11,6 +11,7 @@ fn workspace_args(crate_name: &str) -> BriefArgs {
         recursive: true,
         all: false,
         no_docs: false,
+        doc_lines: None,
         compact: false,
         verbose_metadata: false,
         no_structs: false,
