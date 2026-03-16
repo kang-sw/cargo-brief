@@ -154,9 +154,9 @@ alternatives considered, and trade-offs — focus on _why_ this approach was cho
 
 <!-- Max 3 items. What was done, what's next. -->
 
-- v0.3.2+: Reexport-aware reachability walk for cross-crate views (replaces same_crate=true hotfix)
-- v0.3.1+: `--no-docs`, `--compact`, `--methods-of <TYPE>`, search impl summary (LLM output polish Phases 1–4)
-- v0.3.0+: `--search <pattern>` — leaf item search with case-insensitive multi-word AND matching
+- v0.3.5: fix `--methods-of` stack overflow, `--doc-lines N`, re-export kind annotations
+- v0.3.4: attribute rendering (`#[deprecated]`, `#[non_exhaustive]`, `--verbose-metadata`)
+- v0.3.3: reexport-aware reachability walk for cross-crate views
 
 ## Workspace Reference
 
