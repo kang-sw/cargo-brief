@@ -35,6 +35,7 @@ fn default_args() -> BriefArgs {
         recursive: true,
         all: false,
         no_docs: false,
+        no_crate_docs: false,
         doc_lines: None,
         compact: false,
         verbose_metadata: false,
@@ -1618,6 +1619,24 @@ fn test_crate_docs_suppressed_by_doc_lines_zero() {
     assert!(
         !output.contains("//!"),
         "--doc-lines 0 should suppress crate-level docs:\n{output}"
+    );
+}
+
+#[test]
+fn test_crate_docs_suppressed_by_no_crate_docs() {
+    let model = fixture_model();
+    let mut args = default_args();
+    args.no_crate_docs = true;
+    let output = render_full(&model, &args);
+
+    assert!(
+        !output.contains("//!"),
+        "--no-crate-docs should suppress crate-level docs:\n{output}"
+    );
+    // Item docs should still be present
+    assert!(
+        output.contains("///"),
+        "--no-crate-docs should NOT suppress item docs:\n{output}"
     );
 }
 

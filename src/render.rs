@@ -1230,7 +1230,7 @@ fn render_attrs(item: &Item, indent: &str, verbose: bool, output: &mut String) {
 }
 
 fn render_crate_docs(model: &CrateModel, args: &BriefArgs, output: &mut String) {
-    if args.no_docs || args.compact {
+    if args.no_docs || args.compact || args.no_crate_docs {
         return;
     }
     let Some(root) = model.root_module() else {

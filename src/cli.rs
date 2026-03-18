@@ -127,6 +127,10 @@ pub struct BriefArgs {
     #[arg(long, help_heading = "Filtering")]
     pub no_docs: bool,
 
+    /// Suppress crate-level //! documentation
+    #[arg(long, help_heading = "Filtering")]
+    pub no_crate_docs: bool,
+
     /// Limit doc comments to first N lines (0 = suppress all)
     #[arg(long, value_name = "N", help_heading = "Filtering")]
     pub doc_lines: Option<usize>,

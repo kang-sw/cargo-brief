@@ -127,7 +127,7 @@ Parsed via `rustdoc-types` 0.57. Post-macro-expansion output.
 - Glob re-export expansion: Phase 1 (individual `pub use` lines) + Phase 2 (`--expand-glob` inlines full definitions).
 - Search mode: `--search <pattern>` finds leaf items by case-insensitive substring match on full path. Multi-word AND matching.
 - `--methods-of <TYPE>`: shorthand for `--search TYPE` + exclusion flags (methods/fields only).
-- Crate-level docs: root module `//!` comments rendered after `// crate <name>` header.
+- Crate-level docs: root module `//!` comments rendered after `// crate <name>` header. `--no-crate-docs` suppresses independently.
 - Output density: `--no-docs`, `--doc-lines N`, `--compact` for token-budget control.
 - Attribute rendering: `#[deprecated]`, `#[non_exhaustive]` by default; `--verbose-metadata` adds `#[repr]`, `#[must_use]`, etc.
 - Re-export kind annotations: `pub use` lines show `// struct`, `// trait`, etc.
