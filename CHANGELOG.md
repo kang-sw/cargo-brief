@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.3.10] - 2026-03-18
+
+### Added
+
+- **Crate-level `//!` documentation**: root module doc comments are now rendered after the `// crate <name>` header using `//!` prefix. Especially useful for proc-macro crates (e.g., `thiserror`, `serde`) where usage docs live entirely in crate-level comments. Respects `--no-docs`, `--compact`, and `--doc-lines N`. Skipped in search mode.
+
 ## [0.3.9] - 2026-03-18
 
 ### Improved

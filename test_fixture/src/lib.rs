@@ -1,3 +1,7 @@
+//! Test fixture crate for cargo-brief integration tests.
+//!
+//! This crate exercises all supported item types.
+
 pub mod outer {
     pub struct PubStruct {
         pub pub_field: i32,

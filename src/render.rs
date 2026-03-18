@@ -24,6 +24,7 @@ pub fn render_module_api(
 
     let crate_name = model.crate_name();
     output.push_str(&format!("// crate {crate_name}\n"));
+    render_crate_docs(model, args, &mut output);
 
     let target_item = if let Some(path) = target_module_path {
         model.find_module(path)
@@ -1224,6 +1225,30 @@ fn render_attrs(item: &Item, indent: &str, verbose: bool, output: &mut String) {
                 ));
             }
             _ => {} // skip AutomaticallyDerived, Other, and non-verbose attrs
+        }
+    }
+}
+
+fn render_crate_docs(model: &CrateModel, args: &BriefArgs, output: &mut String) {
+    if args.no_docs || args.compact {
+        return;
+    }
+    let Some(root) = model.root_module() else {
+        return;
+    };
+    let Some(docs) = &root.docs else { return };
+    let max = args.doc_lines.unwrap_or(usize::MAX);
+    if max == 0 {
+        return;
+    }
+    for (i, line) in docs.lines().enumerate() {
+        if i >= max {
+            break;
+        }
+        if line.is_empty() {
+            output.push_str("//!\n");
+        } else {
+            output.push_str(&format!("//! {line}\n"));
         }
     }
 }

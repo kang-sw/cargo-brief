@@ -118,15 +118,16 @@ Parsed via `rustdoc-types` 0.57. Post-macro-expansion output.
 
 ---
 
-## Operational State (v0.3.9)
+## Operational State (v0.3.10)
 
-- Core pipeline complete. All item types supported. 81+ integration tests.
+- Core pipeline complete. All item types supported. 100 integration tests.
 - Flexible package name resolution: `self`, `crate::module`, file path→module. Bare names always resolve as package.
 - Remote crate support: `--crates <spec>` fetches any crate from crates.io. Workspaces cached at `~/.cache/cargo-brief/crates/`.
 - Visibility auto-detection: `same_crate` inferred from cwd package context. Cross-crate views use reachability-based filtering.
 - Glob re-export expansion: Phase 1 (individual `pub use` lines) + Phase 2 (`--expand-glob` inlines full definitions).
 - Search mode: `--search <pattern>` finds leaf items by case-insensitive substring match on full path. Multi-word AND matching.
 - `--methods-of <TYPE>`: shorthand for `--search TYPE` + exclusion flags (methods/fields only).
+- Crate-level docs: root module `//!` comments rendered after `// crate <name>` header.
 - Output density: `--no-docs`, `--doc-lines N`, `--compact` for token-budget control.
 - Attribute rendering: `#[deprecated]`, `#[non_exhaustive]` by default; `--verbose-metadata` adds `#[repr]`, `#[must_use]`, etc.
 - Re-export kind annotations: `pub use` lines show `// struct`, `// trait`, etc.
@@ -169,8 +170,7 @@ Domain-oriented operational knowledge in `ai-docs/mental-model/`:
 ## Next Up (priority order)
 
 1. **`tickets/idea/260316-refactor-trait-impl-noise-reduction.md`** — P2: collapse boilerplate trait impls
-2. **`tickets/idea/260316-feat-crate-level-docs.md`** — P2: render `//!` crate docs
-3. **`tickets/idea/260316-feat-output-summary-mode.md`** — P2: `--summary` TOC mode
+2. **`tickets/idea/260316-feat-output-summary-mode.md`** — P2: `--summary` TOC mode
 
 ## Backlog
 

@@ -1521,3 +1521,114 @@ fn test_search_non_exhaustive_marker() {
         "search should show [non_exhaustive] marker:\n{output}"
     );
 }
+
+// === Crate-Level Doc Tests ===
+
+#[test]
+fn test_crate_docs_rendered() {
+    let model = fixture_model();
+    let args = default_args();
+    let output = render_full(&model, &args);
+
+    assert!(
+        output.contains("//! Test fixture crate for cargo-brief integration tests."),
+        "crate-level docs should appear in output:\n{output}"
+    );
+    assert!(
+        output.contains("//!\n"),
+        "empty doc line should render as bare //!:\n{output}"
+    );
+    assert!(
+        output.contains("//! This crate exercises all supported item types."),
+        "second paragraph should appear:\n{output}"
+    );
+}
+
+#[test]
+fn test_crate_docs_after_header() {
+    let model = fixture_model();
+    let args = default_args();
+    let output = render_full(&model, &args);
+
+    let header_pos = output
+        .find("// crate test_fixture")
+        .expect("crate header missing");
+    let doc_pos = output
+        .find("//! Test fixture crate")
+        .expect("crate doc missing");
+    assert!(
+        doc_pos > header_pos,
+        "crate docs should appear after the crate header"
+    );
+}
+
+#[test]
+fn test_crate_docs_suppressed_by_no_docs() {
+    let model = fixture_model();
+    let mut args = default_args();
+    args.no_docs = true;
+    let output = render_full(&model, &args);
+
+    assert!(
+        !output.contains("//!"),
+        "--no-docs should suppress crate-level docs:\n{output}"
+    );
+}
+
+#[test]
+fn test_crate_docs_suppressed_by_compact() {
+    let model = fixture_model();
+    let mut args = default_args();
+    args.compact = true;
+    let output = render_full(&model, &args);
+
+    assert!(
+        !output.contains("//!"),
+        "--compact should suppress crate-level docs:\n{output}"
+    );
+}
+
+#[test]
+fn test_crate_docs_limited_by_doc_lines() {
+    let model = fixture_model();
+    let mut args = default_args();
+    args.doc_lines = Some(1);
+    let output = render_full(&model, &args);
+
+    assert!(
+        output.contains("//! Test fixture crate"),
+        "--doc-lines 1 should show first line:\n{output}"
+    );
+    // The second content line should NOT appear (line 0 = first line, line 1 = empty, already over limit)
+    let crate_doc_lines: Vec<&str> = output.lines().filter(|l| l.starts_with("//!")).collect();
+    assert_eq!(
+        crate_doc_lines.len(),
+        1,
+        "--doc-lines 1 should limit to 1 crate doc line, got: {crate_doc_lines:?}"
+    );
+}
+
+#[test]
+fn test_crate_docs_suppressed_by_doc_lines_zero() {
+    let model = fixture_model();
+    let mut args = default_args();
+    args.doc_lines = Some(0);
+    let output = render_full(&model, &args);
+
+    assert!(
+        !output.contains("//!"),
+        "--doc-lines 0 should suppress crate-level docs:\n{output}"
+    );
+}
+
+#[test]
+fn test_crate_docs_not_in_search_mode() {
+    let model = fixture_model();
+    let args = default_args();
+    let output = search::render_search(&model, "PubStruct", &args, None, true, None);
+
+    assert!(
+        !output.contains("//!"),
+        "search mode should not show crate-level docs:\n{output}"
+    );
+}
