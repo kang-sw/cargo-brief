@@ -46,6 +46,7 @@ pub fn resolve_cross_crate_module(
         None => (module_path, None),
     };
 
+    let crate_name = primary_model.crate_name();
     let root = primary_model.root_module()?;
     let children = primary_model.module_children(root);
 
@@ -58,6 +59,9 @@ pub fn resolve_cross_crate_module(
             continue;
         }
         if !matches!(child.visibility, Visibility::Public) {
+            continue;
+        }
+        if is_intra_crate_source(&use_item.source, crate_name) {
             continue;
         }
 
@@ -89,6 +93,9 @@ pub fn resolve_cross_crate_module(
             continue;
         }
         if !matches!(child.visibility, Visibility::Public) {
+            continue;
+        }
+        if is_intra_crate_source(&use_item.source, crate_name) {
             continue;
         }
 
@@ -159,6 +166,7 @@ pub fn discover_all_reexported_crates(
     manifest_path: Option<&str>,
     target_dir: &Path,
 ) -> Vec<SubCrate> {
+    let crate_name = primary_model.crate_name();
     let Some(root) = primary_model.root_module() else {
         return Vec::new();
     };
@@ -167,7 +175,7 @@ pub fn discover_all_reexported_crates(
     let mut results = Vec::new();
     let mut seen_names = HashSet::new();
 
-    // Collect named Use items directly at root
+    // Collect named Use items directly at root (skip intra-crate re-exports)
     for (_id, child) in &children {
         let ItemEnum::Use(use_item) = &child.inner else {
             continue;
@@ -176,6 +184,9 @@ pub fn discover_all_reexported_crates(
             continue;
         }
         if !matches!(child.visibility, Visibility::Public) {
+            continue;
+        }
+        if is_intra_crate_source(&use_item.source, crate_name) {
             continue;
         }
 
@@ -254,6 +265,7 @@ pub fn discover_all_reexported_crates(
 /// Check if the root module has cross-crate re-exports (Use items pointing
 /// to external crates with no corresponding Module in the index).
 pub fn root_has_cross_crate_reexports(model: &CrateModel) -> bool {
+    let crate_name = model.crate_name();
     let Some(root) = model.root_module() else {
         return false;
     };
@@ -268,15 +280,18 @@ pub fn root_has_cross_crate_reexports(model: &CrateModel) -> bool {
             continue;
         }
 
+        // Skip intra-crate re-exports (self::, or same crate name)
+        if is_intra_crate_source(&use_item.source, crate_name) {
+            continue;
+        }
+
         if use_item.is_glob {
-            // A glob use is cross-crate by definition (re-imports another crate)
             return true;
         }
 
-        // Named use: check if the target resolves to a local module
+        // Named use targeting an external crate (no local module with this name)
         let name = child.name.as_deref().unwrap_or(&use_item.name);
         if use_item.id.is_none() || model.find_module(name).is_none() {
-            // No local module with this name — likely cross-crate
             return true;
         }
     }
@@ -289,6 +304,11 @@ pub fn root_has_cross_crate_reexports(model: &CrateModel) -> bool {
 /// Extract the crate name from a use source path like "bevy_internal" or "bevy_ecs::system".
 fn extract_crate_name(source: &str) -> String {
     source.split("::").next().unwrap_or(source).to_string()
+}
+
+/// Check if a use source path is intra-crate (starts with "self::" or matches crate name).
+fn is_intra_crate_source(source: &str, crate_name: &str) -> bool {
+    source.starts_with("self::") || extract_crate_name(source) == crate_name
 }
 
 /// Follow a re-export chain from a Use source to the leaf crate.
