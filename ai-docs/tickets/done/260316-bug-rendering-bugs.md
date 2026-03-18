@@ -1,6 +1,7 @@
 ---
 title: "Fix: Rendering artifacts (empty trait path, $crate leak, impl Trait desugar)"
-status: todo
+status: done
+completed: 2026-03-18
 ---
 
 # Fix: Rendering artifacts (empty trait path, $crate leak, impl Trait desugar)
@@ -59,3 +60,19 @@ arguments into synthetic generic params. Need to detect and re-sugar these.
 1. `cargo brief --crates tower@0.5 --no-docs` — no `$crate::`, no `<L as >::Service`
 2. `cargo brief --crates bytes@1 --search slice` — shows `impl RangeBounds<usize>`
 3. `cargo brief --crates tokio@1 --features rt --search spawn` — shows `F::Output`
+
+### Result (9deeffa) - 26-03-18
+
+All three rendering artifacts fixed:
+
+1. **Empty trait path**: `QualifiedPath` now checks if `format_path()` returns empty
+   and falls back to `SelfTy::Name` shorthand. `<F as >::Output` → `F::Output`.
+
+2. **$crate:: leak**: `format_path()` now strips `$crate::` prefix via `strip_prefix`.
+   `$crate::clone::Clone` → `clone::Clone`.
+
+3. **impl Trait desugar**: `format_generics()` now skips params where `is_synthetic == true`.
+   `format_function_sig()` builds a synthetic→bounds map and re-sugars parameter types.
+   `fn f<impl T: T>(x: impl T)` → `fn f(x: impl T)`.
+
+4 new integration tests added. All 93 tests pass, no new clippy warnings.
