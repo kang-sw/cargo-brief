@@ -40,6 +40,9 @@ pub fn render_module_api(
             for p in paths {
                 output.push_str(&format!("//   {p}\n"));
             }
+            output.push_str(&format!(
+                "// TIP: Try --search \"{path}\" to find items by name across the crate.\n"
+            ));
         } else {
             output.push_str("// ERROR: crate root module not found\n");
         }

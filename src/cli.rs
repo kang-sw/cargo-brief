@@ -105,7 +105,7 @@ pub struct BriefArgs {
     pub expand_glob: bool,
 
     /// Search for leaf items by name (case-insensitive substring match on full path).
-    /// Multiple words are AND-matched. Outputs one-line-per-item with full path.
+    /// Multiple words are AND-matched (2-3 words work best). Outputs one-line-per-item with full path.
     ///
     /// Leaf items: functions, methods, struct fields, enum variants, consts,
     /// statics, type aliases, macros, associated types/consts.

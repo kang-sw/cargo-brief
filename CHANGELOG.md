@@ -2,6 +2,14 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.3.9] - 2026-03-18
+
+### Improved
+
+- **Module not found UX**: the error message now includes a `// TIP: Try --search "<path>" ...` suggestion, helping users (and AI agents) discover search mode when targeting non-existent modules in facade crates.
+- **Search zero-result hint**: when `--search` with 4+ words returns 0 results, a hint explains AND matching semantics and suggests using fewer words.
+- **`--search` help text**: doc comment now notes "2-3 words work best" to set expectations upfront.
+
 ## [0.3.8] - 2026-03-18
 
 ### Fixed

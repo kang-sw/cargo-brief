@@ -1,6 +1,7 @@
 ---
 title: "UX: Module path targeting silently ignored for remote crates"
-status: todo
+status: done
+completed: 2026-03-18
 ---
 
 # UX: Module path targeting silently ignored for remote crates
@@ -36,3 +37,10 @@ unresolvable paths. For remote crates, the module path argument goes through
 
 Naive-agent testing (2026-03-17): agent tried `cargo brief --crates axum@0.8
 axum::routing` and was confused when it got the full crate instead.
+
+### Result - 26-03-18
+
+Added a `// TIP: Try --search "<path>" ...` line after the available modules listing
+in `render_module_api()`. The module-not-found error already worked for both local and
+remote crates; the missing piece was suggesting `--search` as an alternative for facade
+crates where the module list is unhelpful.

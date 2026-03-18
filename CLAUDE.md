@@ -160,6 +160,7 @@ alternatives considered, and trade-offs — focus on _why_ this approach was cho
 
 ## Recent Work
 
+- v0.3.9: UX hints — module-not-found suggests --search, search 0-result word count hint
 - v0.3.8: fix empty trait path, $crate leak, impl Trait desugar
 - v0.3.7: where clause / generic bound rendering across all item types
 - v0.3.5: fix `--methods-of` stack overflow, `--doc-lines N`, re-export kind annotations

@@ -1,6 +1,7 @@
 ---
 title: "Glob re-export expansion"
-status: todo
+status: done
+completed: 2026-03-18
 ---
 
 # Glob Re-export Expansion

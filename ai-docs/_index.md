@@ -118,7 +118,7 @@ Parsed via `rustdoc-types` 0.57. Post-macro-expansion output.
 
 ---
 
-## Operational State (v0.3.6)
+## Operational State (v0.3.9)
 
 - Core pipeline complete. All item types supported. 81+ integration tests.
 - Flexible package name resolution: `self`, `crate::module`, file path→module. Bare names always resolve as package.
@@ -168,16 +168,11 @@ Domain-oriented operational knowledge in `ai-docs/mental-model/`:
 
 ## Next Up (priority order)
 
-1. **`tickets/todo/260316-feat-where-clause-rendering.md`** — P1: where clauses / generic bounds rendering
-2. **`tickets/todo/260316-bug-rendering-bugs.md`** — P1: empty trait path, `$crate::` leak, impl Trait desugar
-3. **`tickets/idea/260316-refactor-trait-impl-noise-reduction.md`** — P2: collapse boilerplate trait impls
+1. **`tickets/idea/260316-refactor-trait-impl-noise-reduction.md`** — P2: collapse boilerplate trait impls
+2. **`tickets/idea/260316-feat-crate-level-docs.md`** — P2: render `//!` crate docs
+3. **`tickets/idea/260316-feat-output-summary-mode.md`** — P2: `--summary` TOC mode
 
 ## Backlog
 
-- `tickets/todo/260314-feat-glob-reexport-expansion.md` — glob re-export expansion improvements
-- `tickets/todo/260317-chore-module-path-remote-crate-ux.md` — P2: silent fallback on bad module path
-- `tickets/todo/260317-chore-search-word-count-hint.md` — P3: multi-word search hint
-- `tickets/idea/260316-feat-crate-level-docs.md` — P2: render `//!` crate docs
-- `tickets/idea/260316-feat-output-summary-mode.md` — P2: `--summary` TOC mode
 - `tickets/idea/260316-feat-search-kind-filter.md` — P2: `--search-kind` filter
 - `tickets/idea/260315-research-search-regex.md` — regex/glob search patterns

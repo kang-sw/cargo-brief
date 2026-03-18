@@ -179,6 +179,15 @@ pub fn render_search(
         output.push_str(&format!("// ... and {skipped_after} more results\n"));
     }
 
+    if total == 0 {
+        let word_count = pattern.split_whitespace().count();
+        if word_count >= 4 {
+            output.push_str(&format!(
+                "// hint: search uses AND matching — all {word_count} words must appear in one item's path. Try fewer words.\n"
+            ));
+        }
+    }
+
     output
 }
 

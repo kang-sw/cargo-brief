@@ -1,6 +1,7 @@
 ---
 title: "UX: Hint about multi-word AND search word count"
-status: todo
+status: done
+completed: 2026-03-18
 ---
 
 # UX: Hint about multi-word AND search word count
@@ -25,3 +26,9 @@ appear in a single item's full path. Users/agents try queries like
 
 Naive-agent testing (2026-03-17): agent tried 5-word AND query, got 0 results,
 had to learn to narrow down. Not a blocker but a minor friction point.
+
+### Result - 26-03-18
+
+Implemented fixes 1 and 2: added "(2-3 words work best)" to `--search` help text in
+cli.rs, and added a runtime hint when 0 results with 4+ words explaining AND semantics
+and suggesting fewer words.
