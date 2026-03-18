@@ -67,6 +67,13 @@ cargo brief --crates <spec> [module_path] [OPTIONS]
 | `--no-cache`            | Skip cache for `--crates` (use temp workspace)                 |
 | `--expand-glob`         | Inline full definitions from glob re-export sources            |
 | `--search <pattern>`    | Search leaf items by name (case-insensitive, multi-word AND)   |
+| `--search-limit <N>`   | Limit search results (N or OFFSET:N for paging)               |
+| `--methods-of <TYPE>`  | Show methods/fields of a type (--search + exclusion shorthand) |
+| `--no-docs`             | Suppress doc comments                                          |
+| `--doc-lines <N>`       | Limit doc comments to first N lines (0 = suppress all)         |
+| `--compact`             | Collapse struct fields, enum variants, trait items; implies --no-docs |
+| `--verbose-metadata`    | Show all attributes (default: only #[deprecated], #[non_exhaustive]) |
+| `--features <FEATURES>` | Comma-separated features to enable for --crates                |
 | `--manifest-path <path>`| Path to Cargo.toml                                            |
 
 ---
@@ -111,15 +118,18 @@ Parsed via `rustdoc-types` 0.57. Post-macro-expansion output.
 
 ---
 
-## Operational State (v0.2.2+)
+## Operational State (v0.3.6)
 
-- Core pipeline complete. All item types supported. 149 tests (unit + CLI smoke + integration + subprocess).
+- Core pipeline complete. All item types supported. 81+ integration tests.
 - Flexible package name resolution: `self`, `crate::module`, file path→module. Bare names always resolve as package.
-- Optional TARGET: `cargo brief` defaults to `self` (current package).
-- Remote crate support: `--crates <spec>` fetches any crate from crates.io. Workspaces cached at `~/.cache/cargo-brief/crates/` for fast repeat calls. `--no-cache` forces temp workspace.
-- Visibility auto-detection: `same_crate` inferred from cwd package context. Cross-crate views use reachability-based filtering (private modules with reachable items shown, `pub(crate)` items hidden).
+- Remote crate support: `--crates <spec>` fetches any crate from crates.io. Workspaces cached at `~/.cache/cargo-brief/crates/`.
+- Visibility auto-detection: `same_crate` inferred from cwd package context. Cross-crate views use reachability-based filtering.
 - Glob re-export expansion: Phase 1 (individual `pub use` lines) + Phase 2 (`--expand-glob` inlines full definitions).
-- Search mode: `--search <pattern>` finds leaf items (fn, struct, field, variant, const, type, macro, assoc items) by case-insensitive substring match on full path. Multi-word patterns are AND-matched. Outputs one-line-per-item with full path.
+- Search mode: `--search <pattern>` finds leaf items by case-insensitive substring match on full path. Multi-word AND matching.
+- `--methods-of <TYPE>`: shorthand for `--search TYPE` + exclusion flags (methods/fields only).
+- Output density: `--no-docs`, `--doc-lines N`, `--compact` for token-budget control.
+- Attribute rendering: `#[deprecated]`, `#[non_exhaustive]` by default; `--verbose-metadata` adds `#[repr]`, `#[must_use]`, etc.
+- Re-export kind annotations: `pub use` lines show `// struct`, `// trait`, etc.
 - Dependencies: `clap` 4, `rustdoc-types` 0.57, `serde_json` 1, `anyhow` 1, `tempfile` 3.
 - Test fixture (`test_fixture/`) covers all supported item types.
 
@@ -156,10 +166,18 @@ Domain-oriented operational knowledge in `ai-docs/mental-model/`:
 
 ---
 
-## Active Tickets
+## Next Up (priority order)
 
-- `tickets/done/260308-feat-visibility-and-rendering.md` — same_crate auto-detection, resolution priority, rendering fixes (completed v0.2.0)
-- `tickets/done/260310-feat-remote-crate-support.md` — `--crates` flag for crates.io crates + optional TARGET (completed)
-- `tickets/done/260315-feat-reexport-aware-rendering.md` — reachability-based filtering for cross-crate views (completed)
-- `tickets/todo/260314-feat-glob-reexport-expansion.md` — expand glob re-exports (`pub use other::*`) for facade crates like `clap`
-- `tickets/wip/260315-feat-search-mode.md` — `--search` flag for leaf item discovery (Phase 1 complete, Phase 2 pending)
+1. **`tickets/todo/260316-feat-where-clause-rendering.md`** — P1: where clauses / generic bounds rendering
+2. **`tickets/todo/260316-bug-rendering-bugs.md`** — P1: empty trait path, `$crate::` leak, impl Trait desugar
+3. **`tickets/idea/260316-refactor-trait-impl-noise-reduction.md`** — P2: collapse boilerplate trait impls
+
+## Backlog
+
+- `tickets/todo/260314-feat-glob-reexport-expansion.md` — glob re-export expansion improvements
+- `tickets/todo/260317-chore-module-path-remote-crate-ux.md` — P2: silent fallback on bad module path
+- `tickets/todo/260317-chore-search-word-count-hint.md` — P3: multi-word search hint
+- `tickets/idea/260316-feat-crate-level-docs.md` — P2: render `//!` crate docs
+- `tickets/idea/260316-feat-output-summary-mode.md` — P2: `--summary` TOC mode
+- `tickets/idea/260316-feat-search-kind-filter.md` — P2: `--search-kind` filter
+- `tickets/idea/260315-research-search-regex.md` — regex/glob search patterns
