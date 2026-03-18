@@ -138,6 +138,15 @@ pub fn run_pipeline(args: &BriefArgs) -> Result<String> {
 
 /// Run the pipeline for a remote crate fetched via a cached or temp workspace.
 fn run_remote_pipeline(args: &BriefArgs, spec: &str) -> Result<String> {
+    // When --crates is used, the first positional arg (crate_name) may actually be
+    // a module path (e.g., `cargo brief --crates bevy ecs` → crate_name="ecs").
+    // Merge it into module_path if it's not "self".
+    let module_path = if args.crate_name != "self" && args.module_path.is_none() {
+        Some(args.crate_name.clone())
+    } else {
+        args.module_path.clone()
+    };
+
     let (name, _) = remote::parse_crate_spec(spec);
     let workspace = remote::resolve_workspace(spec, args.features.as_deref(), args.no_cache)
         .with_context(|| format!("Failed to create workspace for '{name}'"))?;
@@ -196,12 +205,13 @@ fn run_remote_pipeline(args: &BriefArgs, spec: &str) -> Result<String> {
     }
 
     // --- Module targeting with cross-crate resolution ---
-    if let Some(ref module_path) = args.module_path {
+    if let Some(ref module_path) = module_path {
         // Try local module first
         if model.find_module(module_path).is_some() {
             // Found locally — render normally
             return render_remote_normal(
                 &model,
+                Some(module_path),
                 args,
                 &manifest_path,
                 &metadata.target_dir,
@@ -246,7 +256,7 @@ fn run_remote_pipeline(args: &BriefArgs, spec: &str) -> Result<String> {
     if args.recursive && has_cross_crate {
         let mut output = render::render_module_api(
             &model,
-            args.module_path.as_deref(),
+            module_path.as_deref(),
             args,
             None,
             false,
@@ -255,7 +265,7 @@ fn run_remote_pipeline(args: &BriefArgs, spec: &str) -> Result<String> {
 
         let result = expand_glob_reexports(
             &model,
-            args.module_path.as_deref(),
+            module_path.as_deref(),
             &args.toolchain,
             Some(&manifest_path),
             &metadata.target_dir,
@@ -292,6 +302,7 @@ fn run_remote_pipeline(args: &BriefArgs, spec: &str) -> Result<String> {
     // --- Normal mode ---
     render_remote_normal(
         &model,
+        module_path.as_deref(),
         args,
         &manifest_path,
         &metadata.target_dir,
@@ -302,23 +313,17 @@ fn run_remote_pipeline(args: &BriefArgs, spec: &str) -> Result<String> {
 /// Render a remote crate in normal (non-search, non-cross-crate) mode.
 fn render_remote_normal(
     model: &CrateModel,
+    module_path: Option<&str>,
     args: &BriefArgs,
     manifest_path: &str,
     target_dir: &Path,
     reachable: Option<&HashSet<Id>>,
 ) -> Result<String> {
-    let mut output = render::render_module_api(
-        model,
-        args.module_path.as_deref(),
-        args,
-        None,
-        false,
-        reachable,
-    );
+    let mut output = render::render_module_api(model, module_path, args, None, false, reachable);
 
     let result = expand_glob_reexports(
         model,
-        args.module_path.as_deref(),
+        module_path,
         &args.toolchain,
         Some(manifest_path),
         target_dir,
