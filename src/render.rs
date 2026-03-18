@@ -1332,7 +1332,13 @@ fn format_type(ty: &Type) -> String {
         } => {
             let self_ty = format_type(self_type);
             if let Some(trait_path) = trait_ {
-                format!("<{self_ty} as {}>::{name}", format_path(trait_path))
+                let tp = format_path(trait_path);
+                if tp.is_empty() {
+                    // Empty trait path (unresolved by rustdoc) — use shorthand
+                    format!("{self_ty}::{name}")
+                } else {
+                    format!("<{self_ty} as {tp}>::{name}")
+                }
             } else {
                 format!("{self_ty}::{name}")
             }
@@ -1346,16 +1352,17 @@ pub fn format_path_pub(path: &rustdoc_types::Path) -> String {
 }
 
 fn format_path(path: &rustdoc_types::Path) -> String {
-    let name = &path.path;
+    // Strip $crate:: macro hygiene artifacts from paths
+    let name = path.path.strip_prefix("$crate::").unwrap_or(&path.path);
     if let Some(args) = &path.args {
         let args_str = format_generic_args(args);
         if args_str.is_empty() {
-            name.clone()
+            name.to_string()
         } else {
             format!("{name}{args_str}")
         }
     } else {
-        name.clone()
+        name.to_string()
     }
 }
 
@@ -1405,21 +1412,26 @@ fn format_generics(generics: &rustdoc_types::Generics) -> String {
     let params: Vec<String> = generics
         .params
         .iter()
-        .map(|p| {
+        .filter_map(|p| {
             let name = &p.name;
             match &p.kind {
                 GenericParamDefKind::Lifetime { outlives } => {
                     if outlives.is_empty() {
-                        name.clone()
+                        Some(name.clone())
                     } else {
-                        format!("{name}: {}", outlives.join(" + "))
+                        Some(format!("{name}: {}", outlives.join(" + ")))
                     }
                 }
                 GenericParamDefKind::Type {
                     bounds,
                     default,
-                    is_synthetic: _,
+                    is_synthetic,
                 } => {
+                    // Skip synthetic params (desugared `impl Trait`) — they are
+                    // re-sugared inline in format_function_sig().
+                    if *is_synthetic {
+                        return None;
+                    }
                     let bounds_str = if bounds.is_empty() {
                         String::new()
                     } else {
@@ -1430,18 +1442,22 @@ fn format_generics(generics: &rustdoc_types::Generics) -> String {
                         .as_ref()
                         .map(|d| format!(" = {}", format_type(d)))
                         .unwrap_or_default();
-                    format!("{name}{bounds_str}{default_str}")
+                    Some(format!("{name}{bounds_str}{default_str}"))
                 }
                 GenericParamDefKind::Const { type_, default } => {
                     let default_str = default
                         .as_deref()
                         .map(|d| format!(" = {d}"))
                         .unwrap_or_default();
-                    format!("const {name}: {}{default_str}", format_type(type_))
+                    Some(format!("const {name}: {}{default_str}", format_type(type_)))
                 }
             }
         })
         .collect();
+
+    if params.is_empty() {
+        return String::new();
+    }
 
     format!("<{}>", params.join(", "))
 }
@@ -1453,6 +1469,21 @@ pub fn format_function_sig_pub(name: &str, f: &Function, vis: &str) -> String {
 
 fn format_function_sig(name: &str, f: &Function, vis: &str) -> String {
     let generics = format_generics(&f.generics);
+
+    // Build a map of synthetic generic param names → their bounds string,
+    // so we can re-sugar `impl Trait` in the parameter list.
+    let mut synthetic_bounds: std::collections::HashMap<&str, String> = Default::default();
+    for p in &f.generics.params {
+        if let GenericParamDefKind::Type {
+            bounds,
+            is_synthetic: true,
+            ..
+        } = &p.kind
+        {
+            let b: Vec<String> = bounds.iter().map(format_generic_bound).collect();
+            synthetic_bounds.insert(&p.name, b.join(" + "));
+        }
+    }
 
     let header = &f.header;
     let is_async = header.is_async;
@@ -1475,10 +1506,9 @@ fn format_function_sig(name: &str, f: &Function, vis: &str) -> String {
         .inputs
         .iter()
         .map(|(pname, ptype)| {
-            let ty = format_type(ptype);
             // Detect self parameters
             if pname == "self" {
-                match ptype {
+                return match ptype {
                     Type::BorrowedRef { is_mutable, .. } => {
                         if *is_mutable {
                             "&mut self".to_string()
@@ -1487,10 +1517,15 @@ fn format_function_sig(name: &str, f: &Function, vis: &str) -> String {
                         }
                     }
                     _ => "self".to_string(),
-                }
-            } else {
-                format!("{pname}: {ty}")
+                };
             }
+            // Re-sugar synthetic generics as `impl Trait`
+            if let Type::Generic(gname) = ptype
+                && let Some(bounds) = synthetic_bounds.get(gname.as_str())
+            {
+                return format!("{pname}: impl {bounds}");
+            }
+            format!("{pname}: {}", format_type(ptype))
         })
         .collect();
 

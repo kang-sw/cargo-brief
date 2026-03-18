@@ -178,6 +178,18 @@ pub mod outer {
         T: Ord,
     = Vec<T>;
 
+    // --- impl Trait syntax ---
+
+    /// A function with impl Trait argument.
+    pub fn impl_trait_fn(val: impl std::fmt::Display) -> String {
+        format!("{val}")
+    }
+
+    /// A function with multiple impl Trait arguments.
+    pub fn multi_impl_trait(a: impl std::fmt::Display, b: impl std::fmt::Debug) -> String {
+        format!("{a}{b:?}")
+    }
+
     // --- Macros ---
 
     /// A declarative macro.

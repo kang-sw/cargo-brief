@@ -1370,6 +1370,71 @@ fn test_where_search_mode() {
     );
 }
 
+// === Rendering Bug Fixes ===
+
+#[test]
+fn test_impl_trait_resugared() {
+    let model = fixture_model();
+    let args = default_args();
+    let output = render_full(&model, &args);
+
+    // impl Trait should be re-sugared, not shown as synthetic generic
+    assert!(
+        output.contains("impl_trait_fn(val: impl"),
+        "impl Trait should be re-sugared in parameter:\n{output}"
+    );
+    // Should NOT have synthetic generic param in angle brackets
+    assert!(
+        !output.contains("impl_trait_fn<impl"),
+        "synthetic generic should not appear in generics:\n{output}"
+    );
+}
+
+#[test]
+fn test_multi_impl_trait_resugared() {
+    let model = fixture_model();
+    let args = default_args();
+    let output = render_full(&model, &args);
+
+    assert!(
+        output.contains("a: impl") && output.contains("b: impl"),
+        "multiple impl Trait params should be re-sugared:\n{output}"
+    );
+}
+
+#[test]
+fn test_impl_trait_search_mode() {
+    let model = fixture_model();
+    let args = default_args();
+    let output = search::render_search(&model, "impl_trait_fn", &args, None, true, None);
+
+    assert!(
+        output.contains("val: impl"),
+        "search mode should show re-sugared impl Trait:\n{output}"
+    );
+    assert!(
+        !output.contains("<impl"),
+        "search mode should not show synthetic generics:\n{output}"
+    );
+}
+
+#[test]
+fn test_qualified_path_no_empty_trait() {
+    // This tests that <T as >::Output doesn't appear — format_type fallback works.
+    // The test fixture Converter trait has associated type Output, used in:
+    // fn convert(&self) -> <Self as Converter>::Output
+    // which rustdoc may render with an empty trait path.
+    let model = fixture_model();
+    let args = default_args();
+    let output = render_full(&model, &args);
+
+    // Should not contain "<X as >::" pattern (empty trait path)
+    assert!(
+        !output.contains("as >::"),
+        "Should not have empty trait path in qualified types:\n{output}"
+    );
+}
+
 // === Attribute Rendering Tests ===
 
 #[test]
