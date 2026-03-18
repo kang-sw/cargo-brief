@@ -2,6 +2,14 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.3.8] - 2026-03-18
+
+### Fixed
+
+- **Empty trait path in qualified types**: `<F as >::Output` now correctly renders as `F::Output` when rustdoc JSON provides an unresolved trait path.
+- **`$crate::` macro hygiene leak**: Paths like `$crate::clone::Clone` from derive macros are now normalized to `clone::Clone`, eliminating confusing macro artifacts.
+- **`impl Trait` desugar**: Synthetic generic params from `impl Trait` arguments are no longer shown in angle brackets. Instead, they are re-sugared back to `impl Bounds` in the parameter list (e.g., `fn f(x: impl Display)` instead of `fn f<impl Display: Display>(x: impl Display)`).
+
 ## [0.3.7] - 2026-03-18
 
 ### Added
