@@ -557,4 +557,63 @@ mod tests {
         let ver = fetch_resolved_version("anything", "=1.2.3").unwrap();
         assert_eq!(ver, "1.2.3");
     }
+
+    #[test]
+    fn test_clean_cache_glob_matching() {
+        let test_dir = tempfile::tempdir().unwrap();
+        let original = std::env::var("CARGO_BRIEF_CACHE_DIR").ok();
+        // SAFETY: test-only env manipulation, tests run serially for this var
+        unsafe { std::env::set_var("CARGO_BRIEF_CACHE_DIR", test_dir.path()) };
+
+        // Seed fake cache dirs
+        std::fs::create_dir_all(test_dir.path().join("serde[1.0.200]")).unwrap();
+        std::fs::create_dir_all(test_dir.path().join("serde[1.0.228]")).unwrap();
+        std::fs::create_dir_all(test_dir.path().join("tokio[1.50.0]")).unwrap();
+
+        // Seed version cache files
+        let versions_dir = test_dir.path().join("versions");
+        std::fs::create_dir_all(&versions_dir).unwrap();
+        std::fs::write(versions_dir.join("serde.json"), "{}").unwrap();
+        std::fs::write(versions_dir.join("tokio.json"), "{}").unwrap();
+
+        clean_cache("serde").unwrap();
+
+        // serde dirs and version cache removed
+        assert!(!test_dir.path().join("serde[1.0.200]").exists());
+        assert!(!test_dir.path().join("serde[1.0.228]").exists());
+        assert!(!versions_dir.join("serde.json").exists());
+
+        // tokio untouched
+        assert!(test_dir.path().join("tokio[1.50.0]").exists());
+        assert!(versions_dir.join("tokio.json").exists());
+
+        match original {
+            Some(v) => unsafe { std::env::set_var("CARGO_BRIEF_CACHE_DIR", v) },
+            None => unsafe { std::env::remove_var("CARGO_BRIEF_CACHE_DIR") },
+        }
+    }
+
+    #[test]
+    fn test_clean_cache_empty_spec_removes_all() {
+        let test_dir = tempfile::tempdir().unwrap();
+        let original = std::env::var("CARGO_BRIEF_CACHE_DIR").ok();
+        // SAFETY: test-only env manipulation, tests run serially for this var
+        unsafe { std::env::set_var("CARGO_BRIEF_CACHE_DIR", test_dir.path()) };
+
+        // Seed fake cache dirs
+        std::fs::create_dir_all(test_dir.path().join("serde[1.0.200]")).unwrap();
+        std::fs::create_dir_all(test_dir.path().join("tokio[1.50.0]")).unwrap();
+        std::fs::create_dir_all(test_dir.path().join("versions")).unwrap();
+        std::fs::write(test_dir.path().join("versions/serde.json"), "{}").unwrap();
+
+        clean_cache("").unwrap();
+
+        // Entire cache dir removed
+        assert!(!test_dir.path().exists());
+
+        match original {
+            Some(v) => unsafe { std::env::set_var("CARGO_BRIEF_CACHE_DIR", v) },
+            None => unsafe { std::env::remove_var("CARGO_BRIEF_CACHE_DIR") },
+        }
+    }
 }
