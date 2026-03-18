@@ -640,7 +640,8 @@ fn render_function_leaf(output: &mut String, leaf: &LeafItem) {
         let sig = render::format_function_sig_pub(
             &leaf.path, f, "", // no visibility prefix in search results
         );
-        output.push_str(&format!("{sig};\n"));
+        let wc = render::format_where_clause_compact_pub(&f.generics);
+        output.push_str(&format!("{sig}{wc};\n"));
     }
 }
 
@@ -649,6 +650,7 @@ fn render_struct_leaf(output: &mut String, model: &CrateModel, leaf: &LeafItem, 
         return;
     };
     let generics = render::format_generics_pub(&s.generics);
+    let wc = render::format_where_clause_compact_pub(&s.generics);
     let summary = collect_impl_summary(model, leaf.item, args);
     let suffix = if summary.is_empty() {
         String::new()
@@ -658,7 +660,7 @@ fn render_struct_leaf(output: &mut String, model: &CrateModel, leaf: &LeafItem, 
 
     match &s.kind {
         StructKind::Unit => {
-            output.push_str(&format!("struct {}{};\n", leaf.path, generics));
+            output.push_str(&format!("struct {}{}{wc};\n", leaf.path, generics));
         }
         StructKind::Tuple(fields) => {
             let field_strs: Vec<String> = fields
@@ -677,7 +679,7 @@ fn render_struct_leaf(output: &mut String, model: &CrateModel, leaf: &LeafItem, 
                 })
                 .collect();
             output.push_str(&format!(
-                "struct {}{}({});{suffix}\n",
+                "struct {}{}({}){wc};{suffix}\n",
                 leaf.path,
                 generics,
                 field_strs.join(", ")
@@ -685,7 +687,7 @@ fn render_struct_leaf(output: &mut String, model: &CrateModel, leaf: &LeafItem, 
         }
         StructKind::Plain { .. } => {
             output.push_str(&format!(
-                "struct {}{} {{ .. }};{suffix}\n",
+                "struct {}{}{wc} {{ .. }};{suffix}\n",
                 leaf.path, generics
             ));
         }
@@ -779,8 +781,9 @@ fn render_static_leaf(output: &mut String, leaf: &LeafItem) {
 fn render_type_alias_leaf(output: &mut String, leaf: &LeafItem) {
     if let ItemEnum::TypeAlias(ta) = &leaf.item.inner {
         let generics = render::format_generics_pub(&ta.generics);
+        let wc = render::format_where_clause_compact_pub(&ta.generics);
         output.push_str(&format!(
-            "type {}{generics} = {};\n",
+            "type {}{generics}{wc} = {};\n",
             leaf.path,
             render::format_type_pub(&ta.type_)
         ));

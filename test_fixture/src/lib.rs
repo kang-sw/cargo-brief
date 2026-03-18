@@ -118,6 +118,66 @@ pub mod outer {
         items.to_vec()
     }
 
+    // --- Where clauses ---
+
+    /// A function with where clause bounds.
+    pub fn where_fn<T, U>(a: T, b: U) -> String
+    where
+        T: std::fmt::Display + Clone,
+        U: Into<String>,
+    {
+        format!("{}{}", a, b.into())
+    }
+
+    /// A function with multiple where clause bounds.
+    pub fn multi_where<T, U, V>(a: T, b: U, c: V) -> String
+    where
+        T: std::fmt::Display,
+        U: std::fmt::Debug + Clone,
+        V: Into<String> + Send,
+    {
+        format!("{a}{b:?}{}", c.into())
+    }
+
+    /// A function with lifetime where clause.
+    pub fn lifetime_where<'a, 'b>(a: &'a str, b: &'b str) -> &'a str
+    where
+        'b: 'a,
+    {
+        if a.len() > b.len() { a } else { a }
+    }
+
+    /// A struct with where clause.
+    pub struct WhereStruct<T>
+    where
+        T: std::fmt::Debug,
+    {
+        pub value: T,
+    }
+
+    impl<T> WhereStruct<T>
+    where
+        T: std::fmt::Debug + Clone,
+    {
+        pub fn get_value(&self) -> &T {
+            &self.value
+        }
+    }
+
+    /// A trait with where clause.
+    pub trait WhereTrait<T>
+    where
+        T: Clone,
+    {
+        fn apply(&self, val: T) -> T;
+    }
+
+    /// A type alias with where clause.
+    pub type WhereAlias<T>
+    where
+        T: Ord,
+    = Vec<T>;
+
     // --- Macros ---
 
     /// A declarative macro.

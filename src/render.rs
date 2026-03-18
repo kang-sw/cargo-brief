@@ -2,8 +2,8 @@ use std::collections::HashSet;
 
 use rustdoc_types::{
     Attribute, Constant, Enum, Function, GenericArg, GenericArgs, GenericBound,
-    GenericParamDefKind, Id, Item, ItemEnum, ReprKind, Static, Struct, StructKind, Trait, Type,
-    TypeAlias, Union, VariantKind, Visibility,
+    GenericParamDefKind, Id, Item, ItemEnum, ReprKind, Static, Struct, StructKind, Term, Trait,
+    Type, TypeAlias, Union, VariantKind, Visibility, WherePredicate,
 };
 
 use crate::cli::BriefArgs;
@@ -208,12 +208,13 @@ fn render_inlined_impl_blocks(
         }
 
         let generics = format_generics(&impl_block.generics);
+        let wc = format_where_clause(&impl_block.generics, "");
         let is_trait_impl = impl_block.trait_.is_some();
         let impl_header = if let Some(trait_) = &impl_block.trait_ {
             let trait_path = format_path(trait_);
-            format!("impl{generics} {trait_path} for {type_name}")
+            format!("impl{generics} {trait_path} for {type_name}{wc}")
         } else {
-            format!("impl{generics} {type_name}")
+            format!("impl{generics} {type_name}{wc}")
         };
 
         if is_trait_impl {
@@ -580,12 +581,13 @@ fn render_impl_blocks(
         }
 
         let generics = format_generics(&impl_block.generics);
+        let wc = format_where_clause(&impl_block.generics, &child_indent);
         let is_trait_impl = impl_block.trait_.is_some();
         let impl_header = if let Some(trait_) = &impl_block.trait_ {
             let trait_path = format_path(trait_);
-            format!("{child_indent}impl{generics} {trait_path} for {type_name}")
+            format!("{child_indent}impl{generics} {trait_path} for {type_name}{wc}")
         } else {
-            format!("{child_indent}impl{generics} {type_name}")
+            format!("{child_indent}impl{generics} {type_name}{wc}")
         };
 
         if is_trait_impl {
@@ -692,7 +694,8 @@ fn render_item(
         ItemEnum::Function(f) => {
             let name = item.name.as_deref().unwrap_or("?");
             let sig = format_function_sig(name, f, &vis);
-            output.push_str(&format!("{indent}{sig};\n"));
+            let wc = format_where_clause(&f.generics, indent);
+            output.push_str(&format!("{indent}{sig}{wc};\n"));
         }
         ItemEnum::TypeAlias(ta) => {
             render_type_alias(item, ta, indent, &vis, output);
@@ -728,10 +731,11 @@ fn render_struct(
 ) {
     let name = item.name.as_deref().unwrap_or("?");
     let generics = format_generics(&s.generics);
+    let wc = format_where_clause(&s.generics, indent);
 
     match &s.kind {
         StructKind::Unit => {
-            output.push_str(&format!("{indent}{vis}struct {name}{generics};\n"));
+            output.push_str(&format!("{indent}{vis}struct {name}{generics}{wc};\n"));
         }
         StructKind::Tuple(fields) => {
             let field_strs: Vec<String> = fields
@@ -751,7 +755,7 @@ fn render_struct(
                 })
                 .collect();
             output.push_str(&format!(
-                "{indent}{vis}struct {name}{generics}({});\n",
+                "{indent}{vis}struct {name}{generics}({}){wc};\n",
                 field_strs.join(", ")
             ));
         }
@@ -761,7 +765,9 @@ fn render_struct(
         } => {
             // Compact: always collapse plain structs to `{ .. }`
             if args.compact {
-                output.push_str(&format!("{indent}{vis}struct {name}{generics} {{ .. }}\n"));
+                output.push_str(&format!(
+                    "{indent}{vis}struct {name}{generics}{wc} {{ .. }}\n"
+                ));
                 return;
             }
 
@@ -789,14 +795,16 @@ fn render_struct(
             }
             let has_hidden = *has_stripped_fields || hidden_count > 0;
             if body.is_empty() && has_hidden {
-                output.push_str(&format!("{indent}{vis}struct {name}{generics} {{ .. }}\n"));
+                output.push_str(&format!(
+                    "{indent}{vis}struct {name}{generics}{wc} {{ .. }}\n"
+                ));
             } else if body.is_empty() {
-                output.push_str(&format!("{indent}{vis}struct {name}{generics} {{}}\n"));
+                output.push_str(&format!("{indent}{vis}struct {name}{generics}{wc} {{}}\n"));
             } else {
                 if has_hidden {
                     body.push_str(&format!("{indent}    // .. private fields\n"));
                 }
-                output.push_str(&format!("{indent}{vis}struct {name}{generics} {{\n"));
+                output.push_str(&format!("{indent}{vis}struct {name}{generics}{wc} {{\n"));
                 output.push_str(&body);
                 output.push_str(&format!("{indent}}}\n"));
             }
@@ -815,6 +823,7 @@ fn render_enum(
 ) {
     let name = item.name.as_deref().unwrap_or("?");
     let generics = format_generics(&e.generics);
+    let wc = format_where_clause(&e.generics, indent);
 
     if args.compact {
         // Compact: render all variants name-only on one line
@@ -833,12 +842,12 @@ fn render_enum(
             }
         }
         let one_liner = format!(
-            "{indent}{vis}enum {name}{generics} {{ {} }}",
+            "{indent}{vis}enum {name}{generics}{wc} {{ {} }}",
             variant_parts.join(", ")
         );
         if one_liner.len() > 120 {
             // Fall back to one-variant-per-line
-            output.push_str(&format!("{indent}{vis}enum {name}{generics} {{\n"));
+            output.push_str(&format!("{indent}{vis}enum {name}{generics}{wc} {{\n"));
             for part in &variant_parts {
                 output.push_str(&format!("{indent}    {part},\n"));
             }
@@ -850,7 +859,7 @@ fn render_enum(
         return;
     }
 
-    output.push_str(&format!("{indent}{vis}enum {name}{generics} {{\n"));
+    output.push_str(&format!("{indent}{vis}enum {name}{generics}{wc} {{\n"));
 
     for variant_id in &e.variants {
         if let Some(variant_item) = model.krate.index.get(variant_id) {
@@ -922,6 +931,7 @@ fn render_trait(
 ) {
     let name = item.name.as_deref().unwrap_or("?");
     let generics = format_generics(&t.generics);
+    let wc = format_where_clause(&t.generics, indent);
 
     let bounds = if t.bounds.is_empty() {
         String::new()
@@ -932,12 +942,14 @@ fn render_trait(
 
     if args.compact {
         output.push_str(&format!(
-            "{indent}{vis}trait {name}{generics}{bounds} {{ .. }}\n"
+            "{indent}{vis}trait {name}{generics}{bounds}{wc} {{ .. }}\n"
         ));
         return;
     }
 
-    output.push_str(&format!("{indent}{vis}trait {name}{generics}{bounds} {{\n"));
+    output.push_str(&format!(
+        "{indent}{vis}trait {name}{generics}{bounds}{wc} {{\n"
+    ));
 
     for item_id in &t.items {
         if let Some(trait_item) = model.krate.index.get(item_id) {
@@ -947,7 +959,8 @@ fn render_trait(
                 ItemEnum::Function(f) => {
                     let mname = trait_item.name.as_deref().unwrap_or("?");
                     let sig = format_function_sig(mname, f, "");
-                    output.push_str(&format!("{inner_indent}{sig};\n"));
+                    let mwc = format_where_clause(&f.generics, &inner_indent);
+                    output.push_str(&format!("{inner_indent}{sig}{mwc};\n"));
                 }
                 ItemEnum::AssocType {
                     generics: _,
@@ -991,8 +1004,9 @@ fn render_trait(
 fn render_type_alias(item: &Item, ta: &TypeAlias, indent: &str, vis: &str, output: &mut String) {
     let name = item.name.as_deref().unwrap_or("?");
     let generics = format_generics(&ta.generics);
+    let wc = format_where_clause(&ta.generics, indent);
     output.push_str(&format!(
-        "{indent}{vis}type {name}{generics} = {};\n",
+        "{indent}{vis}type {name}{generics}{wc} = {};\n",
         format_type(&ta.type_)
     ));
 }
@@ -1035,7 +1049,8 @@ fn render_union(
 ) {
     let name = item.name.as_deref().unwrap_or("?");
     let generics = format_generics(&u.generics);
-    output.push_str(&format!("{indent}{vis}union {name}{generics} {{\n"));
+    let wc = format_where_clause(&u.generics, indent);
+    output.push_str(&format!("{indent}{vis}union {name}{generics}{wc} {{\n"));
 
     for field_id in &u.fields {
         if let Some(field_item) = model.krate.index.get(field_id) {
@@ -1104,7 +1119,8 @@ fn render_impl_item(item: &Item, indent: &str, args: &BriefArgs) -> Option<Strin
             render_attrs(item, indent, args.verbose_metadata, &mut out);
             render_docs(item, indent, args, &mut out);
             let sig = format_function_sig(name, f, &vis);
-            out.push_str(&format!("{indent}{sig};\n"));
+            let wc = format_where_clause(&f.generics, indent);
+            out.push_str(&format!("{indent}{sig}{wc};\n"));
             Some(out)
         }
         ItemEnum::AssocType {
@@ -1508,6 +1524,84 @@ fn format_generic_bound(bound: &GenericBound) -> String {
         GenericBound::Outlives(lt) => lt.clone(),
         GenericBound::Use(_) => "use<...>".to_string(),
     }
+}
+
+fn format_term(term: &Term) -> String {
+    match term {
+        Term::Type(ty) => format_type(ty),
+        Term::Constant(c) => c.value.clone().unwrap_or_else(|| "..".to_string()),
+    }
+}
+
+fn format_predicate(pred: &WherePredicate) -> String {
+    match pred {
+        WherePredicate::BoundPredicate {
+            type_,
+            bounds,
+            generic_params,
+        } => {
+            let hrtb = if generic_params.is_empty() {
+                String::new()
+            } else {
+                let params: Vec<&str> = generic_params.iter().map(|p| p.name.as_str()).collect();
+                format!("for<{}> ", params.join(", "))
+            };
+            let bound_strs: Vec<String> = bounds.iter().map(format_generic_bound).collect();
+            format!("{hrtb}{}: {}", format_type(type_), bound_strs.join(" + "))
+        }
+        WherePredicate::LifetimePredicate { lifetime, outlives } => {
+            if outlives.is_empty() {
+                lifetime.clone()
+            } else {
+                format!("{lifetime}: {}", outlives.join(" + "))
+            }
+        }
+        WherePredicate::EqPredicate { lhs, rhs } => {
+            format!("{} = {}", format_type(lhs), format_term(rhs))
+        }
+    }
+}
+
+/// Format a where clause in multi-line (normal render) style.
+/// Returns "" if no predicates, " where P" for single, or "\n{indent}where\n..." for multiple.
+fn format_where_clause(generics: &rustdoc_types::Generics, indent: &str) -> String {
+    let preds = &generics.where_predicates;
+    if preds.is_empty() {
+        return String::new();
+    }
+    let strs: Vec<String> = preds.iter().map(format_predicate).collect();
+    if strs.len() == 1 {
+        format!(" where {}", strs[0])
+    } else {
+        let mut out = format!("\n{indent}where\n");
+        for (i, s) in strs.iter().enumerate() {
+            let comma = if i + 1 < strs.len() { "," } else { "" };
+            out.push_str(&format!("{indent}    {s}{comma}\n"));
+        }
+        // Remove trailing newline — callers append their own terminators
+        out.truncate(out.trim_end_matches('\n').len());
+        out
+    }
+}
+
+/// Public wrapper for `format_where_clause` (used by search.rs).
+pub fn format_where_clause_pub(generics: &rustdoc_types::Generics, indent: &str) -> String {
+    format_where_clause(generics, indent)
+}
+
+/// Format a compact inline where clause: " where P1, P2".
+fn format_where_clause_compact(generics: &rustdoc_types::Generics) -> String {
+    let preds = &generics.where_predicates;
+    if preds.is_empty() {
+        return String::new();
+    }
+    let strs: Vec<String> = preds.iter().map(format_predicate).collect();
+    format!(" where {}", strs.join(", "))
+}
+
+/// Public wrapper for `format_where_clause_compact` (used by search.rs).
+pub fn format_where_clause_compact_pub(generics: &rustdoc_types::Generics) -> String {
+    format_where_clause_compact(generics)
 }
 
 fn last_segment(path: &str) -> &str {

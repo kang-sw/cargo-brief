@@ -1256,6 +1256,120 @@ fn methods_of_shows_only_methods_and_fields() {
     );
 }
 
+// === Where Clause Tests ===
+
+#[test]
+fn test_where_fn() {
+    let model = fixture_model();
+    let args = default_args();
+    let output = render_full(&model, &args);
+
+    assert!(
+        output.contains("where\n"),
+        "where_fn should have a where clause:\n{output}"
+    );
+    assert!(
+        output.contains("T: std::fmt::Display + Clone"),
+        "where_fn should show T bound:\n{output}"
+    );
+    assert!(
+        output.contains("U: Into<String>"),
+        "where_fn should show U bound:\n{output}"
+    );
+}
+
+#[test]
+fn test_multi_where() {
+    let model = fixture_model();
+    let args = default_args();
+    let output = render_full(&model, &args);
+
+    assert!(
+        output.contains("T: std::fmt::Display"),
+        "multi_where should show T bound:\n{output}"
+    );
+    assert!(
+        output.contains("U: std::fmt::Debug + Clone"),
+        "multi_where should show U bound:\n{output}"
+    );
+    assert!(
+        output.contains("V: Into<String> + Send"),
+        "multi_where should show V bound:\n{output}"
+    );
+}
+
+#[test]
+fn test_lifetime_where() {
+    let model = fixture_model();
+    let args = default_args();
+    let output = render_full(&model, &args);
+
+    assert!(
+        output.contains("'b: 'a"),
+        "lifetime_where should show lifetime bound:\n{output}"
+    );
+}
+
+#[test]
+fn test_where_struct() {
+    let model = fixture_model();
+    let args = default_args();
+    let output = render_full(&model, &args);
+
+    assert!(
+        output.contains("pub struct WhereStruct<T> where T: std::fmt::Debug"),
+        "WhereStruct should have where clause:\n{output}"
+    );
+}
+
+#[test]
+fn test_where_trait() {
+    let model = fixture_model();
+    let args = default_args();
+    let output = render_full(&model, &args);
+
+    assert!(
+        output.contains("pub trait WhereTrait<T> where T: Clone"),
+        "WhereTrait should have where clause:\n{output}"
+    );
+}
+
+#[test]
+fn test_where_type_alias() {
+    let model = fixture_model();
+    let args = default_args();
+    let output = render_full(&model, &args);
+
+    assert!(
+        output.contains("type WhereAlias<T> where T: Ord"),
+        "WhereAlias should have where clause:\n{output}"
+    );
+}
+
+#[test]
+fn test_where_impl_block() {
+    let model = fixture_model();
+    let args = default_args();
+    let output = render_full(&model, &args);
+
+    assert!(
+        output.contains("impl<T> WhereStruct<T> where T: std::fmt::Debug + Clone"),
+        "impl block for WhereStruct should have where clause:\n{output}"
+    );
+}
+
+#[test]
+fn test_where_search_mode() {
+    let model = fixture_model();
+    let args = default_args();
+    let output = search::render_search(&model, "where_fn", &args, None, true, None);
+
+    assert!(
+        output.contains("where T: std::fmt::Display + Clone, U: Into<String>"),
+        "search mode should show compact where clause:\n{output}"
+    );
+}
+
 // === Attribute Rendering Tests ===
 
 #[test]
