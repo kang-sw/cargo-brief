@@ -193,3 +193,19 @@ Implemented Phase 0 (caching) + Phase 1 + Phase 2 (cross-crate) in a single pass
 **Deviations:** Phase 3 (rayon) deferred as planned — not enough sub-crates loaded concurrently to justify the dependency. Phase 4 (parallel JSON parse) also deferred.
 
 **Key findings:** The `follow_use_chain` approach with max 5 hops + cycle detection handles bevy's 3-level chain (bevy → bevy_internal → bevy_ecs). Glob re-exports at root level require generating the glob source's JSON to discover named items within.
+
+### Result (8da8648) - 26-03-18
+
+Post-implementation fixes and enhancements after live testing with bevy.
+
+**Fixes:**
+- `root_has_cross_crate_reexports()` had false positives for intra-crate re-exports (`pub use self::*`). Added `is_intra_crate_source()` filter to all three entry points (detect, resolve, discover). (33226bb)
+- `cargo brief --crates bevy ecs` silently failed — clap consumed `ecs` as `crate_name`, not `module_path`. Fixed: `run_remote_pipeline()` now detects when `crate_name != "self"` with `--crates` and treats it as module_path. (ee66c50)
+
+**Enhancements:**
+- Remote crate header now shows resolved version + features: `// crate bevy[0.18.1] features = ["bevy_winit"]`. Version read from Cargo.lock via line-based scanner. (8da8648)
+- Restructured `run_remote_pipeline()` from early-return to single `let output = if/else` expression for cleaner post-processing.
+
+**Known limitations:**
+- `bevy` and `bevy@0.18` cache to separate directories even if they resolve to the same version (pre-existing `sanitize_spec` behavior).
+- Cross-crate hop limit hardcoded at 5 — deep facade chains silently fall back to "module not found".
