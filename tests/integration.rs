@@ -273,9 +273,15 @@ fn test_trait_impl() {
     let args = default_args();
     let output = render_full(&model, &args);
 
+    // Simple trait impls (no assoc items) are collapsed into summary comment
     assert!(
-        output.contains("impl MyTrait for PubStruct"),
-        "trait impl block"
+        output.contains("MyTrait"),
+        "MyTrait should appear in summary comment:\n{output}"
+    );
+    // Rich trait impl (Converter has assoc type) should still be expanded
+    assert!(
+        output.contains("impl Converter for PubStruct"),
+        "rich trait impl should remain expanded:\n{output}"
     );
 }
 
@@ -620,15 +626,24 @@ fn test_inherent_impl() {
 // === Trait Impl Condensing ===
 
 #[test]
-fn test_trait_impl_is_one_liner() {
+fn test_simple_trait_impl_collapsed_to_summary() {
     let model = fixture_model();
     let args = default_args();
     let output = render_full(&model, &args);
 
-    // Simple trait impl (no associated types) should be a one-liner with { .. }
+    // Simple trait impls (no associated types/constants) should be collapsed into
+    // a summary comment, not rendered as individual `impl ... { .. }` lines
     assert!(
-        output.contains("impl MyTrait for PubStruct { .. }"),
-        "trait impl should be one-liner with {{ .. }}: got:\n{output}"
+        !output.contains("impl MyTrait for PubStruct { .. }"),
+        "simple trait impl should NOT appear as individual line:\n{output}"
+    );
+    // Should appear in summary comment instead
+    let summary_line = output
+        .lines()
+        .find(|l| l.contains("// PubStruct:") && l.contains("MyTrait"));
+    assert!(
+        summary_line.is_some(),
+        "PubStruct summary should mention MyTrait:\n{output}"
     );
 }
 
@@ -1649,5 +1664,96 @@ fn test_crate_docs_not_in_search_mode() {
     assert!(
         !output.contains("//!"),
         "search mode should not show crate-level docs:\n{output}"
+    );
+}
+
+// === Trait Impl Collapsing Tests ===
+
+#[test]
+fn test_trait_impl_summary_format() {
+    let model = fixture_model();
+    let args = default_args();
+    let output = render_full(&model, &args);
+
+    // DerivedStruct should have a summary comment with derived traits
+    let summary = output.lines().find(|l| l.contains("// DerivedStruct:"));
+    assert!(
+        summary.is_some(),
+        "DerivedStruct should have a trait impl summary:\n{output}"
+    );
+    let summary = summary.unwrap();
+    assert!(
+        summary.contains("Clone"),
+        "summary should include Clone: {summary}"
+    );
+    assert!(
+        summary.contains("Debug"),
+        "summary should include Debug: {summary}"
+    );
+    assert!(
+        summary.contains("Eq"),
+        "summary should include Eq: {summary}"
+    );
+    assert!(
+        summary.contains("Hash"),
+        "summary should include Hash: {summary}"
+    );
+    assert!(
+        summary.contains("PartialEq"),
+        "summary should include PartialEq: {summary}"
+    );
+    assert!(
+        summary.contains("Display"),
+        "summary should include Display: {summary}"
+    );
+}
+
+#[test]
+fn test_trait_impl_summary_sorted() {
+    let model = fixture_model();
+    let args = default_args();
+    let output = render_full(&model, &args);
+
+    let summary = output
+        .lines()
+        .find(|l| l.contains("// DerivedStruct:"))
+        .expect("DerivedStruct summary missing");
+
+    // Extract trait names from the summary comment
+    let traits_part = summary.split(": ").nth(1).unwrap();
+    let traits: Vec<&str> = traits_part.split(", ").collect();
+    let mut sorted = traits.clone();
+    sorted.sort();
+    assert_eq!(traits, sorted, "traits should be alphabetically sorted");
+}
+
+#[test]
+fn test_trait_impl_all_expands() {
+    let model = fixture_model();
+    let mut args = default_args();
+    args.all = true;
+    let output = render_full(&model, &args);
+
+    // With --all, simple trait impls should be rendered individually, not collapsed
+    assert!(
+        output.contains("impl MyTrait for PubStruct { .. }"),
+        "--all should expand simple trait impls:\n{output}"
+    );
+}
+
+#[test]
+fn test_trait_impl_rich_not_collapsed() {
+    let model = fixture_model();
+    let args = default_args();
+    let output = render_full(&model, &args);
+
+    // Converter has associated type Output — should remain expanded
+    assert!(
+        output.contains("impl Converter for PubStruct {"),
+        "rich trait impl should remain expanded:\n{output}"
+    );
+    assert!(
+        output.contains("type Output = String;"),
+        "associated type should be shown:\n{output}"
     );
 }

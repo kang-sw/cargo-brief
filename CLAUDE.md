@@ -160,6 +160,7 @@ alternatives considered, and trade-offs — focus on _why_ this approach was cho
 
 ## Recent Work
 
+- v0.3.11: trait impl noise reduction — simple impls collapsed into per-type summary comments
 - v0.3.10: crate-level `//!` doc rendering after `// crate` header
 - v0.3.9: UX hints — module-not-found suggests --search, search 0-result word count hint
 - v0.3.8: fix empty trait path, $crate leak, impl Trait desugar

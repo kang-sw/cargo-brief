@@ -221,6 +221,20 @@ pub mod outer {
         pub int_val: i32,
         pub float_val: f32,
     }
+
+    // --- Derived traits ---
+
+    /// A struct with many derived traits for testing trait impl collapsing.
+    #[derive(Debug, Clone, PartialEq, Eq, Hash)]
+    pub struct DerivedStruct {
+        pub value: i32,
+    }
+
+    impl std::fmt::Display for DerivedStruct {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            write!(f, "{}", self.value)
+        }
+    }
 }
 
 // --- Deprecated / Non-exhaustive test items ---

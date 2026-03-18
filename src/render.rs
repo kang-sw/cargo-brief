@@ -1,9 +1,9 @@
-use std::collections::HashSet;
+use std::collections::{BTreeMap, HashSet};
 
 use rustdoc_types::{
     Attribute, Constant, Enum, Function, GenericArg, GenericArgs, GenericBound,
-    GenericParamDefKind, Id, Item, ItemEnum, ReprKind, Static, Struct, StructKind, Term, Trait,
-    Type, TypeAlias, Union, VariantKind, Visibility, WherePredicate,
+    GenericParamDefKind, Id, Impl, Item, ItemEnum, ReprKind, Static, Struct, StructKind, Term,
+    Trait, Type, TypeAlias, Union, VariantKind, Visibility, WherePredicate,
 };
 
 use crate::cli::BriefArgs;
@@ -168,7 +168,7 @@ pub fn render_inlined_items(
     }
 
     // Render collected impl blocks
-    render_inlined_impl_blocks(source_model, args, &observer, &impl_ids, &mut output);
+    render_inlined_impl_blocks(source_model, args, &observer, &impl_ids, "", &mut output);
 
     output
 }
@@ -192,8 +192,11 @@ fn render_inlined_impl_blocks(
     args: &BriefArgs,
     observer: &str,
     impl_ids: &[Id],
+    source_type_name: &str,
     output: &mut String,
 ) {
+    let mut simple_trait_impls: Vec<&Impl> = Vec::new();
+
     for impl_id in impl_ids {
         let Some(impl_item) = model.krate.index.get(impl_id) else {
             continue;
@@ -214,14 +217,22 @@ fn render_inlined_impl_blocks(
         let generics = format_generics(&impl_block.generics);
         let wc = format_where_clause(&impl_block.generics, "");
         let is_trait_impl = impl_block.trait_.is_some();
-        let impl_header = if let Some(trait_) = &impl_block.trait_ {
-            let trait_path = format_path(trait_);
-            format!("impl{generics} {trait_path} for {type_name}{wc}")
-        } else {
-            format!("impl{generics} {type_name}{wc}")
-        };
 
         if is_trait_impl {
+            // Collapse simple trait impls unless --all or negative
+            if !args.all && !impl_block.is_negative && !has_assoc_items(model, impl_block) {
+                simple_trait_impls.push(impl_block);
+                continue;
+            }
+
+            // Rich/negative/--all trait impl: render expanded
+            let impl_header = if let Some(trait_) = &impl_block.trait_ {
+                let trait_path = format_path(trait_);
+                format!("impl{generics} {trait_path} for {type_name}{wc}")
+            } else {
+                format!("impl{generics} {type_name}{wc}")
+            };
+
             let mut assoc_items = Vec::new();
             let mut has_other_items = false;
 
@@ -254,6 +265,8 @@ fn render_inlined_impl_blocks(
                 output.push_str("}\n");
             }
         } else {
+            let impl_header = format!("impl{generics} {type_name}{wc}");
+
             if args.compact {
                 render_docs(impl_item, "", args, output);
                 output.push_str(&format!("{impl_header} {{ .. }}\n"));
@@ -285,6 +298,8 @@ fn render_inlined_impl_blocks(
             }
         }
     }
+
+    render_trait_impl_summary(source_type_name, &simple_trait_impls, "", output);
 }
 
 /// Check if an item should be rendered based on the args exclusion flags.
@@ -522,6 +537,65 @@ fn render_module_contents(
     }
 }
 
+/// Check if a trait impl has associated types or constants (making it "rich").
+fn has_assoc_items(model: &CrateModel, impl_block: &Impl) -> bool {
+    impl_block.items.iter().any(|id| {
+        model.krate.index.get(id).is_some_and(|item| {
+            matches!(
+                item.inner,
+                ItemEnum::AssocType { .. } | ItemEnum::AssocConst { .. }
+            )
+        })
+    })
+}
+
+/// Render a summary comment line for collapsed simple trait impls.
+///
+/// Groups by `for_` type: forward impls (matching source type) show just the trait name,
+/// reverse impls show `Trait for ForType`.
+fn render_trait_impl_summary(
+    source_type_name: &str,
+    simple_impls: &[&Impl],
+    indent: &str,
+    output: &mut String,
+) {
+    if simple_impls.is_empty() {
+        return;
+    }
+
+    let mut forward_labels: Vec<String> = Vec::new();
+    let mut reverse_groups: BTreeMap<String, Vec<String>> = BTreeMap::new();
+
+    for impl_block in simple_impls {
+        let trait_label = format_path(impl_block.trait_.as_ref().unwrap());
+        let for_type = format_type(&impl_block.for_);
+        // format_type may return "crate::TypeName" for cross-module refs
+        let for_type_clean = for_type.strip_prefix("crate::").unwrap_or(&for_type);
+
+        if for_type_clean == source_type_name {
+            forward_labels.push(trait_label);
+        } else {
+            reverse_groups
+                .entry(for_type.clone())
+                .or_default()
+                .push(trait_label);
+        }
+    }
+
+    forward_labels.sort();
+    if !forward_labels.is_empty() {
+        output.push_str(&format!(
+            "{indent}// {source_type_name}: {}\n",
+            forward_labels.join(", ")
+        ));
+    }
+
+    for (for_type, mut labels) in reverse_groups {
+        labels.sort();
+        output.push_str(&format!("{indent}// {for_type}: {}\n", labels.join(", ")));
+    }
+}
+
 #[allow(clippy::too_many_arguments)]
 fn render_impl_blocks(
     model: &CrateModel,
@@ -541,12 +615,11 @@ fn render_impl_blocks(
         String::new()
     };
 
-    // Collect impl IDs from visible structs/enums/unions in this module
+    // Process impls per source type (struct/enum/union)
     let children = model.module_children(module_item);
-    let mut impl_ids: Vec<Id> = Vec::new();
 
     for (child_id, child) in &children {
-        // Only collect impls for types visible from the observer
+        // Only process impls for types visible from the observer
         if let Some(reachable) = reachable {
             if !reachable.contains(child_id) {
                 continue;
@@ -563,108 +636,119 @@ fn render_impl_blocks(
             ItemEnum::Union(u) => &u.impls,
             _ => continue,
         };
-        impl_ids.extend(impls.iter().cloned());
-    }
 
-    for impl_id in &impl_ids {
-        let Some(impl_item) = model.krate.index.get(impl_id) else {
-            continue;
-        };
-        let ItemEnum::Impl(impl_block) = &impl_item.inner else {
-            continue;
-        };
+        let source_type_name = child.name.as_deref().unwrap_or("?");
+        let mut simple_trait_impls: Vec<&Impl> = Vec::new();
 
-        // Skip blanket impls and synthetic impls unless --all
-        if !args.all && (impl_block.is_synthetic || impl_block.blanket_impl.is_some()) {
-            continue;
-        }
+        for impl_id in impls {
+            let Some(impl_item) = model.krate.index.get(impl_id) else {
+                continue;
+            };
+            let ItemEnum::Impl(impl_block) = &impl_item.inner else {
+                continue;
+            };
 
-        let type_name = format_type(&impl_block.for_);
-        if type_name.is_empty() {
-            continue;
-        }
-
-        let generics = format_generics(&impl_block.generics);
-        let wc = format_where_clause(&impl_block.generics, &child_indent);
-        let is_trait_impl = impl_block.trait_.is_some();
-        let impl_header = if let Some(trait_) = &impl_block.trait_ {
-            let trait_path = format_path(trait_);
-            format!("{child_indent}impl{generics} {trait_path} for {type_name}{wc}")
-        } else {
-            format!("{child_indent}impl{generics} {type_name}{wc}")
-        };
-
-        if is_trait_impl {
-            // Trait impls: collect only associated types/constants (omit methods)
-            let mut assoc_items = Vec::new();
-            let mut has_other_items = false;
-            let inner_indent = format!("{child_indent}    ");
-
-            for item_id in &impl_block.items {
-                if let Some(item) = model.krate.index.get(item_id) {
-                    match &item.inner {
-                        ItemEnum::AssocType { .. } | ItemEnum::AssocConst { .. } => {
-                            if let Some(r) = render_impl_item(item, &inner_indent, args) {
-                                assoc_items.push(r);
-                            }
-                        }
-                        _ => {
-                            has_other_items = true;
-                        }
-                    }
-                }
-            }
-
-            render_docs(impl_item, &child_indent, args, output);
-            if assoc_items.is_empty() {
-                // No associated types/constants → one-liner
-                output.push_str(&format!("{impl_header} {{ .. }}\n"));
-            } else {
-                // Has associated types/constants → show those, plus .. if methods omitted
-                output.push_str(&format!("{impl_header} {{\n"));
-                for item_str in &assoc_items {
-                    output.push_str(item_str);
-                }
-                if has_other_items {
-                    output.push_str(&format!("{inner_indent}// ..\n"));
-                }
-                output.push_str(&format!("{child_indent}}}\n"));
-            }
-        } else {
-            // Compact: collapse inherent impls to `impl Type { .. }`
-            if args.compact {
-                render_docs(impl_item, &child_indent, args, output);
-                output.push_str(&format!("{impl_header} {{ .. }}\n"));
+            // Skip blanket impls and synthetic impls unless --all
+            if !args.all && (impl_block.is_synthetic || impl_block.blanket_impl.is_some()) {
                 continue;
             }
 
-            // Inherent impls: show all visible items (methods, types, constants)
-            let mut rendered_items = Vec::new();
-            let inner_indent = format!("{child_indent}    ");
+            let type_name = format_type(&impl_block.for_);
+            if type_name.is_empty() {
+                continue;
+            }
 
-            for item_id in &impl_block.items {
-                if let Some(item) = model.krate.index.get(item_id) {
-                    if !matches!(item.visibility, Visibility::Default | Visibility::Public) {
-                        if !is_visible_from(model, item, item_id, observer, same_crate) {
-                            continue;
+            let generics = format_generics(&impl_block.generics);
+            let wc = format_where_clause(&impl_block.generics, &child_indent);
+            let is_trait_impl = impl_block.trait_.is_some();
+
+            if is_trait_impl {
+                // Collapse simple trait impls (no assoc items) unless --all or negative
+                if !args.all && !impl_block.is_negative && !has_assoc_items(model, impl_block) {
+                    simple_trait_impls.push(impl_block);
+                    continue;
+                }
+
+                // Rich/negative/--all trait impl: render expanded
+                let impl_header = if let Some(trait_) = &impl_block.trait_ {
+                    let trait_path = format_path(trait_);
+                    format!("{child_indent}impl{generics} {trait_path} for {type_name}{wc}")
+                } else {
+                    format!("{child_indent}impl{generics} {type_name}{wc}")
+                };
+
+                let mut assoc_items = Vec::new();
+                let mut has_other_items = false;
+                let inner_indent = format!("{child_indent}    ");
+
+                for item_id in &impl_block.items {
+                    if let Some(item) = model.krate.index.get(item_id) {
+                        match &item.inner {
+                            ItemEnum::AssocType { .. } | ItemEnum::AssocConst { .. } => {
+                                if let Some(r) = render_impl_item(item, &inner_indent, args) {
+                                    assoc_items.push(r);
+                                }
+                            }
+                            _ => {
+                                has_other_items = true;
+                            }
                         }
                     }
+                }
 
-                    if let Some(r) = render_impl_item(item, &inner_indent, args) {
-                        rendered_items.push(r);
+                render_docs(impl_item, &child_indent, args, output);
+                if assoc_items.is_empty() {
+                    output.push_str(&format!("{impl_header} {{ .. }}\n"));
+                } else {
+                    output.push_str(&format!("{impl_header} {{\n"));
+                    for item_str in &assoc_items {
+                        output.push_str(item_str);
+                    }
+                    if has_other_items {
+                        output.push_str(&format!("{inner_indent}// ..\n"));
+                    }
+                    output.push_str(&format!("{child_indent}}}\n"));
+                }
+            } else {
+                // Inherent impl: render as before
+                let impl_header = format!("{child_indent}impl{generics} {type_name}{wc}");
+
+                if args.compact {
+                    render_docs(impl_item, &child_indent, args, output);
+                    output.push_str(&format!("{impl_header} {{ .. }}\n"));
+                    continue;
+                }
+
+                let mut rendered_items = Vec::new();
+                let inner_indent = format!("{child_indent}    ");
+
+                for item_id in &impl_block.items {
+                    if let Some(item) = model.krate.index.get(item_id) {
+                        if !matches!(item.visibility, Visibility::Default | Visibility::Public)
+                            && !is_visible_from(model, item, item_id, observer, same_crate)
+                        {
+                            continue;
+                        }
+
+                        if let Some(r) = render_impl_item(item, &inner_indent, args) {
+                            rendered_items.push(r);
+                        }
                     }
                 }
-            }
 
-            if !rendered_items.is_empty() {
-                render_docs(impl_item, &child_indent, args, output);
-                output.push_str(&format!("{impl_header} {{\n"));
-                for item_str in &rendered_items {
-                    output.push_str(item_str);
+                if !rendered_items.is_empty() {
+                    render_docs(impl_item, &child_indent, args, output);
+                    output.push_str(&format!("{impl_header} {{\n"));
+                    for item_str in &rendered_items {
+                        output.push_str(item_str);
+                    }
+                    output.push_str(&format!("{child_indent}}}\n"));
                 }
-                output.push_str(&format!("{child_indent}}}\n"));
             }
         }
+
+        // Emit summary comment for collapsed simple trait impls
+        render_trait_impl_summary(source_type_name, &simple_trait_impls, &child_indent, output);
     }
 }
 

@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.3.11] - 2026-03-18
+
+### Changed
+
+- **Trait impl noise reduction**: Simple trait impls (no associated types/constants) are now collapsed into per-type summary comments instead of individual `impl Trait for Type { .. }` lines. Example: `// Bytes: Clone, Debug, Default, Eq, Hash, Send, Sync, ...`. Rich trait impls with associated types (e.g., `Deref`, `IntoIterator`) remain expanded. Use `--all` to restore individual impl lines. Dramatically reduces output for crates like `bytes` (120 impl lines → 8 + summary comments).
+
 ## [0.3.10] - 2026-03-18
 
 ### Added
