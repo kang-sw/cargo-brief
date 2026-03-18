@@ -80,6 +80,8 @@ pub fn generate_rustdoc_json(
             bail!(
                 "Package '{crate_name}' not found in the workspace.\n\
                  Check the package name and ensure it exists in the workspace.\n\
+                 TIP: If it's an optional or unresolved dependency, try:\n\
+                   cargo brief --crates {crate_name} --features <features>\n\
                  Original error:\n{stderr}"
             );
         }
