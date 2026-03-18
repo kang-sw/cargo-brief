@@ -5,15 +5,17 @@
 - `src/main.rs` — CLI dispatch only (dual invocation: `cargo brief` vs `cargo-brief`).
 
 ## Module Contracts
-- `lib.rs` guarantees: two pipeline paths exist. **Local**: metadata → resolve → rustdoc → model → same_crate detection → render → glob expand. **Remote** (`--crates`): early exit to `run_remote_pipeline` which skips resolve and same_crate detection. No stage within a path may be reordered.
-- `resolve` and `rustdoc_json` and `remote` are pure utilities with zero internal dependencies. They can be tested in isolation.
+- `lib.rs` guarantees: two top-level pipeline paths exist. **Local**: metadata → resolve → rustdoc → model → same_crate detection → render → glob expand. **Remote** (`--crates`): early exit to `run_remote_pipeline`, which has four sub-paths: search+cross-crate, module-target+cross-crate, recursive+cross-crate, normal. No stage within a path may be reordered.
+- `resolve`, `rustdoc_json`, `remote`, and `cross_crate` are pure utilities with zero internal dependencies on each other. They can be tested in isolation.
 - `model` depends only on `rustdoc_types` (external). `render` depends on `model` + `cli`.
 - `lib.rs` is the sole orchestrator — all cross-module data flow passes through it.
+- `cross_crate` depends on `rustdoc_json` (for `generate_rustdoc_json_cached` / `parse_rustdoc_json_cached`) and `model`. It never calls `remote` or `resolve`.
 
 ## Coupling
 - `render` → `lib.rs`: Glob re-export output format must match exactly. `render_module_api()` emits `pub use {source}::*;\n` for top-level globs (no indent); `apply_glob_expansions()` searches for this exact string without indentation. Indented globs (from deeper modules) would not match — this coupling is fragile. Change either side without the other → globs silently remain unexpanded.
 - `cli` → all test files: Every `BriefArgs` field must appear in every test helper (5 helpers across 7 test files). Adding a field causes compile errors (good — not silent).
 - `lib.rs` → `resolve` + `rustdoc_json`: `manifest_path` is threaded through without validation. If it points to the wrong Cargo.toml, failure surfaces at JSON generation time, not at metadata loading.
+- `cross_crate` → `rustdoc_json` caching: `cross_crate` exclusively calls `generate_rustdoc_json_cached` / `parse_rustdoc_json_cached`. The local pipeline and `expand_glob_reexports` still call the non-cached variants. Mixing the two on the same target_dir is safe (JSON output is the same file) but `.bin` cache files only exist for sub-crates accessed via the remote pipeline.
 
 ## Extension Points & Change Recipes
 - **Add a new `--no-*` filter flag**: Touch `cli.rs` (add field), `render.rs` (`should_render_item`), all test helpers (add field). Compile errors guide you.
@@ -25,3 +27,4 @@
 ## Technical Debt
 - String-based glob detection/replacement in `apply_glob_expansions` — fragile, first-occurrence-only semantics. See `glob-expansion.md`.
 - No progress indication for long-running `cargo rustdoc` subprocess calls.
+- Cross-crate hop limit is hardcoded at 5 in `cross_crate.rs`. Deep facade chains (>5 hops) silently fall back to "module not found".

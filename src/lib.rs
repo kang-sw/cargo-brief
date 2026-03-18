@@ -1,4 +1,5 @@
 pub mod cli;
+pub mod cross_crate;
 pub mod model;
 pub mod remote;
 pub mod render;
@@ -6,11 +7,16 @@ pub mod resolve;
 pub mod rustdoc_json;
 pub mod search;
 
+/// Clean cached remote crate workspaces. Empty spec = all.
+pub fn clean_cache(spec: &str) -> anyhow::Result<()> {
+    remote::clean_cache(spec)
+}
+
 use std::collections::{HashMap, HashSet};
 use std::path::Path;
 
 use anyhow::{Context, Result};
-use rustdoc_types::{ItemEnum, Visibility};
+use rustdoc_types::{Id, ItemEnum, Visibility};
 
 use cli::BriefArgs;
 use model::{CrateModel, compute_reachable_set};
@@ -145,7 +151,7 @@ fn run_remote_pipeline(args: &BriefArgs, spec: &str) -> Result<String> {
     let metadata = resolve::load_cargo_metadata(Some(&manifest_path))
         .context("Failed to load cargo metadata for remote crate")?;
 
-    let json_path = rustdoc_json::generate_rustdoc_json(
+    let json_path = rustdoc_json::generate_rustdoc_json_cached(
         &name,
         &args.toolchain,
         Some(&manifest_path),
@@ -154,32 +160,169 @@ fn run_remote_pipeline(args: &BriefArgs, spec: &str) -> Result<String> {
     )
     .with_context(|| format!("Failed to generate rustdoc JSON for remote crate '{name}'"))?;
 
-    let krate = rustdoc_json::parse_rustdoc_json(&json_path)?;
+    let krate = rustdoc_json::parse_rustdoc_json_cached(&json_path)?;
     let model = CrateModel::from_crate(krate);
     let reachable = Some(compute_reachable_set(&model));
+    let has_cross_crate = cross_crate::root_has_cross_crate_reexports(&model);
 
+    // --- Search mode ---
     if let Some(pattern) = &args.search {
-        let output = search::render_search(&model, pattern, args, None, false, reachable.as_ref());
+        let mut output =
+            search::render_search(&model, pattern, args, None, false, reachable.as_ref());
+
+        // Cross-crate search: discover sub-crates, search each
+        if has_cross_crate {
+            let sub_crates = cross_crate::discover_all_reexported_crates(
+                &model,
+                &args.toolchain,
+                Some(&manifest_path),
+                &metadata.target_dir,
+            );
+            for sub in &sub_crates {
+                let sub_reachable = Some(compute_reachable_set(&sub.model));
+                let sub_output = search::render_search(
+                    &sub.model,
+                    pattern,
+                    args,
+                    None,
+                    false,
+                    sub_reachable.as_ref(),
+                );
+                output.push_str(&sub_output);
+            }
+        }
+
         return Ok(output);
     }
 
-    let mut output = render::render_module_api(
+    // --- Module targeting with cross-crate resolution ---
+    if let Some(ref module_path) = args.module_path {
+        // Try local module first
+        if model.find_module(module_path).is_some() {
+            // Found locally — render normally
+            return render_remote_normal(
+                &model,
+                args,
+                &manifest_path,
+                &metadata.target_dir,
+                reachable.as_ref(),
+            );
+        }
+
+        // Try cross-crate resolution
+        if let Some(resolution) = cross_crate::resolve_cross_crate_module(
+            &model,
+            module_path,
+            &args.toolchain,
+            Some(&manifest_path),
+            &metadata.target_dir,
+        ) {
+            let sub_reachable = Some(compute_reachable_set(&resolution.model));
+            let mut output = render::render_module_api(
+                &resolution.model,
+                resolution.inner_module_path.as_deref(),
+                args,
+                None,
+                false,
+                sub_reachable.as_ref(),
+            );
+
+            let result = expand_glob_reexports(
+                &resolution.model,
+                resolution.inner_module_path.as_deref(),
+                &args.toolchain,
+                Some(&manifest_path),
+                &metadata.target_dir,
+            );
+            apply_glob_expansions(&mut output, &result, args);
+
+            return Ok(output);
+        }
+
+        // Fall through to normal render (will produce "module not found" error)
+    }
+
+    // --- Recursive mode with cross-crate expansion ---
+    if args.recursive && has_cross_crate {
+        let mut output = render::render_module_api(
+            &model,
+            args.module_path.as_deref(),
+            args,
+            None,
+            false,
+            reachable.as_ref(),
+        );
+
+        let result = expand_glob_reexports(
+            &model,
+            args.module_path.as_deref(),
+            &args.toolchain,
+            Some(&manifest_path),
+            &metadata.target_dir,
+        );
+        apply_glob_expansions(&mut output, &result, args);
+
+        let sub_crates = cross_crate::discover_all_reexported_crates(
+            &model,
+            &args.toolchain,
+            Some(&manifest_path),
+            &metadata.target_dir,
+        );
+        for sub in &sub_crates {
+            let sub_reachable = Some(compute_reachable_set(&sub.model));
+            let sub_output = render::render_module_api(
+                &sub.model,
+                None,
+                args,
+                None,
+                false,
+                sub_reachable.as_ref(),
+            );
+            output.push_str(&format!(
+                "\n// --- module {} (from sub-crate {}) ---\n",
+                sub.display_name,
+                sub.model.crate_name()
+            ));
+            output.push_str(&sub_output);
+        }
+
+        return Ok(output);
+    }
+
+    // --- Normal mode ---
+    render_remote_normal(
         &model,
+        args,
+        &manifest_path,
+        &metadata.target_dir,
+        reachable.as_ref(),
+    )
+}
+
+/// Render a remote crate in normal (non-search, non-cross-crate) mode.
+fn render_remote_normal(
+    model: &CrateModel,
+    args: &BriefArgs,
+    manifest_path: &str,
+    target_dir: &Path,
+    reachable: Option<&HashSet<Id>>,
+) -> Result<String> {
+    let mut output = render::render_module_api(
+        model,
         args.module_path.as_deref(),
         args,
         None,
         false,
-        reachable.as_ref(),
+        reachable,
     );
 
     let result = expand_glob_reexports(
-        &model,
+        model,
         args.module_path.as_deref(),
         &args.toolchain,
-        Some(&manifest_path),
-        &metadata.target_dir,
+        Some(manifest_path),
+        target_dir,
     );
-
     apply_glob_expansions(&mut output, &result, args);
 
     Ok(output)

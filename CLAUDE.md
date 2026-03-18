@@ -160,20 +160,18 @@ alternatives considered, and trade-offs — focus on _why_ this approach was cho
 
 ## Recent Work
 
+- v0.4.0: cross-crate module following (facade crate support), rustdoc JSON + bincode caching, `--clean`
 - v0.3.11: trait impl noise reduction — simple impls collapsed into per-type summary comments
 - v0.3.10: crate-level `//!` doc rendering after `// crate` header
 - v0.3.9: UX hints — module-not-found suggests --search, search 0-result word count hint
 - v0.3.8: fix empty trait path, $crate leak, impl Trait desugar
 - v0.3.7: where clause / generic bound rendering across all item types
-- v0.3.5: fix `--methods-of` stack overflow, `--doc-lines N`, re-export kind annotations
-- v0.3.4: attribute rendering (`#[deprecated]`, `#[non_exhaustive]`, `--verbose-metadata`)
-- v0.3.3: reexport-aware reachability walk for cross-crate views
 
 ## Workspace Reference
 
 - Crate name: `cargo-brief` (binary: `cargo-brief`, lib: `cargo_brief`)
 - Entry: `src/lib.rs` → `run_pipeline()`, `src/main.rs` → CLI
-- Modules: `cli`, `remote`, `resolve`, `rustdoc_json`, `model`, `render`, `search`
+- Modules: `cli`, `cross_crate`, `remote`, `resolve`, `rustdoc_json`, `model`, `render`, `search`
 - Test fixture: `test_fixture/` (sample crate with all item types)
 - Integration tests: `tests/integration.rs`
 

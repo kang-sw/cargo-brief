@@ -2,6 +2,15 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.4.0] - 2026-03-18
+
+### Added
+
+- **Cross-crate module following**: Facade crates like `bevy` that re-export modules from sub-crates now work with module targeting, `--search`, and `--recursive`. `cargo brief --crates bevy ecs` follows the re-export chain (`bevy → bevy_internal → bevy_ecs`) to show the actual module contents. `--search` and `--recursive` automatically discover all re-exported sub-crates.
+- **rustdoc JSON caching**: Remote crate (`--crates`) pipeline now skips `cargo rustdoc` if the JSON already exists in the target directory. Repeat queries are near-instant.
+- **bincode binary cache**: Parsed rustdoc JSON is cached as bincode (`.bin` files alongside `.json`), giving 5-10x faster parse times on subsequent runs.
+- **`--clean [SPEC]` flag**: Clear cached remote crate workspaces. `--clean` removes all caches; `--clean serde@1` removes only that crate's cache. Reports freed disk space.
+
 ## [0.3.11] - 2026-03-18
 
 ### Changed

@@ -16,6 +16,7 @@ fn remote_args(spec: &str) -> BriefArgs {
         recursive: true,
         all: false,
         no_docs: false,
+        no_crate_docs: false,
         doc_lines: None,
         compact: false,
         verbose_metadata: false,
@@ -34,6 +35,7 @@ fn remote_args(spec: &str) -> BriefArgs {
         methods_of: None,
         features: None,
         no_cache: false,
+        clean: None,
         toolchain: "nightly".to_string(),
         manifest_path: None,
     }

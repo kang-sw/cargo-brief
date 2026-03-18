@@ -85,9 +85,10 @@ src/
   lib.rs           — re-exports all modules, run_pipeline() entry point
   main.rs          — CLI arg parsing, calls run_pipeline(), prints output
   cli.rs           — BriefArgs struct (clap derive)
-  remote.rs        — temp workspace creation for --crates (crates.io fetch)
+  cross_crate.rs   — cross-crate module following for facade crates
+  remote.rs        — temp workspace creation for --crates (crates.io fetch) + cache management
   resolve.rs       — flexible target resolution (self, crate::module, fallback) + cargo metadata
-  rustdoc_json.rs  — JSON generation and parsing (accepts target_dir from resolve)
+  rustdoc_json.rs  — JSON generation/parsing + cached variants (JSON skip + bincode)
   model.rs         — CrateModel with module index, visibility resolution
   render.rs        — pseudo-Rust rendering of all item types
   search.rs        — search mode: leaf item walker + one-line-per-item renderer
@@ -118,11 +119,13 @@ Parsed via `rustdoc-types` 0.57. Post-macro-expansion output.
 
 ---
 
-## Operational State (v0.3.11)
+## Operational State (v0.4.0)
 
 - Core pipeline complete. All item types supported. 105 integration tests.
 - Flexible package name resolution: `self`, `crate::module`, file path→module. Bare names always resolve as package.
 - Remote crate support: `--crates <spec>` fetches any crate from crates.io. Workspaces cached at `~/.cache/cargo-brief/crates/`.
+- **Cross-crate module following**: Facade crates (bevy, axum) that re-export from sub-crates now support module targeting (`bevy ecs`), `--search`, and `--recursive`. Re-export chains are followed automatically (max 5 hops).
+- **rustdoc JSON + bincode caching**: Remote pipeline skips JSON generation when file exists; parsed JSON cached as bincode for 5-10x faster reloads. `--clean [SPEC]` manages disk usage.
 - Visibility auto-detection: `same_crate` inferred from cwd package context. Cross-crate views use reachability-based filtering.
 - Glob re-export expansion: Phase 1 (individual `pub use` lines) + Phase 2 (`--expand-glob` inlines full definitions).
 - Search mode: `--search <pattern>` finds leaf items by case-insensitive substring match on full path. Multi-word AND matching.
@@ -132,7 +135,7 @@ Parsed via `rustdoc-types` 0.57. Post-macro-expansion output.
 - Output density: `--no-docs`, `--doc-lines N`, `--compact` for token-budget control.
 - Attribute rendering: `#[deprecated]`, `#[non_exhaustive]` by default; `--verbose-metadata` adds `#[repr]`, `#[must_use]`, etc.
 - Re-export kind annotations: `pub use` lines show `// struct`, `// trait`, etc.
-- Dependencies: `clap` 4, `rustdoc-types` 0.57, `serde_json` 1, `anyhow` 1, `tempfile` 3.
+- Dependencies: `clap` 4, `rustdoc-types` 0.57, `serde_json` 1, `anyhow` 1, `tempfile` 3, `bincode` 1.
 - Test fixture (`test_fixture/`) covers all supported item types.
 
 ## Mental Model Documents
@@ -170,8 +173,7 @@ Domain-oriented operational knowledge in `ai-docs/mental-model/`:
 
 ## Next Up (priority order)
 
-1. **`tickets/idea/260318-feat-cross-crate-module-following.md`** — P1: cross-crate module following + JSON caching (bevy/axum facade support)
-2. **`tickets/idea/260316-feat-output-summary-mode.md`** — P2: `--summary` TOC mode
+1. **`tickets/idea/260316-feat-output-summary-mode.md`** — P2: `--summary` TOC mode
 
 ## Backlog
 

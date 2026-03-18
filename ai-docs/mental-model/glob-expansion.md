@@ -1,9 +1,8 @@
 # Glob Re-Export Expansion
 
 ## Entry Points
-- `src/lib.rs:176-255` — `expand_glob_reexports()` detects globs and generates source crate JSON.
-- `src/lib.rs:145-169` — `apply_glob_expansions()` replaces glob lines in output string.
-- `src/render.rs:82-165` — `render_inlined_items()` renders Phase 2 full definitions.
+- `src/lib.rs` — `expand_glob_reexports()` detects globs and generates source crate JSON; `apply_glob_expansions()` replaces glob lines in output string.
+- `src/render.rs` — `render_inlined_items()` renders Phase 2 full definitions.
 
 ## Module Contracts
 - `expand_glob_reexports()` guarantees: scans only the target module's direct children for `Use` items with `is_glob=true`. Returns `GlobExpansionResult` with both `item_names` (Phase 1) and `source_models` (Phase 2). Errors during source crate JSON generation are silently skipped (`else { continue }`).

@@ -2,8 +2,8 @@
 
 ## Entry Points
 - `src/model.rs` — `is_visible_from()` is the single visibility decision function.
-- `src/lib.rs:62-71` — `same_crate` inference logic.
-- `src/render.rs:47-55` — observer module path normalization.
+- `src/lib.rs` — `same_crate` inference logic (local pipeline only; remote always passes `false`).
+- `src/render.rs` — observer module path normalization before `is_visible_from()` calls.
 
 ## Module Contracts
 - `model::is_visible_from()` guarantees: given correct `observer_module_path` and `same_crate`, it returns whether the item would compile if `use`d from that position. All visibility decisions in the codebase must flow through this function.
@@ -11,7 +11,7 @@
 - `render.rs` guarantees: every item emitted to output has passed an `is_visible_from()` check. This is enforced by convention, not by the type system.
 
 ## Coupling
-- `same_crate` (lib.rs:68) ↔ `document_private_items` (rustdoc_json call): These MUST be consistent. If `same_crate=true`, JSON must be generated with `document_private_items=true`, otherwise `pub(crate)` items are absent from JSON and silently hidden. Currently enforced by: local pipeline always uses `true`, remote pipeline always uses `false`.
+- `same_crate` (lib.rs:68) ↔ `document_private_items` (rustdoc_json call): These MUST be consistent. If `same_crate=true`, JSON must be generated with `document_private_items=true`, otherwise `pub(crate)` items are absent from JSON and silently hidden. Currently both local and remote pipelines pass `true` — the remote pipeline does so to expose internal re-export chains for cross-crate following. `same_crate` is always `false` in the remote pipeline regardless.
 - `same_crate` (lib.rs) ↔ `render_module_api` (render.rs): The `same_crate` flag is passed as a plain `bool`. No type safety prevents passing the wrong value.
 - Observer normalization (render.rs:47-55) does NOT normalize hyphens, but `same_crate` detection (lib.rs:68) DOES. Passing `--at-mod "my-crate::foo"` when the crate name is `my_crate` → observer path won't match, visibility filtering silently wrong.
 

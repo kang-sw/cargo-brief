@@ -17,6 +17,7 @@ fn either_args() -> BriefArgs {
         recursive: true,
         all: false,
         no_docs: false,
+        no_crate_docs: false,
         doc_lines: None,
         compact: false,
         verbose_metadata: false,
@@ -35,6 +36,7 @@ fn either_args() -> BriefArgs {
         methods_of: None,
         features: None,
         no_cache: false,
+        clean: None,
         toolchain: "nightly".to_string(),
         manifest_path: Some("test_workspace/Cargo.toml".to_string()),
     }

@@ -192,6 +192,16 @@ pub struct BriefArgs {
     #[arg(long, help_heading = "Remote Crate (crates.io)")]
     pub no_cache: bool,
 
+    /// Clear cached remote crate workspaces. Use alone or with a crate spec.
+    #[arg(
+        long,
+        value_name = "SPEC",
+        num_args = 0..=1,
+        default_missing_value = "",
+        help_heading = "Remote Crate (crates.io)"
+    )]
+    pub clean: Option<String>,
+
     /// Nightly toolchain name
     #[arg(long, default_value = "nightly", help_heading = "Advanced")]
     pub toolchain: String,

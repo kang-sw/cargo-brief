@@ -54,6 +54,7 @@ fn default_args() -> BriefArgs {
         methods_of: None,
         features: None,
         no_cache: false,
+        clean: None,
         toolchain: "nightly".to_string(),
         manifest_path: Some("test_fixture/Cargo.toml".to_string()),
     }

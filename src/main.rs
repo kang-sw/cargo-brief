@@ -5,6 +5,12 @@ use cargo_brief::cli::{BriefArgs, Cargo, CargoCommand};
 
 fn main() -> Result<()> {
     let args = parse_args();
+
+    if let Some(spec) = &args.clean {
+        cargo_brief::clean_cache(spec)?;
+        return Ok(());
+    }
+
     let output = cargo_brief::run_pipeline(&args)?;
     print!("{output}");
     Ok(())

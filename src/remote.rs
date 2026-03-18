@@ -138,6 +138,40 @@ pub fn resolve_workspace(
     Ok(WorkspaceDir::Cached(dir))
 }
 
+/// Clean cached workspace(s). Empty spec = all, otherwise spec-specific directory.
+pub fn clean_cache(spec: &str) -> Result<()> {
+    let dir = if spec.is_empty() {
+        cache_dir()
+    } else {
+        cache_dir().join(sanitize_spec(spec))
+    };
+    if dir.exists() {
+        let size = dir_size(&dir);
+        std::fs::remove_dir_all(&dir)?;
+        eprintln!("Removed {} ({} MB)", dir.display(), size / 1_000_000);
+    } else {
+        eprintln!("No cache found at {}", dir.display());
+    }
+    Ok(())
+}
+
+/// Recursively compute directory size in bytes.
+fn dir_size(path: &Path) -> u64 {
+    std::fs::read_dir(path)
+        .into_iter()
+        .flatten()
+        .filter_map(|e| e.ok())
+        .map(|e| {
+            let meta = e.metadata().ok();
+            if e.path().is_dir() {
+                dir_size(&e.path())
+            } else {
+                meta.map(|m| m.len()).unwrap_or(0)
+            }
+        })
+        .sum()
+}
+
 /// Create a temporary workspace with the given crate as a dependency.
 /// Returns `TempDir` — the workspace is cleaned up when dropped.
 pub fn create_temp_workspace(name: &str, version_req: &str) -> Result<TempDir> {
