@@ -170,7 +170,8 @@ Domain-oriented operational knowledge in `ai-docs/mental-model/`:
 
 ## Next Up (priority order)
 
-1. **`tickets/idea/260316-feat-output-summary-mode.md`** — P2: `--summary` TOC mode
+1. **`tickets/idea/260318-feat-cross-crate-module-following.md`** — P1: cross-crate module following + JSON caching (bevy/axum facade support)
+2. **`tickets/idea/260316-feat-output-summary-mode.md`** — P2: `--summary` TOC mode
 
 ## Backlog
 
