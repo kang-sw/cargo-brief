@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.3.7] - 2026-03-18
+
+### Added
+
+- **Where clause / generic bound rendering**: all item types (functions, structs, enums, traits, type aliases, unions, impl blocks) now render `where` clauses from rustdoc JSON. Normal mode uses multi-line format for 2+ predicates; search mode uses compact inline format. Covers `BoundPredicate`, `LifetimePredicate`, and `EqPredicate` variants, including higher-ranked trait bounds (`for<'a>`).
+
 ## [0.3.6] - 2026-03-17
 
 ### Added
