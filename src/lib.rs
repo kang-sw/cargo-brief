@@ -174,8 +174,11 @@ fn run_remote_pipeline(args: &BriefArgs, spec: &str) -> Result<String> {
     let reachable = Some(compute_reachable_set(&model));
     let has_cross_crate = cross_crate::root_has_cross_crate_reexports(&model);
 
+    // Build enriched crate header with version + features
+    let crate_header = build_remote_crate_header(&name, workspace.path(), args.features.as_deref());
+
     // --- Search mode ---
-    if let Some(pattern) = &args.search {
+    let mut output = if let Some(pattern) = &args.search {
         let mut output =
             search::render_search(&model, pattern, args, None, false, reachable.as_ref());
 
@@ -201,32 +204,27 @@ fn run_remote_pipeline(args: &BriefArgs, spec: &str) -> Result<String> {
             }
         }
 
-        return Ok(output);
-    }
-
-    // --- Module targeting with cross-crate resolution ---
-    if let Some(ref module_path) = module_path {
-        // Try local module first
+        output
+    } else if let Some(ref module_path) = module_path {
+        // --- Module targeting with cross-crate resolution ---
         if model.find_module(module_path).is_some() {
             // Found locally — render normally
-            return render_remote_normal(
+            render_remote_normal(
                 &model,
                 Some(module_path),
                 args,
                 &manifest_path,
                 &metadata.target_dir,
                 reachable.as_ref(),
-            );
-        }
-
-        // Try cross-crate resolution
-        if let Some(resolution) = cross_crate::resolve_cross_crate_module(
+            )?
+        } else if let Some(resolution) = cross_crate::resolve_cross_crate_module(
             &model,
             module_path,
             &args.toolchain,
             Some(&manifest_path),
             &metadata.target_dir,
         ) {
+            // Cross-crate resolved: use sub-crate model
             let sub_reachable = Some(compute_reachable_set(&resolution.model));
             let mut output = render::render_module_api(
                 &resolution.model,
@@ -245,15 +243,20 @@ fn run_remote_pipeline(args: &BriefArgs, spec: &str) -> Result<String> {
                 &metadata.target_dir,
             );
             apply_glob_expansions(&mut output, &result, args);
-
-            return Ok(output);
+            output
+        } else {
+            // Fall through to normal render (will produce "module not found" error)
+            render_remote_normal(
+                &model,
+                Some(module_path),
+                args,
+                &manifest_path,
+                &metadata.target_dir,
+                reachable.as_ref(),
+            )?
         }
-
-        // Fall through to normal render (will produce "module not found" error)
-    }
-
-    // --- Recursive mode with cross-crate expansion ---
-    if args.recursive && has_cross_crate {
+    } else if args.recursive && has_cross_crate {
+        // --- Recursive mode with cross-crate expansion ---
         let mut output = render::render_module_api(
             &model,
             module_path.as_deref(),
@@ -296,18 +299,51 @@ fn run_remote_pipeline(args: &BriefArgs, spec: &str) -> Result<String> {
             output.push_str(&sub_output);
         }
 
-        return Ok(output);
+        output
+    } else {
+        // --- Normal mode ---
+        render_remote_normal(
+            &model,
+            module_path.as_deref(),
+            args,
+            &manifest_path,
+            &metadata.target_dir,
+            reachable.as_ref(),
+        )?
+    };
+
+    // Enrich the first `// crate <name>` header with version + features
+    if let Some(header) = &crate_header {
+        if let Some(first_newline) = output.find('\n') {
+            let first_line = &output[..first_newline];
+            if first_line.starts_with("// crate ") {
+                output.replace_range(..first_newline, header);
+            }
+        }
     }
 
-    // --- Normal mode ---
-    render_remote_normal(
-        &model,
-        module_path.as_deref(),
-        args,
-        &manifest_path,
-        &metadata.target_dir,
-        reachable.as_ref(),
-    )
+    Ok(output)
+}
+
+/// Build an enriched `// crate name[version] features = [...]` header for remote crates.
+/// Returns None if version cannot be determined.
+fn build_remote_crate_header(
+    crate_name: &str,
+    workspace_dir: &Path,
+    features: Option<&str>,
+) -> Option<String> {
+    let version = remote::resolve_crate_version(workspace_dir, crate_name)?;
+    let mut header = format!("// crate {crate_name}[{version}]");
+    if let Some(feats) = features {
+        let feat_list: Vec<&str> = feats.split(',').map(|s| s.trim()).collect();
+        let formatted = feat_list
+            .iter()
+            .map(|f| format!("\"{f}\""))
+            .collect::<Vec<_>>()
+            .join(", ");
+        header.push_str(&format!(" features = [{formatted}]"));
+    }
+    Some(header)
 }
 
 /// Render a remote crate in normal (non-search, non-cross-crate) mode.

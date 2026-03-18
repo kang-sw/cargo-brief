@@ -138,6 +138,38 @@ pub fn resolve_workspace(
     Ok(WorkspaceDir::Cached(dir))
 }
 
+/// Read the resolved version of a crate from Cargo.lock in a workspace directory.
+///
+/// Parses the lockfile with a simple line-based scanner (no TOML dep needed).
+/// Returns None if the crate is not found or the lockfile doesn't exist.
+pub fn resolve_crate_version(workspace_dir: &Path, crate_name: &str) -> Option<String> {
+    let lockfile = workspace_dir.join("Cargo.lock");
+    let content = std::fs::read_to_string(lockfile).ok()?;
+
+    let mut in_target_package = false;
+    for line in content.lines() {
+        if line.starts_with("[[package]]") {
+            in_target_package = false;
+            continue;
+        }
+        if in_target_package {
+            if let Some(version) = line.strip_prefix("version = \"") {
+                return version.strip_suffix('"').map(|v| v.to_string());
+            }
+        }
+        // Match name = "<crate_name>" (underscore-normalized)
+        if let Some(name) = line.strip_prefix("name = \"") {
+            if let Some(name) = name.strip_suffix('"') {
+                if name == crate_name || name.replace('-', "_") == crate_name.replace('-', "_") {
+                    in_target_package = true;
+                }
+            }
+        }
+    }
+
+    None
+}
+
 /// Clean cached workspace(s). Empty spec = all, otherwise spec-specific directory.
 pub fn clean_cache(spec: &str) -> Result<()> {
     let dir = if spec.is_empty() {
