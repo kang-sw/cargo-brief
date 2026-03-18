@@ -148,8 +148,9 @@ fn run_remote_pipeline(args: &BriefArgs, spec: &str) -> Result<String> {
     };
 
     let (name, _) = remote::parse_crate_spec(spec);
-    let workspace = remote::resolve_workspace(spec, args.features.as_deref(), args.no_cache)
-        .with_context(|| format!("Failed to create workspace for '{name}'"))?;
+    let (workspace, resolved_version) =
+        remote::resolve_workspace(spec, args.features.as_deref(), args.no_cache)
+            .with_context(|| format!("Failed to create workspace for '{name}'"))?;
 
     let manifest_path = workspace
         .path()
@@ -175,7 +176,12 @@ fn run_remote_pipeline(args: &BriefArgs, spec: &str) -> Result<String> {
     let has_cross_crate = cross_crate::root_has_cross_crate_reexports(&model);
 
     // Build enriched crate header with version + features
-    let crate_header = build_remote_crate_header(&name, workspace.path(), args.features.as_deref());
+    let crate_header = build_remote_crate_header(
+        &name,
+        resolved_version.as_deref(),
+        workspace.path(),
+        args.features.as_deref(),
+    );
 
     // --- Search mode ---
     let mut output = if let Some(pattern) = &args.search {
@@ -329,10 +335,13 @@ fn run_remote_pipeline(args: &BriefArgs, spec: &str) -> Result<String> {
 /// Returns None if version cannot be determined.
 fn build_remote_crate_header(
     crate_name: &str,
+    resolved_version: Option<&str>,
     workspace_dir: &Path,
     features: Option<&str>,
 ) -> Option<String> {
-    let version = remote::resolve_crate_version(workspace_dir, crate_name)?;
+    let version = resolved_version
+        .map(|v| v.to_string())
+        .or_else(|| remote::resolve_crate_version(workspace_dir, crate_name))?;
     let mut header = format!("// crate {crate_name}[{version}]");
     if let Some(feats) = features {
         let feat_list: Vec<&str> = feats.split(',').map(|s| s.trim()).collect();

@@ -119,11 +119,11 @@ Parsed via `rustdoc-types` 0.57. Post-macro-expansion output.
 
 ---
 
-## Operational State (v0.4.0)
+## Operational State (v0.4.1)
 
 - Core pipeline complete. All item types supported. 105 integration tests.
 - Flexible package name resolution: `self`, `crate::module`, file path→module. Bare names always resolve as package.
-- Remote crate support: `--crates <spec>` fetches any crate from crates.io. Workspaces cached at `~/.cache/cargo-brief/crates/`.
+- Remote crate support: `--crates <spec>` fetches any crate from crates.io. Workspaces cached at `~/.cache/cargo-brief/crates/` with version-normalized directory names (`name[version]`). Exact version resolved via crates.io API with 24h cache; bare specs auto-update.
 - **Cross-crate module following**: Facade crates (bevy, axum) that re-export from sub-crates now support module targeting (`bevy ecs`), `--search`, and `--recursive`. Re-export chains are followed automatically (max 5 hops).
 - **rustdoc JSON + bincode caching**: Remote pipeline skips JSON generation when file exists; parsed JSON cached as bincode for 5-10x faster reloads. `--clean [SPEC]` manages disk usage.
 - Visibility auto-detection: `same_crate` inferred from cwd package context. Cross-crate views use reachability-based filtering.
@@ -135,7 +135,7 @@ Parsed via `rustdoc-types` 0.57. Post-macro-expansion output.
 - Output density: `--no-docs`, `--doc-lines N`, `--compact` for token-budget control.
 - Attribute rendering: `#[deprecated]`, `#[non_exhaustive]` by default; `--verbose-metadata` adds `#[repr]`, `#[must_use]`, etc.
 - Re-export kind annotations: `pub use` lines show `// struct`, `// trait`, etc.
-- Dependencies: `clap` 4, `rustdoc-types` 0.57, `serde_json` 1, `anyhow` 1, `tempfile` 3, `bincode` 1.
+- Dependencies: `clap` 4, `rustdoc-types` 0.57, `serde_json` 1, `anyhow` 1, `tempfile` 3, `bincode` 1, `semver` 1, `ureq` 2.
 - Test fixture (`test_fixture/`) covers all supported item types.
 
 ## Mental Model Documents

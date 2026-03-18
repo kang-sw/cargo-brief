@@ -160,6 +160,7 @@ alternatives considered, and trade-offs — focus on _why_ this approach was cho
 
 ## Recent Work
 
+- v0.4.1: version-normalized cache dirs (`name[version]`), crates.io API version resolution with 24h cache, `--clean` glob matching, bare spec auto-update
 - v0.4.0: cross-crate module following (facade crate support), rustdoc JSON + bincode caching, `--clean`, version+features in remote crate header
 - v0.3.11: trait impl noise reduction — simple impls collapsed into per-type summary comments
 - v0.3.10: crate-level `//!` doc rendering after `// crate` header

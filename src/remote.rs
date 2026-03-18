@@ -1,7 +1,8 @@
 use std::io::Write;
 use std::path::{Path, PathBuf};
+use std::time::Duration;
 
-use anyhow::{Context, Result};
+use anyhow::{Context, Result, bail};
 use tempfile::TempDir;
 
 /// Parse a crate spec like "name@version" into (name, version_req).
@@ -53,16 +54,123 @@ fn cache_dir() -> PathBuf {
     PathBuf::from(home).join(".cache/cargo-brief/crates")
 }
 
-/// Convert a crate spec into a filesystem-safe directory name.
+/// Build a version-normalized cache directory name.
 ///
-/// `@` → `@` (already safe), other special chars replaced with `_`.
-fn sanitize_spec(spec: &str) -> String {
-    spec.chars()
-        .map(|c| match c {
-            'a'..='z' | 'A'..='Z' | '0'..='9' | '-' | '_' | '.' | '@' => c,
-            _ => '_',
-        })
-        .collect()
+/// Format: `name[version]` or `name[version]+feat1+feat2` (features alpha-sorted).
+pub fn cache_dir_name(name: &str, version: &str, features: Option<&str>) -> String {
+    let mut result = format!("{name}[{version}]");
+    if let Some(feats) = features {
+        let mut feat_list: Vec<&str> = feats.split(',').map(|s| s.trim()).collect();
+        feat_list.sort();
+        for f in &feat_list {
+            result.push('+');
+            result.push_str(f);
+        }
+    }
+    result
+}
+
+/// Find the newest non-yanked version matching `version_req` from a crates.io API JSON response.
+///
+/// The `versions` array in the response is assumed to be newest-first.
+pub fn find_matching_version(json_str: &str, version_req: &str) -> Option<String> {
+    let parsed: serde_json::Value = serde_json::from_str(json_str).ok()?;
+    let versions = parsed.get("versions")?.as_array()?;
+    let req = semver::VersionReq::parse(version_req).ok()?;
+
+    for entry in versions {
+        let yanked = entry
+            .get("yanked")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false);
+        if yanked {
+            continue;
+        }
+        let num = entry.get("num")?.as_str()?;
+        if let Ok(ver) = semver::Version::parse(num)
+            && req.matches(&ver)
+        {
+            return Some(num.to_string());
+        }
+    }
+    None
+}
+
+/// Resolve the exact version of a crate from crates.io, with 24h file cache.
+///
+/// - Exact specs (starting with `=`) skip the API call entirely.
+/// - Cached API responses at `CACHE_DIR/versions/{name}.json` are reused if < 24h old.
+/// - On API failure, stale cache is used with a stderr warning.
+/// - If no cache exists and network fails, returns an error.
+pub fn fetch_resolved_version(name: &str, version_req: &str) -> Result<String> {
+    // Exact spec shortcut: =1.0.200 → 1.0.200 (no network needed)
+    if let Some(exact) = version_req.strip_prefix('=') {
+        return Ok(exact.to_string());
+    }
+
+    let cache_path = cache_dir().join("versions").join(format!("{name}.json"));
+
+    // Try fresh cache first (< 24h)
+    if let Some(cached) = read_version_cache(&cache_path, false)
+        && let Some(ver) = find_matching_version(&cached, version_req)
+    {
+        return Ok(ver);
+    }
+
+    // API call
+    match fetch_crates_io_api(name) {
+        Ok(resp) => {
+            // Write cache (best-effort)
+            let _ = std::fs::create_dir_all(cache_path.parent().unwrap());
+            let _ = std::fs::write(&cache_path, &resp);
+
+            find_matching_version(&resp, version_req).with_context(|| {
+                format!("No version of '{name}' matches requirement '{version_req}'")
+            })
+        }
+        Err(api_err) => {
+            // Offline fallback: use stale cache if available
+            if let Some(stale) = read_version_cache(&cache_path, true)
+                && let Some(ver) = find_matching_version(&stale, version_req)
+            {
+                eprintln!(
+                    "Warning: using stale version cache for '{name}' (API unavailable: {api_err})"
+                );
+                return Ok(ver);
+            }
+            bail!(
+                "Cannot resolve version for '{name}': {api_err}. \
+                 Try specifying an exact version (e.g., {name}@1.0.0) or check your internet connection."
+            )
+        }
+    }
+}
+
+/// Read version cache file, optionally ignoring staleness.
+fn read_version_cache(path: &Path, allow_stale: bool) -> Option<String> {
+    let meta = path.metadata().ok()?;
+    if !allow_stale {
+        let age = meta.modified().ok()?.elapsed().ok()?;
+        if age > Duration::from_secs(86400) {
+            return None;
+        }
+    }
+    std::fs::read_to_string(path).ok()
+}
+
+/// Call the crates.io REST API for crate metadata.
+fn fetch_crates_io_api(name: &str) -> Result<String> {
+    let url = format!("https://crates.io/api/v1/crates/{name}");
+    let resp = ureq::get(&url)
+        .set(
+            "User-Agent",
+            "cargo-brief (https://github.com/kang-sw/cargo-brief)",
+        )
+        .call()
+        .with_context(|| format!("HTTP request to crates.io failed for '{name}'"))?
+        .into_string()
+        .context("Failed to read crates.io response body")?;
+    Ok(resp)
 }
 
 /// Write the workspace Cargo.toml and src/lib.rs into the given directory.
@@ -116,26 +224,39 @@ edition = "2021"
 
 /// Resolve a workspace directory for a remote crate spec.
 ///
-/// When `no_cache` is true, returns a `TempDir` (cleaned up on drop).
-/// Otherwise, returns a persistent cache directory under `cache_dir()/sanitize_spec(spec)`.
+/// Returns `(WorkspaceDir, Option<resolved_version>)`.
+/// When `no_cache` is true, returns a `TempDir` (version resolution is best-effort).
+/// Otherwise, resolves the exact version via crates.io API and uses a normalized cache dir.
 pub fn resolve_workspace(
     spec: &str,
     features: Option<&str>,
     no_cache: bool,
-) -> Result<WorkspaceDir> {
+) -> Result<(WorkspaceDir, Option<String>)> {
     let (name, version_req) = parse_crate_spec(spec);
 
     if no_cache {
+        // Best-effort version resolution for --no-cache (used for header display)
+        let resolved = fetch_resolved_version(&name, &version_req).ok();
+        let actual_req = resolved
+            .as_deref()
+            .map(|v| format!("={v}"))
+            .unwrap_or(version_req);
         let tmp = TempDir::new().context("Failed to create temp directory")?;
-        write_workspace_files(tmp.path(), &name, &version_req, features)?;
-        return Ok(WorkspaceDir::Temp(tmp));
+        write_workspace_files(tmp.path(), &name, &actual_req, features)?;
+        return Ok((WorkspaceDir::Temp(tmp), resolved));
     }
 
-    let dir = cache_dir().join(sanitize_spec(spec));
-    std::fs::create_dir_all(&dir)
-        .with_context(|| format!("Failed to create cache dir {}", dir.display()))?;
-    write_workspace_files(&dir, &name, &version_req, features)?;
-    Ok(WorkspaceDir::Cached(dir))
+    let resolved = fetch_resolved_version(&name, &version_req)?;
+    let dir_name = cache_dir_name(&name, &resolved, features);
+    let dir = cache_dir().join(dir_name);
+
+    if !dir.join("Cargo.toml").exists() {
+        std::fs::create_dir_all(&dir)
+            .with_context(|| format!("Failed to create cache dir {}", dir.display()))?;
+        write_workspace_files(&dir, &name, &format!("={resolved}"), features)?;
+    }
+
+    Ok((WorkspaceDir::Cached(dir), Some(resolved.clone())))
 }
 
 /// Read the resolved version of a crate from Cargo.lock in a workspace directory.
@@ -170,20 +291,53 @@ pub fn resolve_crate_version(workspace_dir: &Path, crate_name: &str) -> Option<S
     None
 }
 
-/// Clean cached workspace(s). Empty spec = all, otherwise spec-specific directory.
+/// Clean cached workspace(s). Empty spec = all, otherwise glob-match on crate name prefix.
 pub fn clean_cache(spec: &str) -> Result<()> {
-    let dir = if spec.is_empty() {
-        cache_dir()
-    } else {
-        cache_dir().join(sanitize_spec(spec))
-    };
-    if dir.exists() {
-        let size = dir_size(&dir);
-        std::fs::remove_dir_all(&dir)?;
-        eprintln!("Removed {} ({} MB)", dir.display(), size / 1_000_000);
-    } else {
-        eprintln!("No cache found at {}", dir.display());
+    if spec.is_empty() {
+        let dir = cache_dir();
+        if dir.exists() {
+            let size = dir_size(&dir);
+            std::fs::remove_dir_all(&dir)?;
+            eprintln!("Removed {} ({} MB)", dir.display(), size / 1_000_000);
+        } else {
+            eprintln!("No cache found at {}", dir.display());
+        }
+        return Ok(());
     }
+
+    let (name, _) = parse_crate_spec(spec);
+    let base = cache_dir();
+    let prefix = format!("{name}[");
+    let mut found = false;
+
+    if let Ok(entries) = std::fs::read_dir(&base) {
+        for entry in entries.flatten() {
+            let fname = entry.file_name().to_string_lossy().to_string();
+            if fname.starts_with(&prefix) && entry.path().is_dir() {
+                let size = dir_size(&entry.path());
+                std::fs::remove_dir_all(entry.path())?;
+                eprintln!(
+                    "Removed {} ({} MB)",
+                    entry.path().display(),
+                    size / 1_000_000
+                );
+                found = true;
+            }
+        }
+    }
+
+    // Also remove version cache
+    let version_cache = base.join("versions").join(format!("{name}.json"));
+    if version_cache.exists() {
+        std::fs::remove_file(&version_cache)?;
+        eprintln!("Removed version cache for '{name}'");
+        found = true;
+    }
+
+    if !found {
+        eprintln!("No cache found for '{name}'");
+    }
+
     Ok(())
 }
 
@@ -255,13 +409,6 @@ mod tests {
     }
 
     #[test]
-    fn sanitize_spec_basic() {
-        assert_eq!(sanitize_spec("serde"), "serde");
-        assert_eq!(sanitize_spec("tokio@1"), "tokio@1");
-        assert_eq!(sanitize_spec("serde@1.0.200"), "serde@1.0.200");
-    }
-
-    #[test]
     fn cache_dir_env_override() {
         let original = std::env::var("CARGO_BRIEF_CACHE_DIR").ok();
         // SAFETY: test-only env manipulation, tests run serially for this var
@@ -286,7 +433,7 @@ mod tests {
 
     #[test]
     fn resolve_workspace_no_cache() {
-        let ws = resolve_workspace("serde", None, true).unwrap();
+        let (ws, _resolved) = resolve_workspace("serde", None, true).unwrap();
         assert!(matches!(ws, WorkspaceDir::Temp(_)));
         assert!(ws.path().join("Cargo.toml").exists());
         assert!(ws.path().join("src/lib.rs").exists());
@@ -299,18 +446,115 @@ mod tests {
         // SAFETY: test-only env manipulation, tests run serially for this var
         unsafe { std::env::set_var("CARGO_BRIEF_CACHE_DIR", test_dir.path()) };
 
-        let ws = resolve_workspace("serde", None, false).unwrap();
+        let (ws, resolved) = resolve_workspace("serde@1.0.200", None, false).unwrap();
         assert!(matches!(ws, WorkspaceDir::Cached(_)));
         assert!(ws.path().join("Cargo.toml").exists());
         assert!(ws.path().join("src/lib.rs").exists());
+        assert_eq!(resolved, Some("1.0.200".to_string()));
+
+        // Verify dir name uses normalized format
+        let dir_name = ws.path().file_name().unwrap().to_string_lossy().to_string();
+        assert_eq!(dir_name, "serde[1.0.200]");
 
         // Second call reuses the same directory (idempotent)
-        let ws2 = resolve_workspace("serde", None, false).unwrap();
+        let (ws2, _) = resolve_workspace("serde@1.0.200", None, false).unwrap();
         assert_eq!(ws.path(), ws2.path());
 
         match original {
             Some(v) => unsafe { std::env::set_var("CARGO_BRIEF_CACHE_DIR", v) },
             None => unsafe { std::env::remove_var("CARGO_BRIEF_CACHE_DIR") },
         }
+    }
+
+    #[test]
+    fn test_cache_dir_name() {
+        assert_eq!(cache_dir_name("hecs", "0.14.2", None), "hecs[0.14.2]");
+        assert_eq!(cache_dir_name("serde", "1.0.200", None), "serde[1.0.200]");
+    }
+
+    #[test]
+    fn test_cache_dir_name_feature_sorting() {
+        assert_eq!(
+            cache_dir_name("bevy", "0.18.1", Some("bevy_winit,default")),
+            "bevy[0.18.1]+bevy_winit+default"
+        );
+        // Features are alpha-sorted
+        assert_eq!(
+            cache_dir_name("tokio", "1.44.1", Some("net,rt,macros")),
+            "tokio[1.44.1]+macros+net+rt"
+        );
+    }
+
+    #[test]
+    fn test_find_matching_version_exact() {
+        let json = r#"{"versions": [
+            {"num": "1.0.3", "yanked": false},
+            {"num": "1.0.2", "yanked": false},
+            {"num": "1.0.1", "yanked": false}
+        ]}"#;
+        assert_eq!(
+            find_matching_version(json, "=1.0.2"),
+            Some("1.0.2".to_string())
+        );
+    }
+
+    #[test]
+    fn test_find_matching_version_range() {
+        let json = r#"{"versions": [
+            {"num": "2.0.0", "yanked": false},
+            {"num": "1.5.0", "yanked": false},
+            {"num": "1.4.0", "yanked": false},
+            {"num": "0.9.0", "yanked": false}
+        ]}"#;
+        // "1" matches >=1.0.0, <2.0.0 → newest is 1.5.0
+        assert_eq!(find_matching_version(json, "1"), Some("1.5.0".to_string()));
+    }
+
+    #[test]
+    fn test_find_matching_version_wildcard() {
+        let json = r#"{"versions": [
+            {"num": "3.0.0", "yanked": false},
+            {"num": "2.0.0", "yanked": false}
+        ]}"#;
+        assert_eq!(find_matching_version(json, "*"), Some("3.0.0".to_string()));
+    }
+
+    #[test]
+    fn test_find_matching_version_skips_yanked() {
+        let json = r#"{"versions": [
+            {"num": "1.2.0", "yanked": true},
+            {"num": "1.1.0", "yanked": false}
+        ]}"#;
+        assert_eq!(find_matching_version(json, "*"), Some("1.1.0".to_string()));
+    }
+
+    #[test]
+    fn test_find_matching_version_no_match() {
+        let json = r#"{"versions": [
+            {"num": "0.9.0", "yanked": false}
+        ]}"#;
+        assert_eq!(find_matching_version(json, "1"), None);
+    }
+
+    #[test]
+    fn test_find_matching_version_minor_range() {
+        let json = r#"{"versions": [
+            {"num": "0.19.0", "yanked": false},
+            {"num": "0.18.3", "yanked": false},
+            {"num": "0.18.1", "yanked": false},
+            {"num": "0.17.0", "yanked": false}
+        ]}"#;
+        // "0.18" matches >=0.18.0, <0.19.0
+        assert_eq!(
+            find_matching_version(json, "0.18"),
+            Some("0.18.3".to_string())
+        );
+    }
+
+    #[test]
+    fn test_fetch_resolved_version_exact_shortcut() {
+        // Exact specs skip the network entirely
+        let ver = fetch_resolved_version("anything", "=1.2.3").unwrap();
+        assert_eq!(ver, "1.2.3");
     }
 }

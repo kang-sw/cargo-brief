@@ -2,6 +2,19 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.4.1] - 2026-03-19
+
+### Changed
+
+- **Version-normalized cache directories**: Remote crate cache dirs now use `name[version]` format (e.g., `serde[1.0.217]/`) instead of echoing the user's spec verbatim. Different spec forms (`serde`, `serde@1`, `serde@1.0.217`) that resolve to the same version now share a single cache directory, eliminating duplicate multi-GB workspaces.
+- **crates.io version resolution**: Before creating a workspace, the exact version is resolved via the crates.io REST API with `semver` matching. API responses are cached for 24 hours at `~/.cache/cargo-brief/crates/versions/`. Offline fallback uses stale cache; exact specs (`serde@1.0.200`) skip the network entirely.
+- **`--clean` glob matching**: `--clean serde` now removes all `serde[*]` directories and the version cache, instead of requiring the exact spec used at creation time.
+- **Bare specs auto-update**: `cargo brief --crates serde` now picks up new versions after the 24h API cache expires, instead of being permanently pinned by `Cargo.lock`.
+
+### Added
+
+- New dependencies: `semver` 1, `ureq` 2.
+
 ## [0.4.0] - 2026-03-18
 
 ### Added
