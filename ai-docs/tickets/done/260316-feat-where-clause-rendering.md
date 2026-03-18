@@ -1,6 +1,7 @@
 ---
 title: "Render where clauses / generic bounds"
-status: todo
+status: done
+completed: 2026-03-18
 ---
 
 # Feature: Render where clauses / generic bounds
@@ -82,3 +83,18 @@ generic params when they match a param name.
 | `src/render.rs` → struct/trait/impl renderers | Append where clauses |
 | `src/search.rs` → `render_function_leaf()` | Compact bounds in search |
 | `tests/integration.rs` | Test where clause rendering |
+
+### Result (bc1c5af) - 26-03-18
+
+Implemented where clause rendering across all item types.
+
+**What was implemented:**
+- New helpers in `render.rs`: `format_term`, `format_predicate`, `format_where_clause` (multi-line), `format_where_clause_compact` (inline). Public wrappers for search.rs.
+- Updated 10 call sites in `render.rs`: free functions, structs (unit/tuple/plain), enums, traits (header + methods), type aliases, unions, impl items, impl blocks (both `render_impl_blocks` and `render_inlined_impl_blocks`).
+- Updated 3 call sites in `search.rs`: function, struct, and type alias leaf renderers use compact inline where.
+- Test fixture: 7 new items exercising all predicate types.
+- Integration tests: 8 new tests.
+
+**Deviations from plan:**
+- Search mode uses compact inline where clause (` where P1, P2`) instead of merging predicates back into generic params — simpler, still readable, avoids complexity of param-matching logic.
+- Paths rendered as-is from rustdoc JSON (e.g. `std::fmt::Debug` not `Debug`) — consistent with existing generic param bound rendering.
