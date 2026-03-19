@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.5.1] - 2026-03-20
+
+### Fixed
+
+- **Glob re-export resolution**: Items inside `pub(crate)` modules that are glob-re-exported (`pub use module::*`) are now correctly included in the reachable set. Previously, `compute_reachable_set` skipped these modules entirely, making core types like `bevy_pbr::Material`, `StandardMaterial`, and `MeshMaterial3d` invisible to both `search` and `api` pipelines. This is the dominant Rust crate organization pattern (used by bevy, axum, tokio, serde, etc.).
+
 ## [0.5.0] - 2026-03-19
 
 ### Breaking
