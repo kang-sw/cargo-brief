@@ -19,13 +19,7 @@ pub enum CargoCommand {
 #[command(
     version,
     about = "Visibility-aware Rust API extractor for AI agents",
-    after_help = "\
-SUBCOMMANDS:
-  api       Extract and render crate API as pseudo-Rust
-  search    Search for items by name across a crate
-  examples  (stub) Grep examples from a crate
-
-Run `cargo brief <subcommand> --help` for subcommand-specific options."
+    after_help = "Run `cargo brief <subcommand> --help` for subcommand-specific options."
 )]
 pub struct BriefDirect {
     #[command(subcommand)]
