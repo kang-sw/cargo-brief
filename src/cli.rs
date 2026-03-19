@@ -205,4 +205,8 @@ pub struct BriefArgs {
     /// Nightly toolchain name
     #[arg(long, default_value = "nightly", help_heading = "Advanced")]
     pub toolchain: String,
+
+    /// Show progress messages on stderr during pipeline execution
+    #[arg(short, long)]
+    pub verbose: bool,
 }

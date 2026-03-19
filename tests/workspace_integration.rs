@@ -32,6 +32,7 @@ fn workspace_args(crate_name: &str) -> BriefArgs {
         no_cache: false,
         clean: None,
         toolchain: "nightly".to_string(),
+        verbose: false,
         manifest_path: Some("test_workspace/Cargo.toml".to_string()),
     }
 }

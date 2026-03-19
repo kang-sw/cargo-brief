@@ -53,6 +53,9 @@ pub fn run_pipeline(args: &BriefArgs) -> Result<String> {
     }
 
     // Step 0: Load cargo metadata and resolve target
+    if args.verbose {
+        eprintln!("[cargo-brief] Resolving target '{}'...", args.crate_name);
+    }
     let metadata = resolve::load_cargo_metadata(args.manifest_path.as_deref())
         .context("Failed to load cargo metadata")?;
 
@@ -61,6 +64,12 @@ pub fn run_pipeline(args: &BriefArgs) -> Result<String> {
             .context("Failed to resolve target")?;
 
     // Step 1: Generate rustdoc JSON
+    if args.verbose {
+        eprintln!(
+            "[cargo-brief] Running cargo rustdoc for '{}'...",
+            resolved.package_name
+        );
+    }
     let json_path = rustdoc_json::generate_rustdoc_json(
         &resolved.package_name,
         &args.toolchain,
@@ -76,6 +85,9 @@ pub fn run_pipeline(args: &BriefArgs) -> Result<String> {
     })?;
 
     // Step 2: Parse JSON
+    if args.verbose {
+        eprintln!("[cargo-brief] Parsing rustdoc JSON...");
+    }
     let krate = rustdoc_json::parse_rustdoc_json(&json_path)
         .with_context(|| format!("Failed to parse rustdoc JSON at '{}'", json_path.display()))?;
 
@@ -148,6 +160,9 @@ fn run_remote_pipeline(args: &BriefArgs, spec: &str) -> Result<String> {
     };
 
     let (name, _) = remote::parse_crate_spec(spec);
+    if args.verbose {
+        eprintln!("[cargo-brief] Resolving workspace for '{name}'...");
+    }
     let (workspace, resolved_version) =
         remote::resolve_workspace(spec, args.features.as_deref(), args.no_cache)
             .with_context(|| format!("Failed to create workspace for '{name}'"))?;
@@ -161,6 +176,9 @@ fn run_remote_pipeline(args: &BriefArgs, spec: &str) -> Result<String> {
     let metadata = resolve::load_cargo_metadata(Some(&manifest_path))
         .context("Failed to load cargo metadata for remote crate")?;
 
+    if args.verbose {
+        eprintln!("[cargo-brief] Running cargo rustdoc for '{name}'...");
+    }
     let json_path = rustdoc_json::generate_rustdoc_json_cached(
         &name,
         &args.toolchain,
@@ -170,6 +188,9 @@ fn run_remote_pipeline(args: &BriefArgs, spec: &str) -> Result<String> {
     )
     .with_context(|| format!("Failed to generate rustdoc JSON for remote crate '{name}'"))?;
 
+    if args.verbose {
+        eprintln!("[cargo-brief] Parsing rustdoc JSON...");
+    }
     let krate = rustdoc_json::parse_rustdoc_json_cached(&json_path)?;
     let model = CrateModel::from_crate(krate);
     let reachable = Some(compute_reachable_set(&model));
@@ -190,6 +211,9 @@ fn run_remote_pipeline(args: &BriefArgs, spec: &str) -> Result<String> {
 
         // Cross-crate search: discover sub-crates, search each
         if has_cross_crate {
+            if args.verbose {
+                eprintln!("[cargo-brief] Discovering cross-crate re-exports...");
+            }
             let sub_crates = cross_crate::discover_all_reexported_crates(
                 &model,
                 &args.toolchain,
@@ -223,46 +247,56 @@ fn run_remote_pipeline(args: &BriefArgs, spec: &str) -> Result<String> {
                 &metadata.target_dir,
                 reachable.as_ref(),
             )?
-        } else if let Some(resolution) = cross_crate::resolve_cross_crate_module(
-            &model,
-            module_path,
-            &args.toolchain,
-            Some(&manifest_path),
-            &metadata.target_dir,
-        ) {
-            // Cross-crate resolved: use sub-crate model
-            let sub_reachable = Some(compute_reachable_set(&resolution.model));
-            let mut output = render::render_module_api(
-                &resolution.model,
-                resolution.inner_module_path.as_deref(),
-                args,
-                None,
-                false,
-                sub_reachable.as_ref(),
-            );
-
-            let result = expand_glob_reexports(
-                &resolution.model,
-                resolution.inner_module_path.as_deref(),
+        } else {
+            if args.verbose {
+                eprintln!(
+                    "[cargo-brief] Module '{module_path}' not found locally, trying cross-crate resolution..."
+                );
+            }
+            if let Some(resolution) = cross_crate::resolve_cross_crate_module(
+                &model,
+                module_path,
                 &args.toolchain,
                 Some(&manifest_path),
                 &metadata.target_dir,
-            );
-            apply_glob_expansions(&mut output, &result, args);
-            output
-        } else {
-            // Fall through to normal render (will produce "module not found" error)
-            render_remote_normal(
-                &model,
-                Some(module_path),
-                args,
-                &manifest_path,
-                &metadata.target_dir,
-                reachable.as_ref(),
-            )?
+            ) {
+                // Cross-crate resolved: use sub-crate model
+                let sub_reachable = Some(compute_reachable_set(&resolution.model));
+                let mut output = render::render_module_api(
+                    &resolution.model,
+                    resolution.inner_module_path.as_deref(),
+                    args,
+                    None,
+                    false,
+                    sub_reachable.as_ref(),
+                );
+
+                let result = expand_glob_reexports(
+                    &resolution.model,
+                    resolution.inner_module_path.as_deref(),
+                    &args.toolchain,
+                    Some(&manifest_path),
+                    &metadata.target_dir,
+                );
+                apply_glob_expansions(&mut output, &result, args);
+                output
+            } else {
+                // Fall through to normal render (will produce "module not found" error)
+                render_remote_normal(
+                    &model,
+                    Some(module_path),
+                    args,
+                    &manifest_path,
+                    &metadata.target_dir,
+                    reachable.as_ref(),
+                )?
+            }
         }
     } else if args.recursive && has_cross_crate {
         // --- Recursive mode with cross-crate expansion ---
+        if args.verbose {
+            eprintln!("[cargo-brief] Discovering cross-crate re-exports...");
+        }
         let mut output = render::render_module_api(
             &model,
             module_path.as_deref(),

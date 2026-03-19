@@ -74,6 +74,7 @@ cargo brief --crates <spec> [module_path] [OPTIONS]
 | `--compact`             | Collapse struct fields, enum variants, trait items; implies --no-docs |
 | `--verbose-metadata`    | Show all attributes (default: only #[deprecated], #[non_exhaustive]) |
 | `--features <FEATURES>` | Comma-separated features to enable for --crates                |
+| `-v` / `--verbose`        | Show progress messages on stderr during pipeline execution     |
 | `--manifest-path <path>`| Path to Cargo.toml                                            |
 
 ---

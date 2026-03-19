@@ -26,5 +26,5 @@
 
 ## Technical Debt
 - String-based glob detection/replacement in `apply_glob_expansions` — fragile, first-occurrence-only semantics. See `glob-expansion.md`.
-- No progress indication for long-running `cargo rustdoc` subprocess calls.
+- `--verbose` / `-v` prints progress to stderr; messages are in `lib.rs` only (not in utility modules).
 - Cross-crate hop limit is hardcoded at 5 in `cross_crate.rs`. Deep facade chains (>5 hops) silently fall back to "module not found".

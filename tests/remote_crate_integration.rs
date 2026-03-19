@@ -37,6 +37,7 @@ fn remote_args(spec: &str) -> BriefArgs {
         no_cache: false,
         clean: None,
         toolchain: "nightly".to_string(),
+        verbose: false,
         manifest_path: None,
     }
 }

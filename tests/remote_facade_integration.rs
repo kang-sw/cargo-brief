@@ -39,6 +39,7 @@ fn hecs_args() -> BriefArgs {
         no_cache: false,
         clean: None,
         toolchain: "nightly".to_string(),
+        verbose: false,
         manifest_path: None,
     }
 }
