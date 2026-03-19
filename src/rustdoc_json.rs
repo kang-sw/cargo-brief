@@ -1,15 +1,19 @@
 use std::path::{Path, PathBuf};
-use std::process::Command;
+use std::process::{Command, Stdio};
 
 use anyhow::{Context, Result, bail};
 
 /// Invoke `cargo +nightly rustdoc` and return the path to the generated JSON file.
+///
+/// When `verbose` is true, cargo's stderr (compilation progress) is streamed to
+/// the terminal in real time via `Stdio::inherit()`.
 pub fn generate_rustdoc_json(
     crate_name: &str,
     toolchain: &str,
     manifest_path: Option<&str>,
     document_private_items: bool,
     target_dir: &Path,
+    verbose: bool,
 ) -> Result<PathBuf> {
     let mut cmd = Command::new("cargo");
     cmd.arg(format!("+{toolchain}"));
@@ -26,66 +30,78 @@ pub fn generate_rustdoc_json(
         cmd.arg("--document-private-items");
     }
 
-    let output = cmd.output().with_context(|| {
-        format!(
-            "Failed to execute `cargo +{toolchain} rustdoc`. \
-             Is the '{toolchain}' toolchain installed? Try: rustup toolchain install {toolchain}"
-        )
-    })?;
-
-    if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        if stderr.contains("toolchain") && stderr.contains("is not installed") {
-            bail!(
-                "The '{toolchain}' toolchain is not installed.\n\
-                 Install it with: rustup toolchain install {toolchain}"
-            );
+    if verbose {
+        // Stream cargo's stderr (Compiling/Checking progress) to terminal
+        cmd.stderr(Stdio::inherit());
+        let status = cmd.status().with_context(|| {
+            format!(
+                "Failed to execute `cargo +{toolchain} rustdoc`. \
+                 Is the '{toolchain}' toolchain installed? Try: rustup toolchain install {toolchain}"
+            )
+        })?;
+        if !status.success() {
+            bail!("cargo rustdoc failed for '{crate_name}' (see output above)");
         }
-        if stderr.contains("is ambiguous") {
-            // Multiple versions of the same crate exist in the dependency tree.
-            // Extract the `pkg@version` suggestions from cargo's stderr.
-            let specs: Vec<&str> = stderr
-                .lines()
-                .filter_map(|l| {
-                    let trimmed = l.trim();
-                    if trimmed.contains('@') && !trimmed.contains(' ') {
-                        Some(trimmed)
-                    } else {
-                        None
-                    }
-                })
-                .collect();
+    } else {
+        let output = cmd.output().with_context(|| {
+            format!(
+                "Failed to execute `cargo +{toolchain} rustdoc`. \
+                 Is the '{toolchain}' toolchain installed? Try: rustup toolchain install {toolchain}"
+            )
+        })?;
 
-            let suggestion = if specs.is_empty() {
-                format!(
-                    "Multiple versions of '{crate_name}' exist. \
-                     Use `<name>@<version>` to disambiguate (e.g. `{crate_name}@1.0.0`)."
-                )
-            } else {
-                format!(
-                    "Multiple versions of '{crate_name}' exist. \
-                     Specify one of:\n  {}\n\
-                     Example: cargo brief {}",
-                    specs.join("\n  "),
-                    specs[0],
-                )
-            };
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            if stderr.contains("toolchain") && stderr.contains("is not installed") {
+                bail!(
+                    "The '{toolchain}' toolchain is not installed.\n\
+                     Install it with: rustup toolchain install {toolchain}"
+                );
+            }
+            if stderr.contains("is ambiguous") {
+                let specs: Vec<&str> = stderr
+                    .lines()
+                    .filter_map(|l| {
+                        let trimmed = l.trim();
+                        if trimmed.contains('@') && !trimmed.contains(' ') {
+                            Some(trimmed)
+                        } else {
+                            None
+                        }
+                    })
+                    .collect();
 
-            bail!("{suggestion}");
+                let suggestion = if specs.is_empty() {
+                    format!(
+                        "Multiple versions of '{crate_name}' exist. \
+                         Use `<name>@<version>` to disambiguate (e.g. `{crate_name}@1.0.0`)."
+                    )
+                } else {
+                    format!(
+                        "Multiple versions of '{crate_name}' exist. \
+                         Specify one of:\n  {}\n\
+                         Example: cargo brief {}",
+                        specs.join("\n  "),
+                        specs[0],
+                    )
+                };
+
+                bail!("{suggestion}");
+            }
+            if stderr.contains("did not match any packages")
+                || stderr.contains("package(s) `")
+                || stderr.contains("no packages match")
+            {
+                bail!(
+                    "Package '{crate_name}' not found in the workspace.\n\
+                     Check the package name and ensure it exists in the workspace.\n\
+                     TIP: If it's an optional or unresolved dependency, try:\n\
+                       cargo brief --crates {crate_name} --features <features>\n\
+                     Original error:\n{stderr}"
+                );
+            }
+            bail!("cargo rustdoc failed:\n{stderr}");
         }
-        if stderr.contains("did not match any packages")
-            || stderr.contains("package(s) `")
-            || stderr.contains("no packages match")
-        {
-            bail!(
-                "Package '{crate_name}' not found in the workspace.\n\
-                 Check the package name and ensure it exists in the workspace.\n\
-                 TIP: If it's an optional or unresolved dependency, try:\n\
-                   cargo brief --crates {crate_name} --features <features>\n\
-                 Original error:\n{stderr}"
-            );
-        }
-        bail!("cargo rustdoc failed:\n{stderr}");
     }
 
     // Find the generated JSON file in the target directory
@@ -113,11 +129,15 @@ pub fn generate_rustdoc_json_cached(
     manifest_path: Option<&str>,
     document_private_items: bool,
     target_dir: &Path,
+    verbose: bool,
 ) -> Result<PathBuf> {
     let base_name = crate_name.split('@').next().unwrap_or(crate_name);
     let json_name = base_name.replace('-', "_");
     let json_path = target_dir.join("doc").join(format!("{json_name}.json"));
     if json_path.exists() {
+        if verbose {
+            eprintln!("[cargo-brief] Using cached rustdoc JSON for '{crate_name}'");
+        }
         return Ok(json_path);
     }
     generate_rustdoc_json(
@@ -126,6 +146,7 @@ pub fn generate_rustdoc_json_cached(
         manifest_path,
         document_private_items,
         target_dir,
+        verbose,
     )
 }
 

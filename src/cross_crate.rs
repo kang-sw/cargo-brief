@@ -40,6 +40,7 @@ pub fn resolve_cross_crate_module(
     toolchain: &str,
     manifest_path: Option<&str>,
     target_dir: &Path,
+    verbose: bool,
 ) -> Option<CrossCrateResolution> {
     let (first_segment, rest) = match module_path.split_once("::") {
         Some((first, rest)) => (first, Some(rest.to_string())),
@@ -78,6 +79,7 @@ pub fn resolve_cross_crate_module(
             toolchain,
             manifest_path,
             target_dir,
+            verbose,
         ) {
             return Some(resolution);
         }
@@ -106,6 +108,7 @@ pub fn resolve_cross_crate_module(
             manifest_path,
             true,
             target_dir,
+            verbose,
         ) else {
             continue;
         };
@@ -146,6 +149,7 @@ pub fn resolve_cross_crate_module(
                     toolchain,
                     manifest_path,
                     target_dir,
+                    verbose,
                 ) {
                     return Some(resolution);
                 }
@@ -165,6 +169,7 @@ pub fn discover_all_reexported_crates(
     toolchain: &str,
     manifest_path: Option<&str>,
     target_dir: &Path,
+    verbose: bool,
 ) -> Vec<SubCrate> {
     let crate_name = primary_model.crate_name();
     let Some(root) = primary_model.root_module() else {
@@ -195,9 +200,14 @@ pub fn discover_all_reexported_crates(
             continue;
         }
 
-        if let Some(sub) =
-            resolve_single_reexport(name, &use_item.source, toolchain, manifest_path, target_dir)
-        {
+        if let Some(sub) = resolve_single_reexport(
+            name,
+            &use_item.source,
+            toolchain,
+            manifest_path,
+            target_dir,
+            verbose,
+        ) {
             results.push(sub);
         }
     }
@@ -221,6 +231,7 @@ pub fn discover_all_reexported_crates(
             manifest_path,
             true,
             target_dir,
+            verbose,
         ) else {
             eprintln!("warning: failed to generate JSON for '{source_crate}', skipping");
             continue;
@@ -251,9 +262,14 @@ pub fn discover_all_reexported_crates(
                 continue;
             }
 
-            if let Some(sub) =
-                resolve_single_reexport(sname, &su.source, toolchain, manifest_path, target_dir)
-            {
+            if let Some(sub) = resolve_single_reexport(
+                sname,
+                &su.source,
+                toolchain,
+                manifest_path,
+                target_dir,
+                verbose,
+            ) {
                 results.push(sub);
             }
         }
@@ -323,6 +339,7 @@ fn follow_use_chain(
     toolchain: &str,
     manifest_path: Option<&str>,
     target_dir: &Path,
+    verbose: bool,
 ) -> Option<CrossCrateResolution> {
     let mut visited = HashSet::new();
     let mut current_source = source.to_string();
@@ -339,6 +356,7 @@ fn follow_use_chain(
             manifest_path,
             true,
             target_dir,
+            verbose,
         )
         .ok()?;
         let krate = rustdoc_json::parse_rustdoc_json_cached(&json_path).ok()?;
@@ -406,6 +424,7 @@ fn resolve_single_reexport(
     toolchain: &str,
     manifest_path: Option<&str>,
     target_dir: &Path,
+    verbose: bool,
 ) -> Option<SubCrate> {
     let mut visited = HashSet::new();
     let mut current_source = source.to_string();
@@ -422,6 +441,7 @@ fn resolve_single_reexport(
             manifest_path,
             true,
             target_dir,
+            verbose,
         )
         .ok()?;
         let krate = rustdoc_json::parse_rustdoc_json_cached(&json_path).ok()?;

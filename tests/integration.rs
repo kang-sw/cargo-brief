@@ -16,6 +16,7 @@ fn fixture_model() -> CrateModel {
         Some("test_fixture/Cargo.toml"),
         true,
         &metadata.target_dir,
+        false,
     )
     .expect("Failed to generate rustdoc JSON for test fixture");
 

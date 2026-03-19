@@ -76,6 +76,7 @@ pub fn run_pipeline(args: &BriefArgs) -> Result<String> {
         args.manifest_path.as_deref(),
         true, // always document private items for visibility filtering
         &metadata.target_dir,
+        args.verbose,
     )
     .with_context(|| {
         format!(
@@ -141,6 +142,7 @@ pub fn run_pipeline(args: &BriefArgs) -> Result<String> {
         &args.toolchain,
         args.manifest_path.as_deref(),
         &metadata.target_dir,
+        args.verbose,
     );
 
     apply_glob_expansions(&mut output, &result, args);
@@ -185,6 +187,7 @@ fn run_remote_pipeline(args: &BriefArgs, spec: &str) -> Result<String> {
         Some(&manifest_path),
         true, // include private modules so facade crate internals are visible
         &metadata.target_dir,
+        args.verbose,
     )
     .with_context(|| format!("Failed to generate rustdoc JSON for remote crate '{name}'"))?;
 
@@ -219,6 +222,7 @@ fn run_remote_pipeline(args: &BriefArgs, spec: &str) -> Result<String> {
                 &args.toolchain,
                 Some(&manifest_path),
                 &metadata.target_dir,
+                args.verbose,
             );
             for sub in &sub_crates {
                 let sub_reachable = Some(compute_reachable_set(&sub.model));
@@ -259,6 +263,7 @@ fn run_remote_pipeline(args: &BriefArgs, spec: &str) -> Result<String> {
                 &args.toolchain,
                 Some(&manifest_path),
                 &metadata.target_dir,
+                args.verbose,
             ) {
                 // Cross-crate resolved: use sub-crate model
                 let sub_reachable = Some(compute_reachable_set(&resolution.model));
@@ -277,6 +282,7 @@ fn run_remote_pipeline(args: &BriefArgs, spec: &str) -> Result<String> {
                     &args.toolchain,
                     Some(&manifest_path),
                     &metadata.target_dir,
+                    args.verbose,
                 );
                 apply_glob_expansions(&mut output, &result, args);
                 output
@@ -312,6 +318,7 @@ fn run_remote_pipeline(args: &BriefArgs, spec: &str) -> Result<String> {
             &args.toolchain,
             Some(&manifest_path),
             &metadata.target_dir,
+            args.verbose,
         );
         apply_glob_expansions(&mut output, &result, args);
 
@@ -320,6 +327,7 @@ fn run_remote_pipeline(args: &BriefArgs, spec: &str) -> Result<String> {
             &args.toolchain,
             Some(&manifest_path),
             &metadata.target_dir,
+            args.verbose,
         );
         for sub in &sub_crates {
             let sub_reachable = Some(compute_reachable_set(&sub.model));
@@ -406,6 +414,7 @@ fn render_remote_normal(
         &args.toolchain,
         Some(manifest_path),
         target_dir,
+        args.verbose,
     );
     apply_glob_expansions(&mut output, &result, args);
 
@@ -485,6 +494,7 @@ fn expand_glob_reexports(
     toolchain: &str,
     manifest_path: Option<&str>,
     target_dir: &Path,
+    verbose: bool,
 ) -> GlobExpansionResult {
     let target_item = if let Some(path) = target_module_path {
         model.find_module(path)
@@ -519,6 +529,7 @@ fn expand_glob_reexports(
             manifest_path,
             false,
             target_dir,
+            verbose,
         ) else {
             continue;
         };
