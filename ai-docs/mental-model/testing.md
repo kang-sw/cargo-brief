@@ -9,22 +9,22 @@
 ## Module Contracts
 - `fixture_model()` (integration.rs) guarantees: generates rustdoc JSON from `test_fixture/` and returns a `CrateModel`. Shared setup — called once per test.
 - `render_full()` / `render_module()` helpers always pass `same_crate=true`. Tests needing cross-crate visibility MUST call `render_module_api()` directly with `same_crate: false`.
-- All test helpers (`default_args`, `workspace_args`, `either_args`, `facade_args`, `remote_args`) enumerate all `BriefArgs` fields explicitly. Adding a field causes compile errors across all helpers (intentional — forces update).
+- All test helpers (`default_args`, `workspace_args`, `either_args`, `facade_args`, `remote_args`) construct `ApiArgs` by composing `TargetArgs`, `RemoteArgs`, `FilterArgs`, and `GlobalArgs` plus per-subcommand fields. `integration.rs` separates `default_filter() -> FilterArgs` from `default_args() -> ApiArgs`. Adding a field to any composed struct causes compile errors across all helpers (intentional — forces update).
 
 ## Coupling
-- `BriefArgs` fields → 5 test helpers: Each helper constructs the full struct. Adding/removing a field requires updating all 5 helpers. Compile errors enforce this.
+- `FilterArgs` / `TargetArgs` / `RemoteArgs` / `GlobalArgs` fields → 5+ test helpers: Each helper constructs `ApiArgs` (or `SearchArgs`) by listing all fields of all composed structs. Adding/removing a field in any struct requires updating all helpers that use it. Compile errors enforce this.
 - Fixture crate names → test assertions: Crate names (`"test-fixture"`, `"core-lib"`, `"app"`) are string literals in both Cargo.toml and test code. Renaming a fixture crate requires updating all references manually — runtime failure, not compile-time.
 - `test_fixture/src/lib.rs` structure → assertion strings: Tests assert on exact item names (`"pub struct PubStruct"`, `"pub enum PlainEnum"`). Renaming/removing items in the fixture breaks assertions at runtime.
 - External dependency versions: `either = "=1.15.0"` is pinned. Tests assert exact method signatures (`pub fn is_left(&self) -> bool`). Version changes → assertion failures.
 
 ## Extension Points & Change Recipes
 - **Add a new item type to fixture**: Add to `test_fixture/src/lib.rs`, add integration test in `tests/integration.rs`, add to `--no-*` flag tests if applicable.
-- **Add a new test file**: Create helper that constructs full `BriefArgs`. Must include ALL fields or won't compile.
+- **Add a new test file**: Create a helper that constructs `ApiArgs` (or `SearchArgs`) spelling out all fields in all four composed structs. Must include ALL fields or won't compile.
 
 ## Common Mistakes
 - Using `render_full()` for cross-crate visibility tests → `same_crate=true` is hardcoded, test passes incorrectly showing `pub(crate)` items.
 - Setting `args.depth = 0` without `args.recursive = false` → depth is ignored because `recursive=true` overrides to `u32::MAX`.
-- Setting `args.at_package` without matching the `same_crate` parameter when calling `render_module_api()` directly → inconsistent visibility context.
+- Setting `args.target.at_package` without matching the `same_crate` parameter when calling `render_module_api()` directly → inconsistent visibility context.
 - Workspace tests using `manifest_path: Some("test_workspace/Cargo.toml")` — must point to workspace ROOT, not individual package Cargo.toml.
 - Ignored tests (`#[ignore]`): If the blocked feature is later implemented, the `#[ignore]` attribute must be removed manually. No CI check for this.
 

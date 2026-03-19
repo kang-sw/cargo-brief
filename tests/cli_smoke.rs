@@ -6,6 +6,7 @@ fn cli_smoke_test() {
         .args([
             "run",
             "--",
+            "api",
             "test-fixture",
             "--manifest-path",
             "test_fixture/Cargo.toml",
@@ -28,13 +29,13 @@ fn cli_smoke_test() {
 fn cli_self_keyword_test() {
     // Run from the project root — "self" should resolve to "cargo-brief"
     let output = Command::new("cargo")
-        .args(["run", "--", "self", "--depth", "0"])
+        .args(["run", "--", "api", "self", "--depth", "0"])
         .output()
         .expect("Failed to run cargo-brief with self");
 
     assert!(
         output.status.success(),
-        "cargo-brief self exited with error: {}",
+        "cargo-brief api self exited with error: {}",
         String::from_utf8_lossy(&output.stderr)
     );
 
@@ -49,20 +50,23 @@ fn cli_self_keyword_test() {
 fn cli_self_module_syntax_test() {
     // "self::cli" should resolve to cargo-brief's cli module
     let output = Command::new("cargo")
-        .args(["run", "--", "self::cli"])
+        .args(["run", "--", "api", "self::cli"])
         .output()
         .expect("Failed to run cargo-brief with self::cli");
 
     assert!(
         output.status.success(),
-        "cargo-brief self::cli exited with error: {}",
+        "cargo-brief api self::cli exited with error: {}",
         String::from_utf8_lossy(&output.stderr)
     );
 
     let stdout = String::from_utf8_lossy(&output.stdout);
+    // After refactor, BriefCommand is the main enum
     assert!(
-        stdout.contains("BriefArgs"),
-        "self::cli should show BriefArgs, got:\n{stdout}"
+        stdout.contains("BriefCommand")
+            || stdout.contains("ApiArgs")
+            || stdout.contains("FilterArgs"),
+        "self::cli should show CLI types, got:\n{stdout}"
     );
 }
 
@@ -70,19 +74,21 @@ fn cli_self_module_syntax_test() {
 fn cli_file_path_test() {
     // "src/cli.rs" should resolve to the cli module of self
     let output = Command::new("cargo")
-        .args(["run", "--", "src/cli.rs"])
+        .args(["run", "--", "api", "src/cli.rs"])
         .output()
         .expect("Failed to run cargo-brief with file path");
 
     assert!(
         output.status.success(),
-        "cargo-brief src/cli.rs exited with error: {}",
+        "cargo-brief api src/cli.rs exited with error: {}",
         String::from_utf8_lossy(&output.stderr)
     );
 
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(
-        stdout.contains("BriefArgs"),
-        "src/cli.rs should show BriefArgs, got:\n{stdout}"
+        stdout.contains("BriefCommand")
+            || stdout.contains("ApiArgs")
+            || stdout.contains("FilterArgs"),
+        "src/cli.rs should show CLI types, got:\n{stdout}"
     );
 }

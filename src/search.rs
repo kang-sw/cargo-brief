@@ -1,8 +1,8 @@
 //! Search mode: find leaf items by name across the entire crate.
 //!
-//! Walks all items recursively, matches against a pattern (case-insensitive,
-//! multi-word AND on full path), and renders each match as a one-liner with
-//! a kind prefix and full path.
+//! Walks all items recursively, matches against a pattern (smart-case,
+//! multi-word AND on full path, comma-separated OR groups), and renders
+//! each match as a one-liner with a kind prefix and full path.
 
 use std::collections::HashSet;
 
@@ -10,7 +10,7 @@ use rustdoc_types::{
     Attribute, Id, Item, ItemEnum, Struct, StructKind, Type, VariantKind, Visibility,
 };
 
-use crate::cli::BriefArgs;
+use crate::cli::FilterArgs;
 use crate::model::{CrateModel, is_visible_from};
 use crate::render;
 
@@ -103,7 +103,8 @@ fn parse_search_limit(raw: Option<&str>) -> (usize, Option<usize>) {
 pub fn render_search(
     model: &CrateModel,
     pattern: &str,
-    args: &BriefArgs,
+    filter: &FilterArgs,
+    limit: Option<&str>,
     observer_module_path: Option<&str>,
     same_crate: bool,
     reachable: Option<&HashSet<Id>>,
@@ -126,7 +127,7 @@ pub fn render_search(
             model,
             root,
             "",
-            args,
+            filter,
             &observer,
             same_crate,
             reachable,
@@ -134,18 +135,40 @@ pub fn render_search(
         );
     }
 
-    // Parse search tokens (case-insensitive, AND-matched)
-    let tokens: Vec<String> = pattern
-        .split_whitespace()
-        .map(|t| t.to_lowercase())
+    // Smart-case: all-lowercase → case-insensitive, any uppercase → case-sensitive
+    let case_sensitive = pattern.chars().any(|c| c.is_uppercase());
+
+    // Comma-separated OR groups, each group is AND of space-separated tokens.
+    // Empty groups (from trailing commas) are filtered out to avoid matching everything.
+    let or_groups: Vec<Vec<String>> = pattern
+        .split(',')
+        .map(|group| {
+            group
+                .split_whitespace()
+                .map(|t| {
+                    if case_sensitive {
+                        t.to_string()
+                    } else {
+                        t.to_lowercase()
+                    }
+                })
+                .collect()
+        })
+        .filter(|group: &Vec<String>| !group.is_empty())
         .collect();
 
     // Filter by pattern
     let mut matched: Vec<&LeafItem> = leaves
         .iter()
         .filter(|leaf| {
-            let path_lower = leaf.path.to_lowercase();
-            tokens.iter().all(|tok| path_lower.contains(tok.as_str()))
+            let path = if case_sensitive {
+                leaf.path.clone()
+            } else {
+                leaf.path.to_lowercase()
+            };
+            or_groups
+                .iter()
+                .any(|group| group.iter().all(|tok| path.contains(tok.as_str())))
         })
         .collect();
 
@@ -158,9 +181,11 @@ pub fn render_search(
     });
 
     let total = matched.len();
-    let (offset, limit) = parse_search_limit(args.search_limit.as_deref());
+    let (offset, search_limit) = parse_search_limit(limit);
     let offset = offset.min(total);
-    let end = limit.map(|n| (offset + n).min(total)).unwrap_or(total);
+    let end = search_limit
+        .map(|n| (offset + n).min(total))
+        .unwrap_or(total);
     let skipped_before = offset;
     let skipped_after = total - end;
 
@@ -172,7 +197,7 @@ pub fn render_search(
     }
 
     for leaf in &matched[offset..end] {
-        render_leaf(&mut output, model, leaf, args);
+        render_leaf(&mut output, model, leaf, filter);
     }
 
     if skipped_after > 0 {
@@ -197,7 +222,7 @@ fn walk_module<'a>(
     model: &'a CrateModel,
     module_item: &'a Item,
     parent_path: &str,
-    args: &BriefArgs,
+    args: &FilterArgs,
     observer: &str,
     same_crate: bool,
     reachable: Option<&HashSet<Id>>,
@@ -480,7 +505,7 @@ fn walk_impl_blocks<'a>(
     model: &'a CrateModel,
     module_item: &'a Item,
     parent_path: &str,
-    args: &BriefArgs,
+    args: &FilterArgs,
     observer: &str,
     same_crate: bool,
     reachable: Option<&HashSet<Id>>,
@@ -584,7 +609,7 @@ fn walk_impl_blocks<'a>(
 // === Rendering ===
 
 /// Render a single leaf item as a one-liner.
-fn render_leaf(output: &mut String, model: &CrateModel, leaf: &LeafItem, args: &BriefArgs) {
+fn render_leaf(output: &mut String, model: &CrateModel, leaf: &LeafItem, args: &FilterArgs) {
     // Doc comment: first line only (suppressed by --no-docs / --compact)
     if !args.no_docs
         && !args.compact
@@ -654,7 +679,7 @@ fn render_function_leaf(output: &mut String, leaf: &LeafItem) {
     }
 }
 
-fn render_struct_leaf(output: &mut String, model: &CrateModel, leaf: &LeafItem, args: &BriefArgs) {
+fn render_struct_leaf(output: &mut String, model: &CrateModel, leaf: &LeafItem, args: &FilterArgs) {
     let ItemEnum::Struct(s) = &leaf.item.inner else {
         return;
     };
@@ -838,7 +863,7 @@ fn render_use_leaf(output: &mut String, leaf: &LeafItem) {
 }
 
 /// Build an inline `// impl (N methods), impl Trait1, impl Trait2` summary for a type.
-fn collect_impl_summary(model: &CrateModel, item: &Item, args: &BriefArgs) -> String {
+fn collect_impl_summary(model: &CrateModel, item: &Item, args: &FilterArgs) -> String {
     let impls = match &item.inner {
         ItemEnum::Struct(s) => &s.impls,
         ItemEnum::Enum(e) => &e.impls,

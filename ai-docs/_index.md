@@ -30,52 +30,55 @@ visibility is always `pub`-only). This makes external dep support architecturall
 ## CLI Interface
 
 ```
-cargo brief [target] [module_path] [OPTIONS]
-cargo brief --crates <spec> [module_path] [OPTIONS]
+cargo brief api [target] [module_path] [OPTIONS]
+cargo brief search [target] <pattern> [OPTIONS]
+cargo brief examples [target] [pattern] [OPTIONS]   # stub
 ```
 
-### Positional Arguments — Flexible Resolution
+### Subcommands
+
+**`api`** — Extract and render crate API as pseudo-Rust documentation.
+Owns: `--depth`, `--recursive`, `--expand-glob`, target/module resolution.
+
+**`search`** — Search for items by name across a crate.
+Pattern is positional. Owns: `--limit`, `--methods-of`.
+Smart-case: all-lowercase = case-insensitive, any uppercase = case-sensitive.
+Comma-separated = OR groups, space-separated = AND within group.
+
+**`examples`** — Stub (not yet implemented).
+
+### Target Resolution (api subcommand)
 | Syntax              | Resolves to                                     |
 |---------------------|-------------------------------------------------|
 | `<crate_name>`      | Named crate (exact match or hyphen/underscore)  |
 | `self`              | Current package (cwd-based detection)           |
 | `self::module`      | Current package, specific module                |
 | `crate::module`     | Named crate, specific module (single-arg)       |
-| `<unknown_name>`    | Treated as package name (use `self::mod` for modules) |
-| `<pkg> <module>`    | Two-arg backward compat: package + module       |
 | `src/cli.rs`        | File path → auto-converted to module path       |
-| `self src/foo.rs`   | Self package + file path as module              |
 
-### Options
+### Shared Options (all subcommands)
 | Flag                    | Description                                                    |
 |-------------------------|----------------------------------------------------------------|
-| `--at-package <pkg>`    | Caller's package (for visibility resolution)                   |
-| `--at-mod <mod_path>`   | Caller's module (determines what is visible)                   |
-| `--depth <n>`           | How many submodule levels to recurse into (default: 1)         |
-| `--recursive`           | Recurse into all submodules (no depth limit)                   |
-| `--all`                 | Show all item kinds including blanket/auto-trait impls          |
-| `--no-structs`          | Exclude structs                                                |
-| `--no-enums`            | Exclude enums                                                  |
-| `--no-traits`           | Exclude traits                                                 |
-| `--no-functions`        | Exclude free functions                                         |
-| `--no-aliases`          | Exclude type aliases                                           |
-| `--no-constants`        | Exclude constants and statics                                  |
-| `--no-unions`           | Exclude unions                                                 |
-| `--no-macros`           | Exclude macros                                                 |
-| `--toolchain <name>`    | Nightly toolchain name (default: `nightly`)                    |
 | `--crates <spec>`       | Fetch crate from crates.io (e.g., `serde`, `tokio@1`)          |
-| `--no-cache`            | Skip cache for `--crates` (use temp workspace)                 |
-| `--expand-glob`         | Inline full definitions from glob re-export sources            |
-| `--search <pattern>`    | Search leaf items by name (case-insensitive, multi-word AND)   |
-| `--search-limit <N>`   | Limit search results (N or OFFSET:N for paging)               |
-| `--methods-of <TYPE>`  | Show methods/fields of a type (--search + exclusion shorthand) |
-| `--no-docs`             | Suppress doc comments                                          |
-| `--doc-lines <N>`       | Limit doc comments to first N lines (0 = suppress all)         |
-| `--compact`             | Collapse struct fields, enum variants, trait items; implies --no-docs |
-| `--verbose-metadata`    | Show all attributes (default: only #[deprecated], #[non_exhaustive]) |
 | `--features <FEATURES>` | Comma-separated features to enable for --crates                |
-| `-v` / `--verbose`        | Show progress messages on stderr during pipeline execution     |
-| `--manifest-path <path>`| Path to Cargo.toml                                            |
+| `--no-cache`            | Skip cache for `--crates` (use temp workspace)                 |
+| `--clean [SPEC]`        | Clear cached remote crate workspaces                           |
+| `--toolchain <name>`    | Nightly toolchain name (default: `nightly`)                    |
+| `-v` / `--verbose`      | Show progress messages on stderr                               |
+| `--no-structs` .. `--no-macros` | Exclude item kinds (FilterArgs)                       |
+| `--no-docs` / `--doc-lines` / `--compact` / `--verbose-metadata` | Output density       |
+| `--all`                 | Show blanket/auto-trait impls                                  |
+
+### Api-only Options
+| `--depth <n>`           | Submodule recursion depth (default: 1)                         |
+| `--recursive`           | Recurse into all submodules                                    |
+| `--expand-glob`         | Inline full definitions from glob re-export sources            |
+| `--at-package` / `--at-mod` | Visibility resolution overrides                           |
+| `--manifest-path`       | Path to Cargo.toml                                             |
+
+### Search-only Options
+| `--limit [OFFSET:]N`   | Limit/page search results                                     |
+| `--methods-of <TYPE>`  | Show methods/fields of a type                                  |
 
 ---
 
@@ -83,9 +86,9 @@ cargo brief --crates <spec> [module_path] [OPTIONS]
 
 ```
 src/
-  lib.rs           — re-exports all modules, run_pipeline() entry point
-  main.rs          — CLI arg parsing, calls run_pipeline(), prints output
-  cli.rs           — BriefArgs struct (clap derive)
+  lib.rs           — re-exports all modules, run_api_pipeline() + run_search_pipeline() entry points
+  main.rs          — CLI arg parsing, subcommand dispatch
+  cli.rs           — Subcommand types: ApiArgs, SearchArgs, ExamplesArgs + shared TargetArgs/RemoteArgs/FilterArgs/GlobalArgs
   cross_crate.rs   — cross-crate module following for facade crates
   remote.rs        — temp workspace creation for --crates (crates.io fetch) + cache management
   resolve.rs       — flexible target resolution (self, crate::module, fallback) + cargo metadata
@@ -129,8 +132,8 @@ Parsed via `rustdoc-types` 0.57. Post-macro-expansion output.
 - **rustdoc JSON + bincode caching**: Remote pipeline skips JSON generation when file exists; parsed JSON cached as bincode for 5-10x faster reloads. `--clean [SPEC]` manages disk usage.
 - Visibility auto-detection: `same_crate` inferred from cwd package context. Cross-crate views use reachability-based filtering.
 - Glob re-export expansion: Phase 1 (individual `pub use` lines) + Phase 2 (`--expand-glob` inlines full definitions).
-- Search mode: `--search <pattern>` finds leaf items by case-insensitive substring match on full path. Multi-word AND matching.
-- `--methods-of <TYPE>`: shorthand for `--search TYPE` + exclusion flags (methods/fields only).
+- Search mode: `cargo brief search <pattern>` finds leaf items with smart-case matching (all-lowercase = insensitive, any uppercase = sensitive). Comma-separated = OR groups, space-separated = AND within group.
+- `--methods-of <TYPE>`: shorthand for search pattern + exclusion flags (methods/fields only).
 - Crate-level docs: root module `//!` comments rendered after `// crate <name>` header. `--no-crate-docs` suppresses independently.
 - Trait impl collapsing: simple trait impls (no assoc items) collapsed into per-type summary comments. `--all` expands.
 - Output density: `--no-docs`, `--doc-lines N`, `--compact` for token-budget control.
@@ -163,7 +166,7 @@ Domain-oriented operational knowledge in `ai-docs/mental-model/`:
 | Output format | Pseudo-Rust text (not JSON) | LLM consumption; readable as documentation |
 | Item-kind filtering | Default=show all common; `--no-*` to exclude; `--all` adds blanket/auto-trait impls | Subtractive model is more ergonomic |
 | Statics grouped with constants | `--no-constants` hides both | Conceptually similar; avoids flag proliferation |
-| lib.rs + slim main.rs | `run_pipeline()` returns String | Enables integration tests without subprocess |
+| lib.rs + slim main.rs | `run_api_pipeline()` / `run_search_pipeline()` returns String | Enables integration tests without subprocess |
 | External deps | Phase 2 | Adds ~30% complexity; architecture supports it cleanly |
 | Target resolution | Semantic layer between CLI and pipeline | `BriefArgs` stays unchanged; resolution in `src/resolve.rs` |
 | Single cargo metadata call | `resolve::load_cargo_metadata()` | Eliminates redundant `find_target_dir()` call |

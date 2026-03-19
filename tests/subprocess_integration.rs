@@ -3,7 +3,7 @@
 //! These tests invoke the `cargo-brief` binary via `std::process::Command` with
 //! explicit working directories and arguments. This exercises the full pipeline
 //! including cwd detection, `self` resolution, and arg parsing — things that
-//! in-process tests via `run_pipeline()` cannot cover.
+//! in-process tests via `run_api_pipeline()` cannot cover.
 //!
 //! Test fixture: `test_workspace/` (workspace with `core-lib` + `app` crates,
 //! `either` as an external dependency of `core-lib`).
@@ -68,7 +68,7 @@ fn run_err(cwd: &Path, args: &[&str]) -> String {
 
 #[test]
 fn explicit_core_lib() {
-    let out = run_ok(&test_workspace(), &["core-lib"]);
+    let out = run_ok(&test_workspace(), &["api", "core-lib"]);
     assert!(out.contains("pub struct Config"), "missing Config struct");
     assert!(
         out.contains("pub trait Processor"),
@@ -78,13 +78,13 @@ fn explicit_core_lib() {
 
 #[test]
 fn explicit_app() {
-    let out = run_ok(&test_workspace(), &["app"]);
+    let out = run_ok(&test_workspace(), &["api", "app"]);
     assert!(out.contains("pub struct App"), "missing App struct");
 }
 
 #[test]
 fn explicit_underscore_normalization() {
-    let out = run_ok(&test_workspace(), &["core_lib"]);
+    let out = run_ok(&test_workspace(), &["api", "core_lib"]);
     assert!(
         out.contains("pub struct Config"),
         "underscore normalization failed — missing Config struct"
@@ -97,19 +97,19 @@ fn explicit_underscore_normalization() {
 
 #[test]
 fn self_from_core_lib() {
-    let out = run_ok(&test_workspace().join("core-lib"), &["self"]);
+    let out = run_ok(&test_workspace().join("core-lib"), &["api", "self"]);
     assert!(out.contains("pub struct Config"), "missing Config struct");
 }
 
 #[test]
 fn self_from_app() {
-    let out = run_ok(&test_workspace().join("app"), &["self"]);
+    let out = run_ok(&test_workspace().join("app"), &["api", "self"]);
     assert!(out.contains("pub struct App"), "missing App struct");
 }
 
 #[test]
 fn self_module_from_core_lib() {
-    let out = run_ok(&test_workspace().join("core-lib"), &["self::utils"]);
+    let out = run_ok(&test_workspace().join("core-lib"), &["api", "self::utils"]);
     assert!(
         out.contains("pub fn format_name"),
         "missing format_name in utils module"
@@ -118,7 +118,7 @@ fn self_module_from_core_lib() {
 
 #[test]
 fn self_from_virtual_root() {
-    let stderr = run_err(&test_workspace(), &["self"]);
+    let stderr = run_err(&test_workspace(), &["api", "self"]);
     // Should report an error about no package found at virtual workspace root
     assert!(
         stderr.contains("package") || stderr.contains("workspace"),
@@ -132,7 +132,7 @@ fn self_from_virtual_root() {
 
 #[test]
 fn crate_module_syntax() {
-    let out = run_ok(&test_workspace(), &["core-lib::utils"]);
+    let out = run_ok(&test_workspace(), &["api", "core-lib::utils"]);
     assert!(
         out.contains("pub fn format_name"),
         "missing format_name in utils"
@@ -146,7 +146,7 @@ fn crate_module_syntax() {
 
 #[test]
 fn file_path_from_package_dir() {
-    let out = run_ok(&test_workspace().join("core-lib"), &["src/utils.rs"]);
+    let out = run_ok(&test_workspace().join("core-lib"), &["api", "src/utils.rs"]);
     assert!(
         out.contains("pub fn format_name"),
         "missing format_name via file path"
@@ -157,7 +157,7 @@ fn file_path_from_package_dir() {
 fn self_with_file_path() {
     let out = run_ok(
         &test_workspace().join("core-lib"),
-        &["self", "src/utils.rs"],
+        &["api", "self", "src/utils.rs"],
     );
     assert!(
         out.contains("pub fn format_name"),
@@ -168,7 +168,7 @@ fn self_with_file_path() {
 #[test]
 #[ignore = "blocked: file path not resolved relative to package dir when cwd != package dir"]
 fn pkg_with_file_path() {
-    let out = run_ok(&test_workspace(), &["core-lib", "src/utils.rs"]);
+    let out = run_ok(&test_workspace(), &["api", "core-lib", "src/utils.rs"]);
     assert!(
         out.contains("pub fn format_name"),
         "missing format_name via pkg + file path"
@@ -181,7 +181,7 @@ fn pkg_with_file_path() {
 
 #[test]
 fn external_crate_either() {
-    let out = run_ok(&test_workspace(), &["either"]);
+    let out = run_ok(&test_workspace(), &["api", "either"]);
     assert!(
         out.contains("pub enum Either"),
         "missing Either enum from external crate"
@@ -195,10 +195,9 @@ fn external_crate_either() {
 // ===========================================================================
 
 #[test]
-
 fn auto_visibility_cross_crate() {
     // From app/, viewing core-lib → should hide pub(crate) items
-    let out = run_ok(&test_workspace().join("app"), &["core-lib"]);
+    let out = run_ok(&test_workspace().join("app"), &["api", "core-lib"]);
     assert!(
         !out.contains("InternalState"),
         "pub(crate) InternalState should be hidden in cross-crate view"
@@ -217,7 +216,7 @@ fn auto_visibility_cross_crate() {
 #[test]
 fn auto_visibility_same_crate() {
     // From core-lib/, viewing core-lib → should show pub(crate) items
-    let out = run_ok(&test_workspace().join("core-lib"), &["core-lib"]);
+    let out = run_ok(&test_workspace().join("core-lib"), &["api", "core-lib"]);
     assert!(
         out.contains("InternalState"),
         "pub(crate) InternalState should be visible in same-crate view"
@@ -229,10 +228,9 @@ fn auto_visibility_same_crate() {
 }
 
 #[test]
-
 fn auto_visibility_reverse() {
     // From core-lib/, viewing app → should hide pub(crate) items of app
-    let out = run_ok(&test_workspace().join("core-lib"), &["app"]);
+    let out = run_ok(&test_workspace().join("core-lib"), &["api", "app"]);
     assert!(
         !out.contains("shutdown_internal"),
         "pub(crate) shutdown_internal should be hidden in cross-crate view"
@@ -245,9 +243,11 @@ fn auto_visibility_reverse() {
 // ===========================================================================
 
 #[test]
-
 fn at_package_cross_crate() {
-    let out = run_ok(&test_workspace(), &["core-lib", "--at-package", "app"]);
+    let out = run_ok(
+        &test_workspace(),
+        &["api", "core-lib", "--at-package", "app"],
+    );
     assert!(
         !out.contains("InternalState"),
         "pub(crate) InternalState should be hidden with --at-package app"
@@ -260,7 +260,10 @@ fn at_package_cross_crate() {
 
 #[test]
 fn at_package_same_crate() {
-    let out = run_ok(&test_workspace(), &["core-lib", "--at-package", "core-lib"]);
+    let out = run_ok(
+        &test_workspace(),
+        &["api", "core-lib", "--at-package", "core-lib"],
+    );
     assert!(
         out.contains("InternalState"),
         "pub(crate) InternalState should be visible with --at-package core-lib"
@@ -277,7 +280,7 @@ fn at_package_same_crate() {
 
 #[test]
 fn depth_zero() {
-    let out = run_ok(&test_workspace(), &["core-lib", "--depth", "0"]);
+    let out = run_ok(&test_workspace(), &["api", "core-lib", "--depth", "0"]);
     // Module should be collapsed — shown but contents not expanded
     assert!(
         out.contains("mod utils"),
@@ -291,7 +294,7 @@ fn depth_zero() {
 
 #[test]
 fn recursive() {
-    let out = run_ok(&test_workspace(), &["core-lib", "--recursive"]);
+    let out = run_ok(&test_workspace(), &["api", "core-lib", "--recursive"]);
     assert!(
         out.contains("pub fn format_name"),
         "format_name should appear with --recursive"
@@ -304,7 +307,7 @@ fn recursive() {
 
 #[test]
 fn no_structs() {
-    let out = run_ok(&test_workspace(), &["core-lib", "--no-structs"]);
+    let out = run_ok(&test_workspace(), &["api", "core-lib", "--no-structs"]);
     assert!(
         !out.contains("struct Config"),
         "struct Config should be excluded by --no-structs"
@@ -317,7 +320,7 @@ fn no_structs() {
 
 #[test]
 fn no_functions() {
-    let out = run_ok(&test_workspace(), &["core-lib", "--no-functions"]);
+    let out = run_ok(&test_workspace(), &["api", "core-lib", "--no-functions"]);
     assert!(
         !out.contains("fn create_default_config"),
         "create_default_config should be excluded by --no-functions"
@@ -334,13 +337,13 @@ fn no_functions() {
 
 #[test]
 fn nonexistent_crate() {
-    let _stderr = run_err(&test_workspace(), &["nonexistent-crate"]);
+    let _stderr = run_err(&test_workspace(), &["api", "nonexistent-crate"]);
 }
 
 #[test]
 fn self_from_non_package() {
     // Same as self_from_virtual_root — virtual workspace root has no package
-    let stderr = run_err(&test_workspace(), &["self"]);
+    let stderr = run_err(&test_workspace(), &["api", "self"]);
     assert!(
         stderr.contains("package") || stderr.contains("workspace"),
         "Expected error about virtual workspace.\nStderr:\n{stderr}"
@@ -348,23 +351,23 @@ fn self_from_non_package() {
 }
 
 // ===========================================================================
-// K. Bare `cargo brief` (no TARGET — defaults to "self")
+// K. Bare `cargo brief api` (no TARGET — defaults to "self")
 // ===========================================================================
 
 #[test]
-fn bare_cargo_brief_from_package_dir() {
-    // Running `cargo brief` from a package dir should behave like `cargo brief self`
-    let out = run_ok(&test_workspace().join("core-lib"), &[]);
+fn bare_cargo_brief_api_from_package_dir() {
+    // Running `cargo-brief api` from a package dir should behave like `cargo-brief api self`
+    let out = run_ok(&test_workspace().join("core-lib"), &["api"]);
     assert!(
         out.contains("pub struct Config"),
-        "bare `cargo brief` from package dir should show Config struct"
+        "bare `cargo-brief api` from package dir should show Config struct"
     );
 }
 
 #[test]
-fn bare_cargo_brief_from_virtual_root() {
-    // Running `cargo brief` from virtual workspace root should fail (same as `cargo brief self`)
-    let stderr = run_err(&test_workspace(), &[]);
+fn bare_cargo_brief_api_from_virtual_root() {
+    // Running `cargo-brief api` from virtual workspace root should fail (same as `api self`)
+    let stderr = run_err(&test_workspace(), &["api"]);
     assert!(
         stderr.contains("package") || stderr.contains("workspace"),
         "Expected error about no package at virtual root.\nStderr:\n{stderr}"
@@ -378,7 +381,7 @@ fn bare_cargo_brief_from_virtual_root() {
 #[test]
 #[ignore = "network: fetches from crates.io"]
 fn cli_crates_serde() {
-    let out = run_ok(&test_workspace(), &["--crates", "serde"]);
+    let out = run_ok(&test_workspace(), &["api", "--crates", "serde"]);
     assert!(!out.is_empty(), "--crates serde should produce output");
     assert!(
         out.contains("Serialize"),
@@ -389,6 +392,6 @@ fn cli_crates_serde() {
 #[test]
 #[ignore = "network: fetches from crates.io"]
 fn cli_crates_version() {
-    let out = run_ok(&test_workspace(), &["--crates", "serde@1"]);
+    let out = run_ok(&test_workspace(), &["api", "--crates", "serde@1"]);
     assert!(!out.is_empty(), "--crates serde@1 should produce output");
 }

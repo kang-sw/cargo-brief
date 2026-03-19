@@ -1,4 +1,4 @@
-use cargo_brief::cli::BriefArgs;
+use cargo_brief::cli::{ApiArgs, FilterArgs, GlobalArgs, RemoteArgs, TargetArgs};
 use cargo_brief::model::CrateModel;
 use cargo_brief::render::render_module_api;
 use cargo_brief::resolve;
@@ -26,20 +26,8 @@ fn fixture_model() -> CrateModel {
     CrateModel::from_crate(krate)
 }
 
-fn default_args() -> BriefArgs {
-    BriefArgs {
-        crate_name: "test-fixture".to_string(),
-        module_path: None,
-        at_package: None,
-        at_mod: None,
-        depth: 1,
-        recursive: true,
-        all: false,
-        no_docs: false,
-        no_crate_docs: false,
-        doc_lines: None,
-        compact: false,
-        verbose_metadata: false,
+fn default_filter() -> FilterArgs {
+    FilterArgs {
         no_structs: false,
         no_enums: false,
         no_traits: false,
@@ -48,25 +36,53 @@ fn default_args() -> BriefArgs {
         no_constants: false,
         no_unions: false,
         no_macros: false,
-        crates: None,
-        expand_glob: false,
-        search: None,
-        search_limit: None,
-        methods_of: None,
-        features: None,
-        no_cache: false,
-        clean: None,
-        toolchain: "nightly".to_string(),
-        verbose: false,
-        manifest_path: Some("test_fixture/Cargo.toml".to_string()),
+        no_docs: false,
+        no_crate_docs: false,
+        doc_lines: None,
+        compact: false,
+        verbose_metadata: false,
+        all: false,
     }
 }
 
-fn render_full(model: &CrateModel, args: &BriefArgs) -> String {
-    render_module_api(model, args.module_path.as_deref(), args, None, true, None)
+fn default_args() -> ApiArgs {
+    ApiArgs {
+        target: TargetArgs {
+            crate_name: "test-fixture".to_string(),
+            module_path: None,
+            at_package: None,
+            at_mod: None,
+            manifest_path: Some("test_fixture/Cargo.toml".to_string()),
+        },
+        remote: RemoteArgs {
+            crates: None,
+            features: None,
+            no_cache: false,
+            clean: None,
+        },
+        filter: default_filter(),
+        global: GlobalArgs {
+            toolchain: "nightly".to_string(),
+            verbose: false,
+        },
+        depth: 1,
+        recursive: true,
+        expand_glob: false,
+    }
 }
 
-fn render_module(model: &CrateModel, args: &BriefArgs, module: &str) -> String {
+fn render_full(model: &CrateModel, args: &ApiArgs) -> String {
+    render_module_api(
+        model,
+        args.target.module_path.as_deref(),
+        args,
+        None,
+        true,
+        None,
+    )
+}
+
+fn render_module(model: &CrateModel, args: &ApiArgs, module: &str) -> String {
     render_module_api(model, Some(module), args, None, true, None)
 }
 
@@ -437,7 +453,7 @@ fn test_depth_one_shows_outer_but_inner_collapsed() {
 fn test_no_structs_flag() {
     let model = fixture_model();
     let mut args = default_args();
-    args.no_structs = true;
+    args.filter.no_structs = true;
     let output = render_full(&model, &args);
 
     assert!(
@@ -451,7 +467,7 @@ fn test_no_structs_flag() {
 fn test_no_enums_flag() {
     let model = fixture_model();
     let mut args = default_args();
-    args.no_enums = true;
+    args.filter.no_enums = true;
     let output = render_full(&model, &args);
 
     assert!(!output.contains("pub enum PlainEnum"), "enums filtered out");
@@ -465,7 +481,7 @@ fn test_no_enums_flag() {
 fn test_no_functions_flag() {
     let model = fixture_model();
     let mut args = default_args();
-    args.no_functions = true;
+    args.filter.no_functions = true;
     let output = render_full(&model, &args);
 
     assert!(
@@ -482,7 +498,7 @@ fn test_no_functions_flag() {
 fn test_no_traits_flag() {
     let model = fixture_model();
     let mut args = default_args();
-    args.no_traits = true;
+    args.filter.no_traits = true;
     let output = render_full(&model, &args);
 
     assert!(!output.contains("pub trait MyTrait"), "traits filtered out");
@@ -492,7 +508,7 @@ fn test_no_traits_flag() {
 fn test_no_constants_flag() {
     let model = fixture_model();
     let mut args = default_args();
-    args.no_constants = true;
+    args.filter.no_constants = true;
     let output = render_full(&model, &args);
 
     assert!(
@@ -509,7 +525,7 @@ fn test_no_constants_flag() {
 fn test_no_macros_flag() {
     let model = fixture_model();
     let mut args = default_args();
-    args.no_macros = true;
+    args.filter.no_macros = true;
     let output = render_full(&model, &args);
 
     assert!(
@@ -522,7 +538,7 @@ fn test_no_macros_flag() {
 fn test_no_unions_flag() {
     let model = fixture_model();
     let mut args = default_args();
-    args.no_unions = true;
+    args.filter.no_unions = true;
     let output = render_full(&model, &args);
 
     assert!(!output.contains("pub union MyUnion"), "unions filtered out");
@@ -693,8 +709,8 @@ fn test_root_items_no_indent() {
 // === Search Mode Tests ===
 
 fn search_output(model: &CrateModel, pattern: &str) -> String {
-    let args = default_args();
-    search::render_search(model, pattern, &args, None, true, None)
+    let filter = default_filter();
+    search::render_search(model, pattern, &filter, None, None, true, None)
 }
 
 #[test]
@@ -731,9 +747,9 @@ fn search_finds_enum_variant() {
 fn search_finds_tuple_variant() {
     let model = fixture_model();
     let output = search_output(&model, "TupleEnum One");
-    let output_lower = output.to_lowercase();
+    // Smart-case: has uppercase → case-sensitive
     assert!(
-        output_lower.contains("variant outer::tupleenum::one"),
+        output.contains("variant outer::TupleEnum::One"),
         "Should find One variant with multi-word AND:\n{output}"
     );
 }
@@ -855,6 +871,7 @@ fn search_finds_macro() {
 #[test]
 fn search_case_insensitive() {
     let model = fixture_model();
+    // All-lowercase pattern → smart-case insensitive
     let output = search_output(&model, "pubstruct");
     assert!(
         output.contains("struct outer::PubStruct"),
@@ -865,6 +882,7 @@ fn search_case_insensitive() {
 #[test]
 fn search_multi_word_and() {
     let model = fixture_model();
+    // All-lowercase → case-insensitive AND
     let output = search_output(&model, "outer method");
     assert!(
         output.contains("fn outer::PubStruct::pub_method"),
@@ -880,9 +898,9 @@ fn search_multi_word_and() {
 #[test]
 fn search_no_functions_excludes_methods() {
     let model = fixture_model();
-    let mut args = default_args();
-    args.no_functions = true;
-    let output = search::render_search(&model, "pub_method", &args, None, true, None);
+    let mut filter = default_filter();
+    filter.no_functions = true;
+    let output = search::render_search(&model, "pub_method", &filter, None, None, true, None);
     assert!(
         !output.contains("fn "),
         "--no-functions should exclude methods:\n{output}"
@@ -924,7 +942,7 @@ fn search_associated_type() {
 #[test]
 fn search_results_sorted_by_kind_then_alpha() {
     let model = fixture_model();
-    // Search for something that matches multiple kinds
+    // All-lowercase to get case-insensitive matching
     let output = search_output(&model, "outer");
     let lines: Vec<&str> = output
         .lines()
@@ -982,9 +1000,8 @@ fn search_finds_reexport() {
 #[test]
 fn search_limit_truncates() {
     let model = fixture_model();
-    let mut args = default_args();
-    args.search_limit = Some("3".to_string());
-    let output = search::render_search(&model, "outer", &args, None, true, None);
+    let filter = default_filter();
+    let output = search::render_search(&model, "outer", &filter, Some("3"), None, true, None);
     // Count non-comment, non-doc lines (actual results)
     let result_lines: Vec<&str> = output
         .lines()
@@ -1008,8 +1025,8 @@ fn search_limit_truncates() {
 #[test]
 fn search_limit_none_shows_all() {
     let model = fixture_model();
-    let args = default_args();
-    let output = search::render_search(&model, "outer", &args, None, true, None);
+    let filter = default_filter();
+    let output = search::render_search(&model, "outer", &filter, None, None, true, None);
     assert!(
         !output.contains("// ... and "),
         "No truncation without limit:\n{output}"
@@ -1019,9 +1036,9 @@ fn search_limit_none_shows_all() {
 #[test]
 fn search_limit_paging() {
     let model = fixture_model();
-    let mut args = default_args();
+    let filter = default_filter();
     // First get total to validate paging
-    let full_output = search::render_search(&model, "outer", &args, None, true, None);
+    let full_output = search::render_search(&model, "outer", &filter, None, None, true, None);
     let full_lines: Vec<&str> = full_output
         .lines()
         .filter(|l| !l.starts_with("//") && !l.starts_with("///"))
@@ -1030,8 +1047,7 @@ fn search_limit_paging() {
     assert!(total > 5, "Need enough results to test paging, got {total}");
 
     // Page: skip 2, show 3
-    args.search_limit = Some("2:3".to_string());
-    let output = search::render_search(&model, "outer", &args, None, true, None);
+    let output = search::render_search(&model, "outer", &filter, Some("2:3"), None, true, None);
 
     let result_lines: Vec<&str> = output
         .lines()
@@ -1067,7 +1083,7 @@ fn search_limit_paging() {
 fn no_docs_suppresses_doc_comments() {
     let model = fixture_model();
     let mut args = default_args();
-    args.no_docs = true;
+    args.filter.no_docs = true;
     let output = render_full(&model, &args);
 
     assert!(
@@ -1084,9 +1100,9 @@ fn no_docs_suppresses_doc_comments() {
 #[test]
 fn no_docs_search_suppresses_doc_comments() {
     let model = fixture_model();
-    let mut args = default_args();
-    args.no_docs = true;
-    let output = search::render_search(&model, "free_function", &args, None, true, None);
+    let mut filter = default_filter();
+    filter.no_docs = true;
+    let output = search::render_search(&model, "free_function", &filter, None, None, true, None);
 
     assert!(
         !output.contains("///"),
@@ -1104,7 +1120,7 @@ fn no_docs_search_suppresses_doc_comments() {
 fn test_doc_lines_limits_output() {
     let model = fixture_model();
     let mut args = default_args();
-    args.doc_lines = Some(1);
+    args.filter.doc_lines = Some(1);
     let output = render_full(&model, &args);
 
     // Should contain first line of doc comments
@@ -1124,7 +1140,7 @@ fn test_doc_lines_limits_output() {
 fn test_doc_lines_zero_suppresses_docs() {
     let model = fixture_model();
     let mut args = default_args();
-    args.doc_lines = Some(0);
+    args.filter.doc_lines = Some(0);
     let output = render_full(&model, &args);
 
     assert!(
@@ -1143,7 +1159,7 @@ fn test_doc_lines_zero_suppresses_docs() {
 fn compact_struct_collapsed() {
     let model = fixture_model();
     let mut args = default_args();
-    args.compact = true;
+    args.filter.compact = true;
     let output = render_full(&model, &args);
 
     assert!(
@@ -1160,7 +1176,7 @@ fn compact_struct_collapsed() {
 fn compact_enum_variants_name_only() {
     let model = fixture_model();
     let mut args = default_args();
-    args.compact = true;
+    args.filter.compact = true;
     let output = render_full(&model, &args);
 
     // PlainEnum should have all variants on one line
@@ -1174,7 +1190,7 @@ fn compact_enum_variants_name_only() {
 fn compact_trait_collapsed() {
     let model = fixture_model();
     let mut args = default_args();
-    args.compact = true;
+    args.filter.compact = true;
     let output = render_full(&model, &args);
 
     assert!(
@@ -1191,7 +1207,7 @@ fn compact_trait_collapsed() {
 fn compact_impl_collapsed() {
     let model = fixture_model();
     let mut args = default_args();
-    args.compact = true;
+    args.filter.compact = true;
     let output = render_full(&model, &args);
 
     assert!(
@@ -1208,7 +1224,7 @@ fn compact_impl_collapsed() {
 fn compact_suppresses_docs() {
     let model = fixture_model();
     let mut args = default_args();
-    args.compact = true;
+    args.filter.compact = true;
     let output = render_full(&model, &args);
 
     assert!(
@@ -1222,8 +1238,8 @@ fn compact_suppresses_docs() {
 #[test]
 fn search_struct_shows_impl_summary() {
     let model = fixture_model();
-    let args = default_args();
-    let output = search::render_search(&model, "PubStruct", &args, None, true, None);
+    let filter = default_filter();
+    let output = search::render_search(&model, "PubStruct", &filter, None, None, true, None);
 
     assert!(
         output.contains("// impl"),
@@ -1236,18 +1252,16 @@ fn search_struct_shows_impl_summary() {
 #[test]
 fn methods_of_shows_only_methods_and_fields() {
     let model = fixture_model();
-    let mut args = default_args();
-    args.methods_of = Some("PubStruct".to_string());
-    // Simulate what run_pipeline does: translate methods_of into search + exclusion flags
-    args.search = Some("PubStruct".to_string());
-    args.no_structs = true;
-    args.no_enums = true;
-    args.no_traits = true;
-    args.no_unions = true;
-    args.no_constants = true;
-    args.no_macros = true;
-    args.no_aliases = true;
-    let output = search::render_search(&model, "PubStruct", &args, None, true, None);
+    let mut filter = default_filter();
+    // Simulate what run_search_pipeline does: translate methods_of into search + exclusion flags
+    filter.no_structs = true;
+    filter.no_enums = true;
+    filter.no_traits = true;
+    filter.no_unions = true;
+    filter.no_constants = true;
+    filter.no_macros = true;
+    filter.no_aliases = true;
+    let output = search::render_search(&model, "PubStruct", &filter, None, None, true, None);
 
     // Should contain methods
     assert!(
@@ -1380,8 +1394,8 @@ fn test_where_impl_block() {
 #[test]
 fn test_where_search_mode() {
     let model = fixture_model();
-    let args = default_args();
-    let output = search::render_search(&model, "where_fn", &args, None, true, None);
+    let filter = default_filter();
+    let output = search::render_search(&model, "where_fn", &filter, None, None, true, None);
 
     assert!(
         output.contains("where T: std::fmt::Display + Clone, U: Into<String>"),
@@ -1424,8 +1438,8 @@ fn test_multi_impl_trait_resugared() {
 #[test]
 fn test_impl_trait_search_mode() {
     let model = fixture_model();
-    let args = default_args();
-    let output = search::render_search(&model, "impl_trait_fn", &args, None, true, None);
+    let filter = default_filter();
+    let output = search::render_search(&model, "impl_trait_fn", &filter, None, None, true, None);
 
     assert!(
         output.contains("val: impl"),
@@ -1439,10 +1453,6 @@ fn test_impl_trait_search_mode() {
 
 #[test]
 fn test_qualified_path_no_empty_trait() {
-    // This tests that <T as >::Output doesn't appear — format_type fallback works.
-    // The test fixture Converter trait has associated type Output, used in:
-    // fn convert(&self) -> <Self as Converter>::Output
-    // which rustdoc may render with an empty trait path.
     let model = fixture_model();
     let args = default_args();
     let output = render_full(&model, &args);
@@ -1496,7 +1506,7 @@ fn test_non_exhaustive_enum_attr() {
 fn test_verbose_metadata_shows_repr() {
     let model = fixture_model();
     let mut args = default_args();
-    args.verbose_metadata = true;
+    args.filter.verbose_metadata = true;
     let output = render_full(&model, &args);
 
     assert!(
@@ -1520,8 +1530,16 @@ fn test_default_hides_repr() {
 #[test]
 fn test_search_deprecated_marker() {
     let model = fixture_model();
-    let args = default_args();
-    let output = search::render_search(&model, "deprecated_function", &args, None, true, None);
+    let filter = default_filter();
+    let output = search::render_search(
+        &model,
+        "deprecated_function",
+        &filter,
+        None,
+        None,
+        true,
+        None,
+    );
 
     assert!(
         output.contains("[deprecated]"),
@@ -1532,8 +1550,9 @@ fn test_search_deprecated_marker() {
 #[test]
 fn test_search_non_exhaustive_marker() {
     let model = fixture_model();
-    let args = default_args();
-    let output = search::render_search(&model, "NonExhaustiveEnum", &args, None, true, None);
+    let filter = default_filter();
+    let output =
+        search::render_search(&model, "NonExhaustiveEnum", &filter, None, None, true, None);
 
     assert!(
         output.contains("[non_exhaustive]"),
@@ -1585,7 +1604,7 @@ fn test_crate_docs_after_header() {
 fn test_crate_docs_suppressed_by_no_docs() {
     let model = fixture_model();
     let mut args = default_args();
-    args.no_docs = true;
+    args.filter.no_docs = true;
     let output = render_full(&model, &args);
 
     assert!(
@@ -1598,7 +1617,7 @@ fn test_crate_docs_suppressed_by_no_docs() {
 fn test_crate_docs_suppressed_by_compact() {
     let model = fixture_model();
     let mut args = default_args();
-    args.compact = true;
+    args.filter.compact = true;
     let output = render_full(&model, &args);
 
     assert!(
@@ -1611,7 +1630,7 @@ fn test_crate_docs_suppressed_by_compact() {
 fn test_crate_docs_limited_by_doc_lines() {
     let model = fixture_model();
     let mut args = default_args();
-    args.doc_lines = Some(1);
+    args.filter.doc_lines = Some(1);
     let output = render_full(&model, &args);
 
     assert!(
@@ -1631,7 +1650,7 @@ fn test_crate_docs_limited_by_doc_lines() {
 fn test_crate_docs_suppressed_by_doc_lines_zero() {
     let model = fixture_model();
     let mut args = default_args();
-    args.doc_lines = Some(0);
+    args.filter.doc_lines = Some(0);
     let output = render_full(&model, &args);
 
     assert!(
@@ -1644,7 +1663,7 @@ fn test_crate_docs_suppressed_by_doc_lines_zero() {
 fn test_crate_docs_suppressed_by_no_crate_docs() {
     let model = fixture_model();
     let mut args = default_args();
-    args.no_crate_docs = true;
+    args.filter.no_crate_docs = true;
     let output = render_full(&model, &args);
 
     assert!(
@@ -1661,8 +1680,8 @@ fn test_crate_docs_suppressed_by_no_crate_docs() {
 #[test]
 fn test_crate_docs_not_in_search_mode() {
     let model = fixture_model();
-    let args = default_args();
-    let output = search::render_search(&model, "PubStruct", &args, None, true, None);
+    let filter = default_filter();
+    let output = search::render_search(&model, "PubStruct", &filter, None, None, true, None);
 
     assert!(
         !output.contains("//!"),
@@ -1734,7 +1753,7 @@ fn test_trait_impl_summary_sorted() {
 fn test_trait_impl_all_expands() {
     let model = fixture_model();
     let mut args = default_args();
-    args.all = true;
+    args.filter.all = true;
     let output = render_full(&model, &args);
 
     // With --all, simple trait impls should be rendered individually, not collapsed
@@ -1758,5 +1777,88 @@ fn test_trait_impl_rich_not_collapsed() {
     assert!(
         output.contains("type Output = String;"),
         "associated type should be shown:\n{output}"
+    );
+}
+
+// === Smart-case + OR Tests ===
+
+#[test]
+fn test_search_smart_case_insensitive() {
+    let model = fixture_model();
+    // All-lowercase pattern → case-insensitive
+    let filter = default_filter();
+    let output = search::render_search(&model, "pubstruct", &filter, None, None, true, None);
+    assert!(
+        output.contains("struct outer::PubStruct"),
+        "all-lowercase pattern should match PubStruct (case-insensitive):\n{output}"
+    );
+}
+
+#[test]
+fn test_search_smart_case_sensitive() {
+    let model = fixture_model();
+    // Has uppercase → case-sensitive
+    let filter = default_filter();
+    let output = search::render_search(&model, "PubStruct", &filter, None, None, true, None);
+    assert!(
+        output.contains("struct outer::PubStruct"),
+        "uppercase pattern should find PubStruct (case-sensitive):\n{output}"
+    );
+    // "pubstruct" should NOT match when searching case-sensitively for "PubStruct"
+    // (This tests that items whose path doesn't contain exact case don't appear)
+    // All items that match "PubStruct" should have "PubStruct" in their path
+    let non_comment_lines: Vec<&str> = output
+        .lines()
+        .filter(|l| !l.starts_with("//") && !l.starts_with("///") && !l.is_empty())
+        .collect();
+    for line in &non_comment_lines {
+        assert!(
+            line.contains("PubStruct"),
+            "case-sensitive search should only return items with exact case 'PubStruct': {line}"
+        );
+    }
+}
+
+#[test]
+fn test_search_or_comma() {
+    let model = fixture_model();
+    // Comma-separated = OR
+    let filter = default_filter();
+    let output = search::render_search(
+        &model,
+        "PlainEnum,TupleEnum",
+        &filter,
+        None,
+        None,
+        true,
+        None,
+    );
+    assert!(
+        output.contains("PlainEnum"),
+        "OR search should find PlainEnum:\n{output}"
+    );
+    assert!(
+        output.contains("TupleEnum"),
+        "OR search should find TupleEnum:\n{output}"
+    );
+}
+
+#[test]
+fn test_search_or_no_cross_match() {
+    let model = fixture_model();
+    // "PlainEnum,TupleEnum" should NOT match PlainStruct (neither OR group matches)
+    let filter = default_filter();
+    let output = search::render_search(
+        &model,
+        "PlainEnum,TupleEnum",
+        &filter,
+        None,
+        None,
+        true,
+        None,
+    );
+    assert!(
+        !output.contains("PlainStruct"),
+        "OR search should not cross-match PlainStruct:\n{output}"
     );
 }

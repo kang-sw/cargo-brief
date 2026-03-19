@@ -160,22 +160,20 @@ alternatives considered, and trade-offs — focus on _why_ this approach was cho
 
 ## Recent Work
 
+- v0.5.0: CLI subcommand refactor — `api`/`search`/`examples` subcommands, smart-case search, comma-separated OR matching
 - v0.4.1+: `--verbose` / `-v` flag for pipeline progress on stderr
-- v0.4.1: version-normalized cache dirs (`name[version]`), crates.io API version resolution with 24h cache, `--clean` glob matching, bare spec auto-update
-- v0.4.0: cross-crate module following (facade crate support), rustdoc JSON + bincode caching, `--clean`, version+features in remote crate header
+- v0.4.1: version-normalized cache dirs, crates.io API version resolution, `--clean` glob matching
+- v0.4.0: cross-crate module following, rustdoc JSON + bincode caching, version+features in remote crate header
 - v0.3.11: trait impl noise reduction — simple impls collapsed into per-type summary comments
-- v0.3.10: crate-level `//!` doc rendering after `// crate` header
-- v0.3.9: UX hints — module-not-found suggests --search, search 0-result word count hint
-- v0.3.8: fix empty trait path, $crate leak, impl Trait desugar
-- v0.3.7: where clause / generic bound rendering across all item types
 
 ## Workspace Reference
 
 - Crate name: `cargo-brief` (binary: `cargo-brief`, lib: `cargo_brief`)
-- Entry: `src/lib.rs` → `run_pipeline()`, `src/main.rs` → CLI
+- Entry: `src/lib.rs` → `run_api_pipeline()` + `run_search_pipeline()`, `src/main.rs` → subcommand dispatch
+- CLI types: `ApiArgs`, `SearchArgs`, `ExamplesArgs` + shared `TargetArgs`/`RemoteArgs`/`FilterArgs`/`GlobalArgs`
 - Modules: `cli`, `cross_crate`, `remote`, `resolve`, `rustdoc_json`, `model`, `render`, `search`
 - Test fixture: `test_fixture/` (sample crate with all item types)
-- Integration tests: `tests/integration.rs`
+- Integration tests: `tests/integration.rs` (109 tests)
 
 ## Documented Dependencies
 

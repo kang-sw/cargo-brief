@@ -3,43 +3,48 @@
 //! All tests are `#[ignore]` because they require network access to crates.io.
 //! Run with: `cargo test --test version_cache_integration -- --ignored`
 
-use cargo_brief::cli::BriefArgs;
+use cargo_brief::cli::{ApiArgs, FilterArgs, GlobalArgs, RemoteArgs, TargetArgs};
 use cargo_brief::remote::{clean_cache, fetch_resolved_version, resolve_workspace};
-use cargo_brief::run_pipeline;
+use cargo_brief::run_api_pipeline;
 
-fn remote_args(spec: &str) -> BriefArgs {
-    BriefArgs {
-        crate_name: "self".to_string(),
-        module_path: None,
-        at_package: None,
-        at_mod: None,
+fn remote_args(spec: &str) -> ApiArgs {
+    ApiArgs {
+        target: TargetArgs {
+            crate_name: "self".to_string(),
+            module_path: None,
+            at_package: None,
+            at_mod: None,
+            manifest_path: None,
+        },
+        remote: RemoteArgs {
+            crates: Some(spec.to_string()),
+            features: None,
+            no_cache: false,
+            clean: None,
+        },
+        filter: FilterArgs {
+            no_structs: false,
+            no_enums: false,
+            no_traits: false,
+            no_functions: false,
+            no_aliases: false,
+            no_constants: false,
+            no_unions: false,
+            no_macros: false,
+            no_docs: false,
+            no_crate_docs: false,
+            doc_lines: None,
+            compact: false,
+            verbose_metadata: false,
+            all: false,
+        },
+        global: GlobalArgs {
+            toolchain: "nightly".to_string(),
+            verbose: false,
+        },
         depth: 1,
         recursive: true,
-        all: false,
-        no_docs: false,
-        no_crate_docs: false,
-        doc_lines: None,
-        compact: false,
-        verbose_metadata: false,
-        no_structs: false,
-        no_enums: false,
-        no_traits: false,
-        no_functions: false,
-        no_aliases: false,
-        no_constants: false,
-        no_unions: false,
-        no_macros: false,
-        crates: Some(spec.to_string()),
         expand_glob: false,
-        search: None,
-        search_limit: None,
-        methods_of: None,
-        features: None,
-        no_cache: false,
-        clean: None,
-        toolchain: "nightly".to_string(),
-        verbose: false,
-        manifest_path: None,
     }
 }
 
@@ -181,8 +186,8 @@ fn clean_cache_removes_matching_dirs() {
 fn full_pipeline_header_shows_version() {
     with_temp_cache(|_cache_path| {
         let mut args = remote_args("serde");
-        args.compact = true;
-        let output = run_pipeline(&args).expect("serde pipeline should succeed");
+        args.filter.compact = true;
+        let output = run_api_pipeline(&args).expect("serde pipeline should succeed");
         // Header should contain version: "// crate serde[1.0.xxx]"
         assert!(
             output.starts_with("// crate serde[1.0."),

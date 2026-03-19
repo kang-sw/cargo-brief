@@ -5,49 +5,54 @@
 //!
 //! All tests require network access. Run with: `cargo test -- --ignored`
 
-use cargo_brief::cli::BriefArgs;
-use cargo_brief::run_pipeline;
+use cargo_brief::cli::{ApiArgs, FilterArgs, GlobalArgs, RemoteArgs, SearchArgs, TargetArgs};
+use cargo_brief::{run_api_pipeline, run_search_pipeline};
 
-fn hecs_args() -> BriefArgs {
-    BriefArgs {
-        crate_name: "self".to_string(),
-        module_path: None,
-        at_package: None,
-        at_mod: None,
+fn hecs_args() -> ApiArgs {
+    ApiArgs {
+        target: TargetArgs {
+            crate_name: "self".to_string(),
+            module_path: None,
+            at_package: None,
+            at_mod: None,
+            manifest_path: None,
+        },
+        remote: RemoteArgs {
+            crates: Some("hecs@0.11.0".to_string()),
+            features: None,
+            no_cache: false,
+            clean: None,
+        },
+        filter: FilterArgs {
+            no_structs: false,
+            no_enums: false,
+            no_traits: false,
+            no_functions: false,
+            no_aliases: false,
+            no_constants: false,
+            no_unions: false,
+            no_macros: false,
+            no_docs: false,
+            no_crate_docs: false,
+            doc_lines: None,
+            compact: false,
+            verbose_metadata: false,
+            all: false,
+        },
+        global: GlobalArgs {
+            toolchain: "nightly".to_string(),
+            verbose: false,
+        },
         depth: 1,
         recursive: true,
-        all: false,
-        no_docs: false,
-        no_crate_docs: false,
-        doc_lines: None,
-        compact: false,
-        verbose_metadata: false,
-        no_structs: false,
-        no_enums: false,
-        no_traits: false,
-        no_functions: false,
-        no_aliases: false,
-        no_constants: false,
-        no_unions: false,
-        no_macros: false,
-        crates: Some("hecs@0.11.0".to_string()),
         expand_glob: false,
-        search: None,
-        search_limit: None,
-        methods_of: None,
-        features: None,
-        no_cache: false,
-        clean: None,
-        toolchain: "nightly".to_string(),
-        verbose: false,
-        manifest_path: None,
     }
 }
 
 #[test]
 #[ignore = "network"]
 fn hecs_private_modules_with_reachable_items() {
-    let output = run_pipeline(&hecs_args()).unwrap();
+    let output = run_api_pipeline(&hecs_args()).unwrap();
 
     // Private modules are rendered because they contain reachable items
     assert!(
@@ -67,7 +72,7 @@ fn hecs_private_modules_with_reachable_items() {
 #[test]
 #[ignore = "network"]
 fn hecs_reachable_types_inside_modules() {
-    let output = run_pipeline(&hecs_args()).unwrap();
+    let output = run_api_pipeline(&hecs_args()).unwrap();
 
     assert!(
         output.contains("pub struct Archetype"),
@@ -86,7 +91,7 @@ fn hecs_reachable_types_inside_modules() {
 #[test]
 #[ignore = "network"]
 fn hecs_no_pub_crate_items() {
-    let output = run_pipeline(&hecs_args()).unwrap();
+    let output = run_api_pipeline(&hecs_args()).unwrap();
 
     assert!(
         !output.contains("pub(crate)"),
@@ -97,7 +102,7 @@ fn hecs_no_pub_crate_items() {
 #[test]
 #[ignore = "network"]
 fn hecs_pub_use_at_root() {
-    let output = run_pipeline(&hecs_args()).unwrap();
+    let output = run_api_pipeline(&hecs_args()).unwrap();
 
     assert!(
         output.contains("pub use"),
@@ -108,7 +113,7 @@ fn hecs_pub_use_at_root() {
 #[test]
 #[ignore = "network"]
 fn hecs_nontrivial_output() {
-    let output = run_pipeline(&hecs_args()).unwrap();
+    let output = run_api_pipeline(&hecs_args()).unwrap();
 
     let line_count = output.lines().count();
     assert!(
@@ -120,9 +125,42 @@ fn hecs_nontrivial_output() {
 #[test]
 #[ignore = "network"]
 fn hecs_search_no_pub_crate() {
-    let mut args = hecs_args();
-    args.search = Some("Archetype".to_string());
-    let output = run_pipeline(&args).unwrap();
+    let args = SearchArgs {
+        crate_name: "self".to_string(),
+        pattern: "Archetype".to_string(),
+        remote: RemoteArgs {
+            crates: Some("hecs@0.11.0".to_string()),
+            features: None,
+            no_cache: false,
+            clean: None,
+        },
+        filter: FilterArgs {
+            no_structs: false,
+            no_enums: false,
+            no_traits: false,
+            no_functions: false,
+            no_aliases: false,
+            no_constants: false,
+            no_unions: false,
+            no_macros: false,
+            no_docs: false,
+            no_crate_docs: false,
+            doc_lines: None,
+            compact: false,
+            verbose_metadata: false,
+            all: false,
+        },
+        global: GlobalArgs {
+            toolchain: "nightly".to_string(),
+            verbose: false,
+        },
+        at_package: None,
+        at_mod: None,
+        manifest_path: None,
+        limit: None,
+        methods_of: None,
+    };
+    let output = run_search_pipeline(&args).unwrap();
 
     assert!(output.contains("Archetype"), "search should find Archetype");
     assert!(

@@ -4,42 +4,47 @@
 //! These tests verify that cargo-brief can generate correct output for crates
 //! that are not workspace members.
 
-use cargo_brief::cli::BriefArgs;
-use cargo_brief::run_pipeline;
+use cargo_brief::cli::{ApiArgs, FilterArgs, GlobalArgs, RemoteArgs, TargetArgs};
+use cargo_brief::run_api_pipeline;
 
-fn either_args() -> BriefArgs {
-    BriefArgs {
-        crate_name: "either".to_string(),
-        module_path: None,
-        at_package: None,
-        at_mod: None,
+fn either_args() -> ApiArgs {
+    ApiArgs {
+        target: TargetArgs {
+            crate_name: "either".to_string(),
+            module_path: None,
+            at_package: None,
+            at_mod: None,
+            manifest_path: Some("test_workspace/Cargo.toml".to_string()),
+        },
+        remote: RemoteArgs {
+            crates: None,
+            features: None,
+            no_cache: false,
+            clean: None,
+        },
+        filter: FilterArgs {
+            no_structs: false,
+            no_enums: false,
+            no_traits: false,
+            no_functions: false,
+            no_aliases: false,
+            no_constants: false,
+            no_unions: false,
+            no_macros: false,
+            no_docs: false,
+            no_crate_docs: false,
+            doc_lines: None,
+            compact: false,
+            verbose_metadata: false,
+            all: false,
+        },
+        global: GlobalArgs {
+            toolchain: "nightly".to_string(),
+            verbose: false,
+        },
         depth: 1,
         recursive: true,
-        all: false,
-        no_docs: false,
-        no_crate_docs: false,
-        doc_lines: None,
-        compact: false,
-        verbose_metadata: false,
-        no_structs: false,
-        no_enums: false,
-        no_traits: false,
-        no_functions: false,
-        no_aliases: false,
-        no_constants: false,
-        no_unions: false,
-        no_macros: false,
-        crates: None,
         expand_glob: false,
-        search: None,
-        search_limit: None,
-        methods_of: None,
-        features: None,
-        no_cache: false,
-        clean: None,
-        toolchain: "nightly".to_string(),
-        verbose: false,
-        manifest_path: Some("test_workspace/Cargo.toml".to_string()),
     }
 }
 
@@ -50,7 +55,7 @@ fn either_args() -> BriefArgs {
 #[test]
 fn either_crate_header() {
     let args = either_args();
-    let output = run_pipeline(&args).unwrap();
+    let output = run_api_pipeline(&args).unwrap();
 
     assert!(
         output.starts_with("// crate either\n"),
@@ -62,7 +67,7 @@ fn either_crate_header() {
 #[test]
 fn either_enum_definition() {
     let args = either_args();
-    let output = run_pipeline(&args).unwrap();
+    let output = run_api_pipeline(&args).unwrap();
 
     assert!(
         output.contains("pub enum Either<L, R>"),
@@ -75,7 +80,7 @@ fn either_enum_definition() {
 #[test]
 fn either_enum_doc_comment() {
     let args = either_args();
-    let output = run_pipeline(&args).unwrap();
+    let output = run_api_pipeline(&args).unwrap();
 
     assert!(
         output.contains("/// The enum `Either` with variants `Left` and `Right`"),
@@ -90,7 +95,7 @@ fn either_enum_doc_comment() {
 #[test]
 fn either_has_core_methods() {
     let args = either_args();
-    let output = run_pipeline(&args).unwrap();
+    let output = run_api_pipeline(&args).unwrap();
 
     assert!(output.contains("pub fn is_left(&self) -> bool;"), "is_left");
     assert!(
@@ -119,7 +124,7 @@ fn either_has_core_methods() {
 #[test]
 fn either_has_map_methods() {
     let args = either_args();
-    let output = run_pipeline(&args).unwrap();
+    let output = run_api_pipeline(&args).unwrap();
 
     assert!(
         output.contains("pub fn map_left<F, M>(self, f: F) -> Either<M, R>;"),
@@ -134,7 +139,7 @@ fn either_has_map_methods() {
 #[test]
 fn either_has_into_inner_for_same_type() {
     let args = either_args();
-    let output = run_pipeline(&args).unwrap();
+    let output = run_api_pipeline(&args).unwrap();
 
     assert!(output.contains("impl<T> Either<T, T>"), "impl Either<T, T>");
     assert!(
@@ -150,7 +155,7 @@ fn either_has_into_inner_for_same_type() {
 #[test]
 fn either_into_either_trait() {
     let args = either_args();
-    let output = run_pipeline(&args).unwrap();
+    let output = run_api_pipeline(&args).unwrap();
 
     // IntoEither is in a pub(crate) module, but re-exported at root
     assert!(
@@ -175,7 +180,7 @@ fn either_into_either_trait() {
 #[test]
 fn either_iter_either_struct() {
     let args = either_args();
-    let output = run_pipeline(&args).unwrap();
+    let output = run_api_pipeline(&args).unwrap();
 
     // IterEither is in a pub(crate) module, but re-exported at root
     assert!(
@@ -200,7 +205,7 @@ fn either_iter_either_struct() {
 #[test]
 fn either_reexports() {
     let args = either_args();
-    let output = run_pipeline(&args).unwrap();
+    let output = run_api_pipeline(&args).unwrap();
 
     assert!(
         output.contains("pub use") && output.contains("IterEither"),
@@ -219,7 +224,7 @@ fn either_reexports() {
 #[test]
 fn either_trait_impls() {
     let args = either_args();
-    let output = run_pipeline(&args).unwrap();
+    let output = run_api_pipeline(&args).unwrap();
 
     // Iterator impl with associated type
     assert!(
@@ -243,7 +248,7 @@ fn either_trait_impls() {
 #[test]
 fn either_deref_impl() {
     let args = either_args();
-    let output = run_pipeline(&args).unwrap();
+    let output = run_api_pipeline(&args).unwrap();
 
     assert!(
         output.contains("impl<L, R> Deref for Either<L, R>"),
@@ -258,7 +263,7 @@ fn either_deref_impl() {
 #[test]
 fn either_shows_reachable_private_modules_but_no_pub_crate_items() {
     let args = either_args();
-    let output = run_pipeline(&args).unwrap();
+    let output = run_api_pipeline(&args).unwrap();
 
     // Private modules with reachable items ARE shown (they contain pub use targets)
     assert!(
@@ -283,8 +288,8 @@ fn either_shows_reachable_private_modules_but_no_pub_crate_items() {
 #[test]
 fn either_target_iterator_module() {
     let mut args = either_args();
-    args.module_path = Some("iterator".to_string());
-    let output = run_pipeline(&args).unwrap();
+    args.target.module_path = Some("iterator".to_string());
+    let output = run_api_pipeline(&args).unwrap();
 
     assert!(
         output.contains("pub struct IterEither<L, R>"),
@@ -304,7 +309,7 @@ fn either_target_iterator_module() {
 #[test]
 fn either_has_macros() {
     let args = either_args();
-    let output = run_pipeline(&args).unwrap();
+    let output = run_api_pipeline(&args).unwrap();
 
     assert!(output.contains("macro_rules! for_both"), "for_both macro");
     assert!(output.contains("macro_rules! try_left"), "try_left macro");
@@ -320,7 +325,7 @@ fn either_depth_zero_still_shows_root_items() {
     let mut args = either_args();
     args.recursive = false;
     args.depth = 0;
-    let output = run_pipeline(&args).unwrap();
+    let output = run_api_pipeline(&args).unwrap();
 
     // At depth 0, reachable modules are shown but collapsed
     assert!(
@@ -341,7 +346,7 @@ fn either_depth_zero_still_shows_root_items() {
 #[test]
 fn either_method_doc_comments() {
     let args = either_args();
-    let output = run_pipeline(&args).unwrap();
+    let output = run_api_pipeline(&args).unwrap();
 
     assert!(
         output.contains("/// Return true if the value is the `Left` variant."),
@@ -360,8 +365,8 @@ fn either_method_doc_comments() {
 #[test]
 fn either_versioned_specifier() {
     let mut args = either_args();
-    args.crate_name = "either@1.15.0".to_string();
-    let output = run_pipeline(&args).unwrap();
+    args.target.crate_name = "either@1.15.0".to_string();
+    let output = run_api_pipeline(&args).unwrap();
 
     assert!(
         output.starts_with("// crate either\n"),
@@ -381,7 +386,7 @@ fn either_versioned_specifier() {
 #[test]
 fn either_specialized_impls() {
     let args = either_args();
-    let output = run_pipeline(&args).unwrap();
+    let output = run_api_pipeline(&args).unwrap();
 
     assert!(
         output.contains("impl<L, R> Either<Option<L>, Option<R>>"),

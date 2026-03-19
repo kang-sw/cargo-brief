@@ -2,42 +2,47 @@
 //!
 //! Uses `clap` as a test case — it re-exports from `clap_builder` and `clap_derive`.
 
-use cargo_brief::cli::BriefArgs;
-use cargo_brief::run_pipeline;
+use cargo_brief::cli::{ApiArgs, FilterArgs, GlobalArgs, RemoteArgs, TargetArgs};
+use cargo_brief::run_api_pipeline;
 
-fn facade_args(crate_name: &str) -> BriefArgs {
-    BriefArgs {
-        crate_name: crate_name.to_string(),
-        module_path: None,
-        at_package: None,
-        at_mod: None,
+fn facade_args(crate_name: &str) -> ApiArgs {
+    ApiArgs {
+        target: TargetArgs {
+            crate_name: crate_name.to_string(),
+            module_path: None,
+            at_package: None,
+            at_mod: None,
+            manifest_path: Some("test_workspace/Cargo.toml".to_string()),
+        },
+        remote: RemoteArgs {
+            crates: None,
+            features: None,
+            no_cache: false,
+            clean: None,
+        },
+        filter: FilterArgs {
+            no_structs: false,
+            no_enums: false,
+            no_traits: false,
+            no_functions: false,
+            no_aliases: false,
+            no_constants: false,
+            no_unions: false,
+            no_macros: false,
+            no_docs: false,
+            no_crate_docs: false,
+            doc_lines: None,
+            compact: false,
+            verbose_metadata: false,
+            all: false,
+        },
+        global: GlobalArgs {
+            toolchain: "nightly".to_string(),
+            verbose: false,
+        },
         depth: 1,
         recursive: true,
-        all: false,
-        no_docs: false,
-        no_crate_docs: false,
-        doc_lines: None,
-        compact: false,
-        verbose_metadata: false,
-        no_structs: false,
-        no_enums: false,
-        no_traits: false,
-        no_functions: false,
-        no_aliases: false,
-        no_constants: false,
-        no_unions: false,
-        no_macros: false,
-        crates: None,
         expand_glob: false,
-        search: None,
-        search_limit: None,
-        methods_of: None,
-        features: None,
-        no_cache: false,
-        clean: None,
-        toolchain: "nightly".to_string(),
-        verbose: false,
-        manifest_path: Some("test_workspace/Cargo.toml".to_string()),
     }
 }
 
@@ -48,7 +53,7 @@ fn facade_args(crate_name: &str) -> BriefArgs {
 #[test]
 fn clap_facade_not_empty() {
     let args = facade_args("clap");
-    let output = run_pipeline(&args).unwrap();
+    let output = run_api_pipeline(&args).unwrap();
 
     // Must have more than just the crate header
     let lines: Vec<&str> = output.lines().collect();
@@ -61,7 +66,7 @@ fn clap_facade_not_empty() {
 #[test]
 fn clap_facade_has_crate_header() {
     let args = facade_args("clap");
-    let output = run_pipeline(&args).unwrap();
+    let output = run_api_pipeline(&args).unwrap();
 
     assert!(
         output.starts_with("// crate clap\n"),
@@ -77,7 +82,7 @@ fn clap_facade_has_crate_header() {
 #[test]
 fn clap_facade_expands_clap_builder_items() {
     let args = facade_args("clap");
-    let output = run_pipeline(&args).unwrap();
+    let output = run_api_pipeline(&args).unwrap();
 
     // Key types from clap_builder should appear as individual pub use
     assert!(
@@ -93,7 +98,7 @@ fn clap_facade_expands_clap_builder_items() {
 #[test]
 fn clap_facade_no_glob_star() {
     let args = facade_args("clap");
-    let output = run_pipeline(&args).unwrap();
+    let output = run_api_pipeline(&args).unwrap();
 
     // The glob `pub use clap_builder::*;` should be replaced with individual items
     for line in output.lines() {
@@ -110,7 +115,7 @@ fn clap_facade_no_glob_star() {
 #[test]
 fn clap_facade_no_module_reexports() {
     let args = facade_args("clap");
-    let output = run_pipeline(&args).unwrap();
+    let output = run_api_pipeline(&args).unwrap();
 
     // Submodules from clap_builder (like `builder`) should NOT appear as re-exports
     // (Rust's glob import doesn't re-export submodules)
@@ -127,7 +132,7 @@ fn clap_facade_no_module_reexports() {
 #[test]
 fn either_unaffected_by_glob_expansion() {
     let args = facade_args("either");
-    let output = run_pipeline(&args).unwrap();
+    let output = run_api_pipeline(&args).unwrap();
 
     // either is not a facade crate — should render normally
     assert!(
@@ -146,7 +151,7 @@ fn either_unaffected_by_glob_expansion() {
 // --expand-glob: full definition inlining
 // ============================================================
 
-fn expand_glob_args(crate_name: &str) -> BriefArgs {
+fn expand_glob_args(crate_name: &str) -> ApiArgs {
     let mut args = facade_args(crate_name);
     args.expand_glob = true;
     args
@@ -155,7 +160,7 @@ fn expand_glob_args(crate_name: &str) -> BriefArgs {
 #[test]
 fn clap_expand_glob_has_full_definitions() {
     let args = expand_glob_args("clap");
-    let output = run_pipeline(&args).unwrap();
+    let output = run_api_pipeline(&args).unwrap();
 
     // Full struct definitions should appear instead of `pub use` lines
     assert!(
@@ -171,7 +176,7 @@ fn clap_expand_glob_has_full_definitions() {
 #[test]
 fn clap_expand_glob_no_pub_use_lines() {
     let args = expand_glob_args("clap");
-    let output = run_pipeline(&args).unwrap();
+    let output = run_api_pipeline(&args).unwrap();
 
     // No `pub use clap_builder::*;` lines should remain
     for line in output.lines() {
@@ -189,7 +194,7 @@ fn clap_expand_glob_no_pub_use_lines() {
 #[test]
 fn clap_expand_glob_has_impl_blocks() {
     let args = expand_glob_args("clap");
-    let output = run_pipeline(&args).unwrap();
+    let output = run_api_pipeline(&args).unwrap();
 
     // impl blocks from source crate should be included
     assert!(
@@ -201,7 +206,7 @@ fn clap_expand_glob_has_impl_blocks() {
 #[test]
 fn clap_expand_glob_dedup() {
     let args = expand_glob_args("clap");
-    let output = run_pipeline(&args).unwrap();
+    let output = run_api_pipeline(&args).unwrap();
 
     // Items appearing in multiple glob sources should be rendered only once.
     // Count occurrences of "pub struct Command" — should be exactly 1.
@@ -215,7 +220,7 @@ fn clap_expand_glob_dedup() {
 #[test]
 fn either_expand_glob_no_effect() {
     let args = expand_glob_args("either");
-    let output = run_pipeline(&args).unwrap();
+    let output = run_api_pipeline(&args).unwrap();
 
     // either is not a facade crate — --expand-glob should not change output
     assert!(

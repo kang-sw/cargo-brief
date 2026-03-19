@@ -6,7 +6,7 @@ use rustdoc_types::{
     Trait, Type, TypeAlias, Union, VariantKind, Visibility, WherePredicate,
 };
 
-use crate::cli::BriefArgs;
+use crate::cli::{ApiArgs, FilterArgs};
 use crate::model::{CrateModel, is_visible_from};
 
 /// Render the API of a target module as pseudo-Rust.
@@ -15,7 +15,7 @@ use crate::model::{CrateModel, is_visible_from};
 pub fn render_module_api(
     model: &CrateModel,
     target_module_path: Option<&str>,
-    args: &BriefArgs,
+    args: &ApiArgs,
     observer_module_path: Option<&str>,
     same_crate: bool,
     reachable: Option<&HashSet<Id>>,
@@ -24,7 +24,7 @@ pub fn render_module_api(
 
     let crate_name = model.crate_name();
     output.push_str(&format!("// crate {crate_name}\n"));
-    render_crate_docs(model, args, &mut output);
+    render_crate_docs(model, &args.filter, &mut output);
 
     let target_item = if let Some(path) = target_module_path {
         model.find_module(path)
@@ -42,7 +42,7 @@ pub fn render_module_api(
                 output.push_str(&format!("//   {p}\n"));
             }
             output.push_str(&format!(
-                "// TIP: Try --search \"{path}\" to find items by name across the crate.\n"
+                "// TIP: Try `search {path}` to find items by name across the crate.\n"
             ));
         } else {
             output.push_str("// ERROR: crate root module not found\n");
@@ -67,7 +67,7 @@ pub fn render_module_api(
     render_module_contents(
         model,
         target_item,
-        args,
+        &args.filter,
         &observer,
         same_crate,
         depth,
@@ -88,7 +88,7 @@ pub fn render_module_api(
 /// `seen_names` for cross-source deduplication.
 pub fn render_inlined_items(
     source_model: &CrateModel,
-    args: &BriefArgs,
+    args: &FilterArgs,
     seen_names: &mut HashSet<String>,
 ) -> String {
     let mut output = String::new();
@@ -189,7 +189,7 @@ fn collect_impl_ids(item: &Item, impl_ids: &mut Vec<Id>) {
 /// Render impl blocks collected from inlined types.
 fn render_inlined_impl_blocks(
     model: &CrateModel,
-    args: &BriefArgs,
+    args: &FilterArgs,
     observer: &str,
     impl_ids: &[Id],
     source_type_name: &str,
@@ -303,7 +303,7 @@ fn render_inlined_impl_blocks(
 }
 
 /// Check if an item should be rendered based on the args exclusion flags.
-fn should_render_item(item: &Item, args: &BriefArgs) -> bool {
+fn should_render_item(item: &Item, args: &FilterArgs) -> bool {
     match &item.inner {
         ItemEnum::Struct(_) => !args.no_structs,
         ItemEnum::Enum(_) => !args.no_enums,
@@ -322,7 +322,7 @@ fn should_render_item(item: &Item, args: &BriefArgs) -> bool {
 fn render_module_contents(
     model: &CrateModel,
     module_item: &Item,
-    args: &BriefArgs,
+    args: &FilterArgs,
     observer: &str,
     same_crate: bool,
     max_depth: u32,
@@ -600,7 +600,7 @@ fn render_trait_impl_summary(
 fn render_impl_blocks(
     model: &CrateModel,
     module_item: &Item,
-    args: &BriefArgs,
+    args: &FilterArgs,
     observer: &str,
     same_crate: bool,
     current_depth: u32,
@@ -758,7 +758,7 @@ fn render_item(
     item: &Item,
     _item_id: &Id,
     indent: &str,
-    args: &BriefArgs,
+    args: &FilterArgs,
     observer: &str,
     same_crate: bool,
     output: &mut String,
@@ -812,7 +812,7 @@ fn render_struct(
     s: &Struct,
     indent: &str,
     vis: &str,
-    args: &BriefArgs,
+    args: &FilterArgs,
     observer: &str,
     same_crate: bool,
     output: &mut String,
@@ -906,7 +906,7 @@ fn render_enum(
     e: &Enum,
     indent: &str,
     vis: &str,
-    args: &BriefArgs,
+    args: &FilterArgs,
     output: &mut String,
 ) {
     let name = item.name.as_deref().unwrap_or("?");
@@ -1014,7 +1014,7 @@ fn render_trait(
     t: &Trait,
     indent: &str,
     vis: &str,
-    args: &BriefArgs,
+    args: &FilterArgs,
     output: &mut String,
 ) {
     let name = item.name.as_deref().unwrap_or("?");
@@ -1197,7 +1197,7 @@ fn item_kind_suffix(item: &Item) -> &'static str {
     }
 }
 
-fn render_impl_item(item: &Item, indent: &str, args: &BriefArgs) -> Option<String> {
+fn render_impl_item(item: &Item, indent: &str, args: &FilterArgs) -> Option<String> {
     let mut out = String::new();
 
     match &item.inner {
@@ -1313,7 +1313,7 @@ fn render_attrs(item: &Item, indent: &str, verbose: bool, output: &mut String) {
     }
 }
 
-fn render_crate_docs(model: &CrateModel, args: &BriefArgs, output: &mut String) {
+fn render_crate_docs(model: &CrateModel, args: &FilterArgs, output: &mut String) {
     if args.no_docs || args.compact || args.no_crate_docs {
         return;
     }
@@ -1337,7 +1337,7 @@ fn render_crate_docs(model: &CrateModel, args: &BriefArgs, output: &mut String) 
     }
 }
 
-fn render_docs(item: &Item, indent: &str, args: &BriefArgs, output: &mut String) {
+fn render_docs(item: &Item, indent: &str, args: &FilterArgs, output: &mut String) {
     if args.no_docs || args.compact {
         return;
     }

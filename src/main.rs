@@ -1,32 +1,48 @@
 use anyhow::Result;
 use clap::Parser;
 
-use cargo_brief::cli::{BriefArgs, Cargo, CargoCommand};
+use cargo_brief::cli::{BriefCommand, BriefDirect, Cargo, CargoCommand};
 
 fn main() -> Result<()> {
-    let args = parse_args();
+    let cmd = parse_command();
 
-    if let Some(spec) = &args.clean {
-        cargo_brief::clean_cache(spec)?;
-        return Ok(());
+    match &cmd {
+        BriefCommand::Api(args) => {
+            if let Some(spec) = &args.remote.clean {
+                cargo_brief::clean_cache(spec)?;
+                return Ok(());
+            }
+            let output = cargo_brief::run_api_pipeline(args)?;
+            print!("{output}");
+        }
+        BriefCommand::Search(args) => {
+            if let Some(spec) = &args.remote.clean {
+                cargo_brief::clean_cache(spec)?;
+                return Ok(());
+            }
+            let output = cargo_brief::run_search_pipeline(args)?;
+            print!("{output}");
+        }
+        BriefCommand::Examples(_) => {
+            eprintln!("error: 'examples' subcommand not yet implemented");
+            std::process::exit(1);
+        }
     }
-
-    let output = cargo_brief::run_pipeline(&args)?;
-    print!("{output}");
     Ok(())
 }
 
-fn parse_args() -> BriefArgs {
+fn parse_command() -> BriefCommand {
     // Handle both `cargo brief <args>` and `cargo-brief <args>` invocations
     let raw_args: Vec<String> = std::env::args().collect();
 
     if raw_args.len() > 1 && raw_args[1] == "brief" {
         // Invoked as `cargo brief` — parse as cargo subcommand
         let cargo = Cargo::parse();
-        let CargoCommand::Brief(args) = cargo.command;
-        args
+        let CargoCommand::Brief(direct) = cargo.command;
+        direct.command
     } else {
-        // Direct invocation — parse BriefArgs directly
-        BriefArgs::parse()
+        // Direct invocation — parse BriefDirect directly
+        let direct = BriefDirect::parse();
+        direct.command
     }
 }
