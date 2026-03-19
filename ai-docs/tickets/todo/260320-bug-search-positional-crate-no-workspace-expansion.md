@@ -52,8 +52,12 @@ boundaries.
 # items are not collected into the parent module's reachable set
 ```
 
-Note: v0.5.1 (50f096b) fixed intra-crate glob re-exports. This may be a
-cross-crate variant of the same problem, or the fix may not cover all cases.
+Note: v0.5.1 (50f096b) fixed intra-crate glob re-exports, but the fix may
+not be recursive. A chain like `pub mod render_resource { pub use
+bind_group::*; }` where `bind_group` itself re-exports from deeper modules
+requires recursive glob expansion to surface items like `AsBindGroup`.
+Verify whether the current implementation expands only one level or walks
+the full depth.
 
 ### 5. Submodule direct access returns empty (medium)
 
@@ -115,8 +119,22 @@ WGSL shader module introspection (e.g. `forward_io` structs like
 `VertexOutput`) — not Rust API, but noted as a frequent need for bevy custom
 material workflows.
 
+## Implementation Note
+
+Issues 1–5 share a common theme: the visibility/reachability engine doesn't
+consistently follow re-export chains across crate boundaries or through
+recursive glob expansions. Rather than patching each symptom individually,
+this warrants a holistic revision of the re-export resolution logic to ensure:
+
+- Workspace member expansion works uniformly (positional and `--crates`)
+- Cross-crate `pub use` chains are walked transitively
+- Glob re-exports (`pub use submod::*`) are expanded recursively, not just
+  one level deep
+- The resulting reachable set is the same regardless of which entry point
+  the user specifies (umbrella crate vs sub-crate vs module path)
+
 ## Priority
 
-Issues 1–4 are the most impactful — they all stem from the tool not following
+Issues 1–5 are the most impactful — they all stem from the tool not following
 re-export chains / workspace member relationships for umbrella crates. A
-unified fix that walks re-export paths would likely address most of them.
+unified revision of re-export resolution would address most of them.
