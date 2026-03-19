@@ -1,5 +1,5 @@
 use cargo_brief::cli::{ApiArgs, FilterArgs, GlobalArgs, RemoteArgs, TargetArgs};
-use cargo_brief::model::CrateModel;
+use cargo_brief::model::{CrateModel, compute_reachable_set};
 use cargo_brief::render::render_module_api;
 use cargo_brief::resolve;
 use cargo_brief::rustdoc_json;
@@ -1860,5 +1860,63 @@ fn test_search_or_no_cross_match() {
     assert!(
         !output.contains("PlainStruct"),
         "OR search should not cross-match PlainStruct:\n{output}"
+    );
+}
+
+// === Glob Re-export from pub(crate) Module Tests ===
+
+#[test]
+fn test_glob_reexport_search_finds_trait() {
+    let model = fixture_model();
+    let filter = default_filter();
+    let reachable = compute_reachable_set(&model);
+    let output = search::render_search(
+        &model,
+        "GlobTrait",
+        &filter,
+        None,
+        None,
+        false,
+        Some(&reachable),
+    );
+    assert!(
+        output.contains("GlobTrait"),
+        "search should find GlobTrait via glob re-export:\n{output}"
+    );
+}
+
+#[test]
+fn test_glob_reexport_search_finds_struct() {
+    let model = fixture_model();
+    let filter = default_filter();
+    let reachable = compute_reachable_set(&model);
+    let output = search::render_search(
+        &model,
+        "GlobStruct",
+        &filter,
+        None,
+        None,
+        false,
+        Some(&reachable),
+    );
+    assert!(
+        output.contains("GlobStruct"),
+        "search should find GlobStruct via glob re-export:\n{output}"
+    );
+}
+
+#[test]
+fn test_glob_reexport_api_renders_items() {
+    let model = fixture_model();
+    let args = default_args();
+    let reachable = compute_reachable_set(&model);
+    let output = render_module_api(&model, None, &args, None, false, Some(&reachable));
+    assert!(
+        output.contains("GlobTrait"),
+        "API render should include GlobTrait via glob re-export:\n{output}"
+    );
+    assert!(
+        output.contains("GlobStruct"),
+        "API render should include GlobStruct via glob re-export:\n{output}"
     );
 }

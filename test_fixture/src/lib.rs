@@ -254,3 +254,25 @@ pub enum NonExhaustiveEnum {
 }
 
 pub use outer::PubStruct as ReExported;
+
+// --- Glob re-export from pub(crate) module ---
+
+pub(crate) mod hidden_reexport {
+    /// A trait only accessible via glob re-export.
+    pub trait GlobTrait {
+        fn glob_method(&self) -> bool;
+    }
+
+    /// A struct only accessible via glob re-export.
+    pub struct GlobStruct {
+        pub visible_field: i32,
+    }
+
+    impl GlobStruct {
+        pub fn glob_fn(&self) -> i32 {
+            self.visible_field
+        }
+    }
+}
+
+pub use hidden_reexport::*;

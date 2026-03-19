@@ -92,12 +92,17 @@ impl CrateModel {
     /// Find a module by its path relative to the crate root.
     /// Accepts paths like "outer::inner" (without crate name prefix).
     pub fn find_module(&self, module_path: &str) -> Option<&Item> {
+        self.find_module_entry(module_path).map(|(_id, item)| item)
+    }
+
+    /// Find a module by path, returning both its Id and Item.
+    fn find_module_entry(&self, module_path: &str) -> Option<(&Id, &Item)> {
         let full_path = format!("{}::{}", self.crate_name(), module_path);
         let id = self
             .module_index
             .get(&full_path)
             .or_else(|| self.module_index.get(module_path))?;
-        self.krate.index.get(id)
+        self.krate.index.get(id).map(|item| (id, item))
     }
 
     /// Find the root module of the crate.
@@ -218,8 +223,20 @@ fn walk_public(model: &CrateModel, module_item: &Item, reachable: &mut HashSet<I
                     mark_reachable_with_ancestors(model, target_id, reachable);
                 }
             }
-            ItemEnum::Use(_) => {
+            ItemEnum::Use(use_item) => {
                 reachable.insert(**child_id);
+                // Follow intra-crate glob re-exports: resolve the source module
+                // and walk its public items into the reachable set.
+                // Cross-crate sources won't be in module_index → harmlessly skipped.
+                let source = use_item
+                    .source
+                    .strip_prefix("self::")
+                    .unwrap_or(&use_item.source);
+                if let Some((mod_id, mod_item)) = model.find_module_entry(source) {
+                    if reachable.insert(*mod_id) {
+                        walk_public(model, mod_item, reachable);
+                    }
+                }
             }
             _ => {
                 reachable.insert(**child_id);
