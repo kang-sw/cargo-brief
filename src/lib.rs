@@ -128,6 +128,20 @@ pub fn run_api_pipeline(args: &ApiArgs) -> Result<String> {
 
 /// Run the search pipeline and return the rendered output string.
 pub fn run_search_pipeline(args: &SearchArgs) -> Result<String> {
+    // When --crates is used, the first positional (crate_name) is redundant since
+    // the crate is specified by --crates. If pattern is empty and crate_name is not
+    // "self", treat crate_name as the pattern (mirrors api subcommand behavior).
+    let args =
+        if args.remote.crates.is_some() && args.pattern.is_empty() && args.crate_name != "self" {
+            let mut args = args.clone();
+            args.pattern = std::mem::take(&mut args.crate_name);
+            args.crate_name = "self".to_string();
+            std::borrow::Cow::Owned(args)
+        } else {
+            std::borrow::Cow::Borrowed(args)
+        };
+    let args = args.as_ref();
+
     // Validate: need either a pattern or --methods-of
     if args.pattern.is_empty() && args.methods_of.is_none() {
         anyhow::bail!("search requires a pattern or --methods-of <TYPE>");
