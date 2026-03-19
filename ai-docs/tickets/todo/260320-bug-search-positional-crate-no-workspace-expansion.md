@@ -82,7 +82,23 @@ cargo brief search bevy_pbr "^Material$"  # → 0 results
 Only substring matching is supported. Regex (or at least exact-match mode)
 would help narrow results.
 
-### 8. `--compact` hides trait method signatures (low)
+### 8. Zero-result crate headers should be verbose-only (medium)
+
+```
+// crate bevy_picking — search: "ShaderRef" (0 results)
+// crate bevy_platform — search: "ShaderRef" (0 results)
+// crate bevy_ptr — search: "ShaderRef" (0 results)
+// ...
+// crate bevy_shader — search: "ShaderRef" (16 results)
+fn shader::ShaderRef::default() -> ShaderRef;
+```
+
+When workspace members are expanded, the output is flooded with `(0 results)`
+lines for every sub-crate that didn't match. These headers should only appear
+in `--verbose` mode. In normal mode, only crates with actual results should
+be shown — making the expansion seamless to the user.
+
+### 9. `--compact` hides trait method signatures (low)
 
 ```sh
 # --compact collapses trait bodies to { .. }
