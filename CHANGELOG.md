@@ -2,6 +2,28 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.5.0] - 2026-03-19
+
+### Breaking
+
+- **Subcommand CLI**: The flat CLI is replaced with subcommands. All invocations now require `api`, `search`, or `examples` as the first argument.
+  - `cargo brief self` → `cargo brief api self`
+  - `cargo brief --search pattern` → `cargo brief search self pattern`
+  - `cargo brief --methods-of Type` → `cargo brief search self --methods-of Type`
+  - `--search`, `--search-limit`, `--methods-of` flags removed from `api`; use `search` subcommand instead.
+
+### Added
+
+- **Smart-case search matching**: All-lowercase patterns are case-insensitive; patterns with any uppercase character are case-sensitive. Matches ripgrep/vim `smartcase` semantics.
+- **Comma-separated OR search**: `"Foo,Bar"` finds items matching either term. Within each comma-group, space-separated words are AND-matched. `"World spawn,despawn"` matches (World AND spawn) OR (despawn).
+- **`examples` subcommand stub**: Placeholder for future example grepping (exits with "not yet implemented").
+
+### Changed
+
+- `run_pipeline()` split into `run_api_pipeline()` + `run_search_pipeline()` for clearer API.
+- `BriefArgs` split into per-subcommand `ApiArgs`/`SearchArgs`/`ExamplesArgs` with shared `FilterArgs`/`RemoteArgs`/`TargetArgs`/`GlobalArgs` groups.
+- `--search-limit` renamed to `--limit` (on `search` subcommand).
+
 ## [0.4.1] - 2026-03-19
 
 ### Changed
