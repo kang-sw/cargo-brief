@@ -1927,7 +1927,7 @@ fn test_glob_reexport_api_renders_items() {
 fn default_examples_args() -> ExamplesArgs {
     ExamplesArgs {
         crate_name: "test-fixture".to_string(),
-        pattern: None,
+        patterns: vec![],
         remote: RemoteArgs {
             crates: None,
             features: None,
@@ -1970,7 +1970,7 @@ fn test_examples_list_mode() {
 #[test]
 fn test_examples_grep_mode() {
     let mut args = default_examples_args();
-    args.pattern = Some("PubStruct".to_string());
+    args.patterns = vec!["PubStruct".to_string()];
     let output = cargo_brief::run_examples_pipeline(&args).unwrap();
     assert!(
         output.contains("@examples/example_usage.rs"),
@@ -1989,7 +1989,7 @@ fn test_examples_grep_mode() {
 #[test]
 fn test_examples_grep_no_match() {
     let mut args = default_examples_args();
-    args.pattern = Some("nonexistent_xyzzy_pattern".to_string());
+    args.patterns = vec!["nonexistent_xyzzy_pattern".to_string()];
     let output = cargo_brief::run_examples_pipeline(&args).unwrap();
     assert!(
         output.contains("no matches"),
@@ -2000,7 +2000,7 @@ fn test_examples_grep_no_match() {
 #[test]
 fn test_examples_grep_context_format() {
     let mut args = default_examples_args();
-    args.pattern = Some("pub_method".to_string());
+    args.patterns = vec!["pub_method".to_string()];
     args.context = "1:1".to_string();
     let output = cargo_brief::run_examples_pipeline(&args).unwrap();
     // Should have the match line with * and context lines with space
@@ -2019,7 +2019,7 @@ fn test_examples_grep_context_format() {
 fn test_examples_smart_case() {
     let mut args = default_examples_args();
     // Lowercase pattern → case-insensitive
-    args.pattern = Some("pubstruct".to_string());
+    args.patterns = vec!["pubstruct".to_string()];
     let output = cargo_brief::run_examples_pipeline(&args).unwrap();
     assert!(
         output.contains("PubStruct"),
@@ -2027,7 +2027,7 @@ fn test_examples_smart_case() {
     );
 
     // Uppercase pattern → case-sensitive
-    args.pattern = Some("PUBSTRUCT".to_string());
+    args.patterns = vec!["PUBSTRUCT".to_string()];
     let output = cargo_brief::run_examples_pipeline(&args).unwrap();
     assert!(
         output.contains("no matches"),

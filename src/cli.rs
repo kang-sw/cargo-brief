@@ -64,7 +64,10 @@ RESOLUTION RULES:
     #[command(after_help = "\
 EXAMPLES:
   # Search for items by name (smart-case: lowercase=insensitive, uppercase=sensitive)
-  cargo brief search --crates axum@0.8 \"Router route\"
+  cargo brief search --crates axum@0.8 Router route
+
+  # Multiple patterns are AND-matched (no quotes needed)
+  cargo brief search --crates bevy ShaderRef Material
 
   # List all methods/fields of a type
   cargo brief search --crates bytes@1 --methods-of Bytes
@@ -73,6 +76,7 @@ EXAMPLES:
   cargo brief search self \"EventReader,EventWriter\"
 
 SEARCH MATCHING:
+  Multiple pattern arguments are joined with spaces (AND-matched).
   Smart-case: all-lowercase pattern → case-insensitive, any uppercase → case-sensitive.
   Space-separated words are AND-matched: \"World spawn\" finds items whose path contains both.
   Comma-separated terms are OR-matched: \"Foo,Bar\" finds items matching either.
@@ -98,10 +102,14 @@ EXAMPLES:
   cargo brief examples self spawn
   cargo brief examples --crates hecs spawn_at --context 3
 
+  # Multiple patterns are AND-matched (no quotes needed)
+  cargo brief examples self spawn async
+
   # Include tests and benches directories
   cargo brief examples --crates serde --tests --benches derive
 
 MATCHING:
+  Multiple pattern arguments are joined with spaces (AND-matched).
   Smart-case: all-lowercase pattern = case-insensitive, any uppercase = case-sensitive.
   Without a pattern, lists files with their //! doc comments.")]
     Examples(ExamplesArgs),
@@ -266,16 +274,15 @@ pub struct ApiArgs {
 
 /// Arguments for the `search` subcommand.
 #[derive(Args, Debug, Clone)]
+#[command(trailing_var_arg = true)]
 pub struct SearchArgs {
     /// Target crate to search: crate name, "self", or crate::module
     #[arg(value_name = "TARGET", default_value = "self")]
     pub crate_name: String,
 
-    /// Search pattern (smart-case: all-lowercase=insensitive, any uppercase=sensitive).
-    /// Space-separated words = AND, comma-separated terms = OR.
-    /// Empty when --methods-of is used alone.
-    #[arg(default_value = "")]
-    pub pattern: String,
+    /// Search patterns — multiple args are AND-matched (use -- for patterns starting with -)
+    #[arg(value_name = "PATTERN", trailing_var_arg = true)]
+    pub patterns: Vec<String>,
 
     #[command(flatten)]
     pub remote: RemoteArgs,
@@ -307,15 +314,24 @@ pub struct SearchArgs {
     pub methods_of: Option<String>,
 }
 
+impl SearchArgs {
+    /// Join pattern args with space (AND semantics). Empty string if no patterns.
+    pub fn pattern(&self) -> String {
+        self.patterns.join(" ")
+    }
+}
+
 /// Arguments for the `examples` subcommand.
 #[derive(Args, Debug, Clone)]
+#[command(trailing_var_arg = true)]
 pub struct ExamplesArgs {
     /// Target crate
     #[arg(value_name = "TARGET", default_value = "self")]
     pub crate_name: String,
 
-    /// Pattern to grep for (omit for list mode)
-    pub pattern: Option<String>,
+    /// Grep patterns — multiple args are AND-matched (omit for list mode)
+    #[arg(value_name = "PATTERN", trailing_var_arg = true)]
+    pub patterns: Vec<String>,
 
     #[command(flatten)]
     pub remote: RemoteArgs,
@@ -338,4 +354,15 @@ pub struct ExamplesArgs {
     /// Include benches/ directory [default depth: unlimited]
     #[arg(long, num_args(0..=1), default_missing_value = "999", value_name = "DEPTH")]
     pub benches: Option<u32>,
+}
+
+impl ExamplesArgs {
+    /// Join pattern args with space. None if no patterns (list mode).
+    pub fn pattern(&self) -> Option<String> {
+        if self.patterns.is_empty() {
+            None
+        } else {
+            Some(self.patterns.join(" "))
+        }
+    }
 }

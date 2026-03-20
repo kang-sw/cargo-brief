@@ -127,7 +127,7 @@ fn hecs_nontrivial_output() {
 fn hecs_search_no_pub_crate() {
     let args = SearchArgs {
         crate_name: "self".to_string(),
-        pattern: "Archetype".to_string(),
+        patterns: vec!["Archetype".to_string()],
         remote: RemoteArgs {
             crates: Some("hecs@0.11.0".to_string()),
             features: None,

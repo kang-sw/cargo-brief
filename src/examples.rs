@@ -229,7 +229,7 @@ pub fn render_examples(source_root: &Path, crate_display: &str, args: &ExamplesA
     let mut out = format!("// examples for {crate_display}\n");
     out.push_str(&format!("// root: {}/\n\n", source_root.display()));
 
-    if let Some(ref pattern) = args.pattern {
+    if let Some(ref pattern) = args.pattern() {
         let grep_output = render_grep(source_root, &files, pattern, &args.context);
         if grep_output.is_empty() {
             out.push_str(&format!("// no matches for \"{pattern}\"\n"));

@@ -341,12 +341,12 @@ fn render_and_expand_globs(
 /// Run the search pipeline and return the rendered output string.
 pub fn run_search_pipeline(args: &SearchArgs) -> Result<String> {
     // When --crates is used, the first positional (crate_name) is redundant since
-    // the crate is specified by --crates. If pattern is empty and crate_name is not
+    // the crate is specified by --crates. If patterns are empty and crate_name is not
     // "self", treat crate_name as the pattern (mirrors api subcommand behavior).
     let args =
-        if args.remote.crates.is_some() && args.pattern.is_empty() && args.crate_name != "self" {
+        if args.remote.crates.is_some() && args.patterns.is_empty() && args.crate_name != "self" {
             let mut args = args.clone();
-            args.pattern = std::mem::take(&mut args.crate_name);
+            args.patterns = vec![std::mem::take(&mut args.crate_name)];
             args.crate_name = "self".to_string();
             std::borrow::Cow::Owned(args)
         } else {
@@ -355,14 +355,14 @@ pub fn run_search_pipeline(args: &SearchArgs) -> Result<String> {
     let args = args.as_ref();
 
     // Validate: need either a pattern or --methods-of
-    if args.pattern.is_empty() && args.methods_of.is_none() {
+    if args.patterns.is_empty() && args.methods_of.is_none() {
         anyhow::bail!("search requires a pattern or --methods-of <TYPE>");
     }
 
     // --methods-of: translate into pattern + exclusion flags
     if let Some(type_name) = &args.methods_of {
         let mut args = args.clone();
-        args.pattern = type_name.clone();
+        args.patterns = vec![type_name.clone()];
         args.filter.no_structs = true;
         args.filter.no_enums = true;
         args.filter.no_traits = true;
@@ -443,10 +443,11 @@ fn build_remote_context_search(args: &SearchArgs, spec: &str) -> Result<Pipeline
 
 fn run_shared_search_pipeline(ctx: &PipelineContext, args: &SearchArgs) -> Result<String> {
     let (model, same_crate, reachable) = generate_and_parse_model(ctx)?;
+    let pattern = args.pattern();
 
     let mut output = search::render_search(
         &model,
-        &args.pattern,
+        &pattern,
         &args.filter,
         args.limit.as_deref(),
         if same_crate {
@@ -474,7 +475,7 @@ fn run_shared_search_pipeline(ctx: &PipelineContext, args: &SearchArgs) -> Resul
             let sub_reachable = Some(compute_reachable_set(&sub.model));
             let sub_output = search::render_search(
                 &sub.model,
-                &args.pattern,
+                &pattern,
                 &args.filter,
                 args.limit.as_deref(),
                 None,
@@ -490,12 +491,12 @@ fn run_shared_search_pipeline(ctx: &PipelineContext, args: &SearchArgs) -> Resul
 
 /// Run the examples pipeline and return the rendered output string.
 pub fn run_examples_pipeline(args: &ExamplesArgs) -> Result<String> {
-    // When --crates is used and crate_name is not "self" and no pattern,
+    // When --crates is used and crate_name is not "self" and no patterns,
     // treat crate_name as pattern (mirrors search subcommand behavior).
     let args =
-        if args.remote.crates.is_some() && args.pattern.is_none() && args.crate_name != "self" {
+        if args.remote.crates.is_some() && args.patterns.is_empty() && args.crate_name != "self" {
             let mut args = args.clone();
-            args.pattern = Some(std::mem::take(&mut args.crate_name));
+            args.patterns = vec![std::mem::take(&mut args.crate_name)];
             args.crate_name = "self".to_string();
             std::borrow::Cow::Owned(args)
         } else {
