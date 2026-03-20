@@ -34,15 +34,17 @@ cargo brief search bevy "Material"  # → 0 results
 `bevy` re-exports via `bevy → bevy_internal → bevy_pbr`, but search doesn't
 walk this chain. Users must already know which sub-crate defines the item.
 
-### 3. Cross-crate module paths not resolved (high)
+### 3. Cross-crate module paths not resolved in local pipeline (high)
 
 ```sh
 cargo brief api bevy::pbr  # → module 'pbr' not found. Available modules: bevy
 ```
 
 `bevy::pbr` is the canonical user-facing path, but the tool only sees the
-top-level module. Need to resolve re-exported module paths across crate
-boundaries.
+top-level module. The remote API pipeline *does* have partial support via
+`cross_crate::resolve_cross_crate_module()` (lib.rs:487–527), but the local
+pipeline never enters this code path. Root cause is shared with #1: positional
+args use the local pipeline, which lacks cross-crate logic entirely.
 
 ### 4. Glob re-export items missing (high)
 
@@ -52,12 +54,12 @@ boundaries.
 # items are not collected into the parent module's reachable set
 ```
 
-Note: v0.5.1 (50f096b) fixed intra-crate glob re-exports, but the fix may
-not be recursive. A chain like `pub mod render_resource { pub use
-bind_group::*; }` where `bind_group` itself re-exports from deeper modules
-requires recursive glob expansion to surface items like `AsBindGroup`.
-Verify whether the current implementation expands only one level or walks
-the full depth.
+v0.5.1 (50f096b) fixed intra-crate glob re-exports, but **confirmed
+single-level only**: `expand_glob_reexports()` (lib.rs:747–798) collects
+direct children of the source module's root and does not recurse into deeper
+re-exports. A chain like `pub mod render_resource { pub use bind_group::*; }`
+where `bind_group` itself re-exports from deeper modules will not surface
+items like `AsBindGroup`.
 
 ### 5. Submodule direct access returns empty (medium)
 
@@ -66,7 +68,9 @@ cargo brief api bevy_render::render_resource::bind_group  # → empty output
 ```
 
 Even when the sub-crate and full module path are specified, the submodule
-renders as empty.
+renders as empty. Likely caused by #4: `render_resource` uses glob re-exports
+to pull items from `bind_group`, but glob expansion is single-level and
+doesn't populate the submodule's reachable set.
 
 ### 6. `--methods-of` is substring match — result explosion (medium)
 
@@ -119,22 +123,65 @@ WGSL shader module introspection (e.g. `forward_io` structs like
 `VertexOutput`) — not Rust API, but noted as a frequent need for bevy custom
 material workflows.
 
+## Root Cause Analysis
+
+Issues 1–5 stem from **two distinct root causes**:
+
+### A. Local pipeline lacks cross-crate logic entirely
+
+The local pipeline (`resolve_target()` → `generate_rustdoc_json()`) never
+calls `root_has_cross_crate_reexports()` or `discover_all_reexported_crates()`.
+The remote pipeline already has this wired up for both search (lib.rs:370–407)
+and API (lib.rs:459–577). Positional args route through the local pipeline,
+so umbrella crates like `bevy` get no sub-crate expansion.
+
+**Fixes #1, #2, #3** — enabling cross-crate discovery in the local pipeline
+(or unifying the two pipelines) would make positional args behave like
+`--crates`.
+
+### B. Glob re-export expansion is single-level
+
+`expand_glob_reexports()` (lib.rs:747–798) collects only direct children
+of the source module root. Nested re-export chains (`pub use submod::*` where
+`submod` itself re-exports deeper) are not followed.
+
+**Fixes #4, #5** — recursive glob expansion would surface deeply re-exported
+items like `AsBindGroup`.
+
+### Structural concern: local/remote pipeline divergence
+
+The local and remote pipelines operate on different semantic models:
+- **Local**: `CargoMetadataInfo` + `ResolvedTarget`, no cross-crate, no caching
+- **Remote**: `WorkspaceDir` + bare strings, cross-crate discovery, JSON/bincode caching
+
+This divergence means features added to one pipeline don't automatically
+appear in the other — which is how #1–#3 happened. A longer-term unification
+(shared `PipelineInput` + caching abstraction) would prevent this class of
+bugs.
+
 ## Implementation Note
 
-Issues 1–5 share a common theme: the visibility/reachability engine doesn't
-consistently follow re-export chains across crate boundaries or through
-recursive glob expansions. Rather than patching each symptom individually,
-this warrants a holistic revision of the re-export resolution logic to ensure:
+Rather than patching each symptom individually, this warrants addressing
+the two root causes and considering pipeline unification:
 
-- Workspace member expansion works uniformly (positional and `--crates`)
-- Cross-crate `pub use` chains are walked transitively
-- Glob re-exports (`pub use submod::*`) are expanded recursively, not just
-  one level deep
-- The resulting reachable set is the same regardless of which entry point
-  the user specifies (umbrella crate vs sub-crate vs module path)
+- **Root cause A**: Enable cross-crate discovery in local pipeline, or
+  unify local/remote into a shared pipeline that always has cross-crate
+  support
+- **Root cause B**: Make glob re-export expansion recursive
+- **Structural**: Shared caching/expansion code path so local and remote
+  can't silently diverge
 
 ## Priority
 
-Issues 1–5 are the most impactful — they all stem from the tool not following
-re-export chains / workspace member relationships for umbrella crates. A
-unified revision of re-export resolution would address most of them.
+**Root cause A** (#1–#3) is highest priority — it's the most visible gap
+and the remote pipeline already has the logic.
+
+**Root cause B** (#4–#5) is next — requires recursive glob expansion.
+
+**#6, #8** are independent bugs (substring matching, zero-result headers)
+that can be fixed separately.
+
+## Related
+
+- 260320-refactor-unify-local-remote-pipeline: pipeline unification that
+  structurally resolves root cause A (Phase 3)
