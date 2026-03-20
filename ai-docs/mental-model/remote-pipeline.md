@@ -1,14 +1,15 @@
 # Remote Pipeline
 
 ## Entry Points
-- `src/lib.rs` — `run_remote_pipeline()` (private helper), `render_remote_normal()` (extracted helper).
+- `src/lib.rs` — `run_remote_api_pipeline()` and `run_remote_search_pipeline()` (private helpers), `render_remote_normal()` (extracted helper).
 - `src/remote.rs` — `parse_crate_spec()`, `resolve_workspace()`, `clean_cache()`, `WorkspaceDir`.
 - `src/cross_crate.rs` — `resolve_cross_crate_module()`, `discover_all_reexported_crates()`, `root_has_cross_crate_reexports()`.
 
 ## Module Contracts
-- `run_remote_pipeline()` guarantees: `WorkspaceDir` is held alive for the entire function scope. Manifest path is an owned `String` — no borrow chain. After building the primary model, `root_has_cross_crate_reexports()` is called once and the result gates all cross-crate branches.
+- `run_remote_api_pipeline()` guarantees: `WorkspaceDir` is held alive for the entire function scope. Manifest path is an owned `String` — no borrow chain. After building the primary model, `root_has_cross_crate_reexports()` is called once and the result gates all cross-crate branches.
 - Remote pipeline uses `document_private_items=true` for both the primary crate and sub-crates resolved via `cross_crate`. This deviates from the old contract in `visibility.md` — private modules are included so facade crate re-export chains remain traversable.
-- `run_remote_pipeline()` has four mutually exclusive sub-paths evaluated in order: (1) search+cross-crate, (2) module-target+cross-crate, (3) recursive+cross-crate, (4) normal. Only the first matching path executes.
+- `run_remote_api_pipeline()` has three mutually exclusive sub-paths evaluated in order: (1) module-target+cross-crate, (2) recursive+cross-crate, (3) normal. Only the first matching path executes.
+- `run_examples_pipeline` remote path does not call `generate_rustdoc_json_cached` at all — it uses `resolve::find_dep_source_root` to locate the crate source dir on disk, then reads `.rs` files directly. No model is built.
 - `resolve_workspace(spec, features, no_cache)` returns `(WorkspaceDir, Option<String>)`. The second element is the resolved exact version string (e.g. `"1.0.200"`). Cached workspaces persist at `cache_dir()/name[version]` (or `name[version]+feat1+feat2` with alpha-sorted features). Cargo reuses build artifacts on subsequent calls. With `no_cache`, version resolution is best-effort and the workspace is a `TempDir`.
 - `clean_cache(spec)` with a non-empty spec glob-matches all directories starting with `name[` prefix and also removes `versions/{name}.json`. Empty spec removes all of `cache_dir()`. Prints removed paths and sizes to stderr.
 - `generate_rustdoc_json_cached()` skips `cargo rustdoc` if the `.json` file already exists in `target/doc/`. Only safe for remote pipelines where versions are locked.

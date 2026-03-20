@@ -160,6 +160,7 @@ alternatives considered, and trade-offs — focus on _why_ this approach was cho
 
 ## Recent Work
 
+- v0.5.1: `examples` subcommand — list/grep mode, `--tests`/`--benches` scope flags, smart-case, dynamic line numbers
 - v0.5.0: CLI subcommand refactor — `api`/`search`/`examples` subcommands, smart-case search, comma-separated OR matching
 - v0.4.1+: `--verbose` / `-v` flag for pipeline progress on stderr
 - v0.4.1: version-normalized cache dirs, crates.io API version resolution, `--clean` glob matching
@@ -169,11 +170,11 @@ alternatives considered, and trade-offs — focus on _why_ this approach was cho
 ## Workspace Reference
 
 - Crate name: `cargo-brief` (binary: `cargo-brief`, lib: `cargo_brief`)
-- Entry: `src/lib.rs` → `run_api_pipeline()` + `run_search_pipeline()`, `src/main.rs` → subcommand dispatch
+- Entry: `src/lib.rs` → `run_api_pipeline()` + `run_search_pipeline()` + `run_examples_pipeline()`, `src/main.rs` → subcommand dispatch
 - CLI types: `ApiArgs`, `SearchArgs`, `ExamplesArgs` + shared `TargetArgs`/`RemoteArgs`/`FilterArgs`/`GlobalArgs`
-- Modules: `cli`, `cross_crate`, `remote`, `resolve`, `rustdoc_json`, `model`, `render`, `search`
+- Modules: `cli`, `cross_crate`, `examples`, `remote`, `resolve`, `rustdoc_json`, `model`, `render`, `search`
 - Test fixture: `test_fixture/` (sample crate with all item types)
-- Integration tests: `tests/integration.rs` (109 tests)
+- Integration tests: `tests/integration.rs` (117 tests)
 
 ## Documented Dependencies
 

@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
@@ -13,6 +14,8 @@ pub struct CargoMetadataInfo {
     pub current_package_manifest_dir: Option<PathBuf>,
     /// The target directory for build artifacts.
     pub target_dir: PathBuf,
+    /// Manifest directory for each workspace package (name → dir).
+    pub package_manifest_dirs: HashMap<String, PathBuf>,
 }
 
 /// A resolved target for the pipeline.
@@ -51,6 +54,7 @@ pub fn load_cargo_metadata(manifest_path: Option<&str>) -> Result<CargoMetadataI
     let mut workspace_packages = Vec::new();
     let mut current_package = None;
     let mut current_package_manifest_dir = None;
+    let mut package_manifest_dirs = HashMap::new();
 
     if let Some(packages) = metadata["packages"].as_array() {
         for pkg in packages {
@@ -63,6 +67,9 @@ pub fn load_cargo_metadata(manifest_path: Option<&str>) -> Result<CargoMetadataI
                     let manifest_canonical = manifest_dir
                         .canonicalize()
                         .unwrap_or(manifest_dir.to_path_buf());
+
+                    package_manifest_dirs.insert(name.to_string(), manifest_canonical.clone());
+
                     if manifest_canonical == cwd_canonical {
                         current_package = Some(name.to_string());
                         current_package_manifest_dir = Some(manifest_canonical);
@@ -77,6 +84,7 @@ pub fn load_cargo_metadata(manifest_path: Option<&str>) -> Result<CargoMetadataI
         current_package,
         current_package_manifest_dir,
         target_dir: PathBuf::from(target_dir),
+        package_manifest_dirs,
     })
 }
 
@@ -303,6 +311,45 @@ fn current_package_or_error(metadata: &CargoMetadataInfo) -> Result<String> {
     })
 }
 
+/// Find a dependency's source root from cargo metadata (with deps).
+/// Runs `cargo metadata` WITHOUT `--no-deps` to include all resolved dependencies,
+/// then finds the package matching `crate_name` (with hyphen/underscore normalization).
+pub fn find_dep_source_root(manifest_path: &str, crate_name: &str) -> Result<PathBuf> {
+    let output = Command::new("cargo")
+        .args([
+            "metadata",
+            "--format-version=1",
+            "--manifest-path",
+            manifest_path,
+        ])
+        .output()
+        .context("Failed to run cargo metadata (with deps)")?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        bail!("cargo metadata failed:\n{stderr}");
+    }
+
+    let metadata: serde_json::Value =
+        serde_json::from_slice(&output.stdout).context("Failed to parse cargo metadata")?;
+
+    let normalized_query = crate_name.replace('-', "_");
+
+    if let Some(packages) = metadata["packages"].as_array() {
+        for pkg in packages {
+            if let Some(name) = pkg["name"].as_str()
+                && name.replace('-', "_") == normalized_query
+                && let Some(manifest) = pkg["manifest_path"].as_str()
+            {
+                let manifest_dir = Path::new(manifest).parent().unwrap_or(Path::new(""));
+                return Ok(manifest_dir.to_path_buf());
+            }
+        }
+    }
+
+    bail!("Package '{crate_name}' not found in dependency tree of '{manifest_path}'")
+}
+
 /// Find a package in the workspace, normalizing hyphens/underscores.
 fn find_workspace_package(packages: &[String], query: &str) -> Option<String> {
     let normalized = query.replace('-', "_");
@@ -322,6 +369,7 @@ mod tests {
             current_package: current.map(|s| s.to_string()),
             current_package_manifest_dir: None,
             target_dir: PathBuf::from("/tmp/target"),
+            package_manifest_dirs: HashMap::new(),
         }
     }
 
@@ -335,6 +383,7 @@ mod tests {
             current_package: current.map(|s| s.to_string()),
             current_package_manifest_dir: Some(manifest_dir.to_path_buf()),
             target_dir: PathBuf::from("/tmp/target"),
+            package_manifest_dirs: HashMap::new(),
         }
     }
 

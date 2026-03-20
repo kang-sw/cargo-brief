@@ -1,4 +1,4 @@
-use cargo_brief::cli::{ApiArgs, FilterArgs, GlobalArgs, RemoteArgs, TargetArgs};
+use cargo_brief::cli::{ApiArgs, ExamplesArgs, FilterArgs, GlobalArgs, RemoteArgs, TargetArgs};
 use cargo_brief::model::{CrateModel, compute_reachable_set};
 use cargo_brief::render::render_module_api;
 use cargo_brief::resolve;
@@ -1918,5 +1918,118 @@ fn test_glob_reexport_api_renders_items() {
     assert!(
         output.contains("GlobStruct"),
         "API render should include GlobStruct via glob re-export:\n{output}"
+    );
+}
+
+// === Examples Subcommand Tests ===
+
+fn default_examples_args() -> ExamplesArgs {
+    ExamplesArgs {
+        crate_name: "test-fixture".to_string(),
+        pattern: None,
+        remote: RemoteArgs {
+            crates: None,
+            features: None,
+            no_cache: false,
+            clean: None,
+        },
+        global: GlobalArgs {
+            toolchain: "nightly".to_string(),
+            verbose: false,
+        },
+        manifest_path: Some("test_fixture/Cargo.toml".to_string()),
+        context: "2".to_string(),
+        tests: None,
+        benches: None,
+    }
+}
+
+#[test]
+fn test_examples_list_mode() {
+    let args = default_examples_args();
+    let output = cargo_brief::run_examples_pipeline(&args).unwrap();
+    assert!(
+        output.contains("@examples/example_usage.rs"),
+        "Should list the example file:\n{output}"
+    );
+    assert!(
+        output.contains("Example demonstrating basic usage"),
+        "Should include //! doc comment text:\n{output}"
+    );
+    assert!(
+        output.contains("// examples for"),
+        "Should have examples header:\n{output}"
+    );
+    assert!(
+        output.contains("// root:"),
+        "Should have root path header:\n{output}"
+    );
+}
+
+#[test]
+fn test_examples_grep_mode() {
+    let mut args = default_examples_args();
+    args.pattern = Some("PubStruct".to_string());
+    let output = cargo_brief::run_examples_pipeline(&args).unwrap();
+    assert!(
+        output.contains("@examples/example_usage.rs"),
+        "Should show file with matches:\n{output}"
+    );
+    assert!(
+        output.contains('*'),
+        "Should have * markers on matching lines:\n{output}"
+    );
+    assert!(
+        output.contains("PubStruct"),
+        "Should contain the matched pattern:\n{output}"
+    );
+}
+
+#[test]
+fn test_examples_grep_no_match() {
+    let mut args = default_examples_args();
+    args.pattern = Some("nonexistent_xyzzy_pattern".to_string());
+    let output = cargo_brief::run_examples_pipeline(&args).unwrap();
+    assert!(
+        output.contains("no matches"),
+        "Should indicate no matches:\n{output}"
+    );
+}
+
+#[test]
+fn test_examples_grep_context_format() {
+    let mut args = default_examples_args();
+    args.pattern = Some("pub_method".to_string());
+    args.context = "1:1".to_string();
+    let output = cargo_brief::run_examples_pipeline(&args).unwrap();
+    // Should have the match line with * and context lines with space
+    assert!(
+        output.contains('*'),
+        "Should have * on match line:\n{output}"
+    );
+    // Line numbers should be present
+    assert!(
+        output.contains(':'),
+        "Should have line numbers with colons:\n{output}"
+    );
+}
+
+#[test]
+fn test_examples_smart_case() {
+    let mut args = default_examples_args();
+    // Lowercase pattern → case-insensitive
+    args.pattern = Some("pubstruct".to_string());
+    let output = cargo_brief::run_examples_pipeline(&args).unwrap();
+    assert!(
+        output.contains("PubStruct"),
+        "Lowercase pattern should match case-insensitively:\n{output}"
+    );
+
+    // Uppercase pattern → case-sensitive
+    args.pattern = Some("PUBSTRUCT".to_string());
+    let output = cargo_brief::run_examples_pipeline(&args).unwrap();
+    assert!(
+        output.contains("no matches"),
+        "Uppercase pattern should not match:\n{output}"
     );
 }

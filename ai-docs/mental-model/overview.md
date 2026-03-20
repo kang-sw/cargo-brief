@@ -1,13 +1,14 @@
 # Overview
 
 ## Entry Points
-- `src/lib.rs` — `run_api_pipeline(&ApiArgs)` and `run_search_pipeline(&SearchArgs)` are the two pipeline entry points; start here.
-- `src/main.rs` — CLI dispatch only: parses `BriefCommand` enum and dispatches to the two pipeline functions (dual invocation: `cargo brief <sub>` vs `cargo-brief <sub>`).
+- `src/lib.rs` — `run_api_pipeline(&ApiArgs)`, `run_search_pipeline(&SearchArgs)`, and `run_examples_pipeline(&ExamplesArgs)` are the three pipeline entry points; start here.
+- `src/main.rs` — CLI dispatch only: parses `BriefCommand` enum and dispatches to the three pipeline functions (dual invocation: `cargo brief <sub>` vs `cargo-brief <sub>`).
 
 ## Module Contracts
-- `lib.rs` guarantees: two public pipeline functions. `run_api_pipeline` has a local path (metadata → resolve → rustdoc → model → same_crate → render → glob expand) and a remote path (`run_remote_api_pipeline`, three sub-paths: module-target+cross-crate, recursive+cross-crate, normal). `run_search_pipeline` mirrors this structure with `run_remote_search_pipeline`. No stage within a path may be reordered.
+- `lib.rs` guarantees: three public pipeline functions. `run_api_pipeline` has a local path (metadata → resolve → rustdoc → model → same_crate → render → glob expand) and a remote path (`run_remote_api_pipeline`, three sub-paths: module-target+cross-crate, recursive+cross-crate, normal). `run_search_pipeline` mirrors this structure with `run_remote_search_pipeline`. `run_examples_pipeline` is disk-only — no rustdoc JSON, no model building; it reads `.rs` files directly from `examples/`, `tests/`, and `benches/` directories. No stage within a path may be reordered.
 - `resolve`, `rustdoc_json`, `remote`, and `cross_crate` are pure utilities with zero internal dependencies on each other. They can be tested in isolation.
 - `model` depends only on `rustdoc_types` (external). `render` depends on `model` + `cli`.
+- `examples` depends only on `cli` (for `ExamplesArgs`). It has no dependency on `model`, `render`, `rustdoc_json`, or `resolve`.
 - `lib.rs` is the sole orchestrator — all cross-module data flow passes through it.
 - `cross_crate` depends on `rustdoc_json` (for `generate_rustdoc_json_cached` / `parse_rustdoc_json_cached`) and `model`. It never calls `remote` or `resolve`.
 

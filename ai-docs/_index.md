@@ -32,7 +32,7 @@ visibility is always `pub`-only). This makes external dep support architecturall
 ```
 cargo brief api [target] [module_path] [OPTIONS]
 cargo brief search [target] <pattern> [OPTIONS]
-cargo brief examples [target] [pattern] [OPTIONS]   # stub
+cargo brief examples [target] [pattern] [OPTIONS]
 ```
 
 ### Subcommands
@@ -45,7 +45,9 @@ Pattern is positional. Owns: `--limit`, `--methods-of`.
 Smart-case: all-lowercase = case-insensitive, any uppercase = case-sensitive.
 Comma-separated = OR groups, space-separated = AND within group.
 
-**`examples`** — Stub (not yet implemented).
+**`examples`** — Grep example/test/bench source files from a crate.
+List mode (no pattern) shows files with `//!` doc comments; grep mode shows matching
+lines with context and `*` markers. `--tests [DEPTH]` / `--benches [DEPTH]` extend scope.
 
 ### Target Resolution (api subcommand)
 | Syntax              | Resolves to                                     |
@@ -86,7 +88,8 @@ Comma-separated = OR groups, space-separated = AND within group.
 
 ```
 src/
-  lib.rs           — re-exports all modules, run_api_pipeline() + run_search_pipeline() entry points
+  lib.rs           — re-exports all modules, run_api_pipeline() + run_search_pipeline() + run_examples_pipeline() entry points
+  examples.rs      — example/test/bench file scanning, list mode and grep mode rendering
   main.rs          — CLI arg parsing, subcommand dispatch
   cli.rs           — Subcommand types: ApiArgs, SearchArgs, ExamplesArgs + shared TargetArgs/RemoteArgs/FilterArgs/GlobalArgs
   cross_crate.rs   — cross-crate module following for facade crates
@@ -123,9 +126,9 @@ Parsed via `rustdoc-types` 0.57. Post-macro-expansion output.
 
 ---
 
-## Operational State (v0.4.1)
+## Operational State (v0.5.1)
 
-- Core pipeline complete. All item types supported. 105 integration tests.
+- Core pipeline complete. All item types supported. 117 integration tests.
 - Flexible package name resolution: `self`, `crate::module`, file path→module. Bare names always resolve as package.
 - Remote crate support: `--crates <spec>` fetches any crate from crates.io. Workspaces cached at `~/.cache/cargo-brief/crates/` with version-normalized directory names (`name[version]`). Exact version resolved via crates.io API with 24h cache; bare specs auto-update.
 - **Cross-crate module following**: Facade crates (bevy, axum) that re-export from sub-crates now support module targeting (`bevy ecs`), `--search`, and `--recursive`. Re-export chains are followed automatically (max 5 hops).
@@ -139,6 +142,7 @@ Parsed via `rustdoc-types` 0.57. Post-macro-expansion output.
 - Output density: `--no-docs`, `--doc-lines N`, `--compact` for token-budget control.
 - Attribute rendering: `#[deprecated]`, `#[non_exhaustive]` by default; `--verbose-metadata` adds `#[repr]`, `#[must_use]`, etc.
 - Re-export kind annotations: `pub use` lines show `// struct`, `// trait`, etc.
+- **Examples subcommand**: `cargo brief examples <target> [pattern]` greps example/test/bench source files. List mode (no pattern) shows files with `//!` docs; grep mode shows matches with `*` markers, dynamic line numbers, context control. `--tests [DEPTH]` / `--benches [DEPTH]` extend scope. Smart-case matching.
 - Dependencies: `clap` 4, `rustdoc-types` 0.57, `serde_json` 1, `anyhow` 1, `tempfile` 3, `bincode` 1, `semver` 1, `ureq` 2.
 - Test fixture (`test_fixture/`) covers all supported item types.
 
@@ -178,6 +182,7 @@ Domain-oriented operational knowledge in `ai-docs/mental-model/`:
 ## Next Up (priority order)
 
 1. **`tickets/idea/260316-feat-output-summary-mode.md`** — P2: `--summary` TOC mode
+   (Examples subcommand completed — `tickets/done/260319-feat-examples-subcommand.md`)
 
 ## Backlog
 

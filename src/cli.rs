@@ -87,7 +87,23 @@ OUTPUT:
     variant module::Enum::Variant(T1, T2);")]
     Search(SearchArgs),
 
-    /// Grep examples from a crate (not yet implemented)
+    /// Grep example/test/bench source files from a crate
+    #[command(after_help = "\
+EXAMPLES:
+  # List example files with their module docs
+  cargo brief examples self
+  cargo brief examples --crates tokio@1
+
+  # Grep for a pattern in example files
+  cargo brief examples self spawn
+  cargo brief examples --crates hecs spawn_at --context 3
+
+  # Include tests and benches directories
+  cargo brief examples --crates serde --tests --benches derive
+
+MATCHING:
+  Smart-case: all-lowercase pattern = case-insensitive, any uppercase = case-sensitive.
+  Without a pattern, lists files with their //! doc comments.")]
     Examples(ExamplesArgs),
 }
 
@@ -291,14 +307,14 @@ pub struct SearchArgs {
     pub methods_of: Option<String>,
 }
 
-/// Arguments for the `examples` subcommand (stub).
+/// Arguments for the `examples` subcommand.
 #[derive(Args, Debug, Clone)]
 pub struct ExamplesArgs {
     /// Target crate
     #[arg(value_name = "TARGET", default_value = "self")]
     pub crate_name: String,
 
-    /// Pattern to grep for
+    /// Pattern to grep for (omit for list mode)
     pub pattern: Option<String>,
 
     #[command(flatten)]
@@ -311,11 +327,15 @@ pub struct ExamplesArgs {
     #[arg(long, help_heading = "Local Workspace")]
     pub manifest_path: Option<String>,
 
-    /// Lines of context around matches
+    /// Lines of context around matches: N or BEFORE:AFTER
     #[arg(long, default_value = "2")]
     pub context: String,
 
-    /// Include tests/ directory in search
-    #[arg(long)]
-    pub include_tests: bool,
+    /// Include tests/ directory [default depth: unlimited]
+    #[arg(long, num_args(0..=1), default_missing_value = "999", value_name = "DEPTH")]
+    pub tests: Option<u32>,
+
+    /// Include benches/ directory [default depth: unlimited]
+    #[arg(long, num_args(0..=1), default_missing_value = "999", value_name = "DEPTH")]
+    pub benches: Option<u32>,
 }

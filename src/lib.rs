@@ -1,5 +1,6 @@
 pub mod cli;
 pub mod cross_crate;
+pub mod examples;
 pub mod model;
 pub mod remote;
 pub mod render;
@@ -18,7 +19,7 @@ use std::path::Path;
 use anyhow::{Context, Result};
 use rustdoc_types::{Id, ItemEnum, Visibility};
 
-use cli::{ApiArgs, FilterArgs, SearchArgs};
+use cli::{ApiArgs, ExamplesArgs, FilterArgs, SearchArgs};
 use model::{CrateModel, compute_reachable_set};
 
 /// Result of glob re-export expansion. Contains both the item names (for Phase 1
@@ -230,6 +231,102 @@ pub fn run_search_pipeline(args: &SearchArgs) -> Result<String> {
         reachable.as_ref(),
     );
     Ok(output)
+}
+
+/// Run the examples pipeline and return the rendered output string.
+pub fn run_examples_pipeline(args: &ExamplesArgs) -> Result<String> {
+    // When --crates is used and crate_name is not "self" and no pattern,
+    // treat crate_name as pattern (mirrors search subcommand behavior).
+    let args =
+        if args.remote.crates.is_some() && args.pattern.is_none() && args.crate_name != "self" {
+            let mut args = args.clone();
+            args.pattern = Some(std::mem::take(&mut args.crate_name));
+            args.crate_name = "self".to_string();
+            std::borrow::Cow::Owned(args)
+        } else {
+            std::borrow::Cow::Borrowed(args)
+        };
+    let args = args.as_ref();
+
+    if let Some(spec) = &args.remote.crates {
+        // Remote path
+        let (name, _) = remote::parse_crate_spec(spec);
+        if args.global.verbose {
+            eprintln!("[cargo-brief] Resolving workspace for '{name}'...");
+        }
+        let (workspace, resolved_version) =
+            remote::resolve_workspace(spec, None, args.remote.no_cache)
+                .with_context(|| format!("Failed to create workspace for '{name}'"))?;
+
+        let manifest_path = workspace
+            .path()
+            .join("Cargo.toml")
+            .to_string_lossy()
+            .into_owned();
+
+        if args.global.verbose {
+            eprintln!("[cargo-brief] Finding source root for '{name}'...");
+        }
+        let source_root = resolve::find_dep_source_root(&manifest_path, &name)
+            .with_context(|| format!("Failed to find source root for '{name}'"))?;
+
+        let version =
+            resolved_version.or_else(|| remote::resolve_crate_version(workspace.path(), &name));
+        let crate_display = match version {
+            Some(v) => format!("{name}[{v}]"),
+            None => name.clone(),
+        };
+
+        Ok(examples::render_examples(
+            &source_root,
+            &crate_display,
+            args,
+        ))
+    } else {
+        // Local path
+        let metadata = resolve::load_cargo_metadata(args.manifest_path.as_deref())
+            .context("Failed to load cargo metadata")?;
+
+        let (pkg_name, source_root) = if args.crate_name == "self" {
+            let pkg = metadata.current_package.as_ref().ok_or_else(|| {
+                anyhow::anyhow!(
+                    "Cannot resolve 'self': no package found for the current directory."
+                )
+            })?;
+            let dir = metadata
+                .package_manifest_dirs
+                .get(pkg)
+                .cloned()
+                .or(metadata.current_package_manifest_dir.clone())
+                .ok_or_else(|| {
+                    anyhow::anyhow!("Cannot find manifest directory for package '{pkg}'")
+                })?;
+            (pkg.clone(), dir)
+        } else {
+            // Look up named package in workspace
+            let normalized = args.crate_name.replace('-', "_");
+            let found = metadata
+                .package_manifest_dirs
+                .iter()
+                .find(|(k, _)| k.replace('-', "_") == normalized);
+            match found {
+                Some((name, dir)) => (name.clone(), dir.clone()),
+                None => {
+                    anyhow::bail!(
+                        "Package '{}' not found in workspace. Available: {}",
+                        args.crate_name,
+                        metadata.workspace_packages.join(", ")
+                    );
+                }
+            }
+        };
+
+        if args.global.verbose {
+            eprintln!("[cargo-brief] Scanning examples for '{pkg_name}'...");
+        }
+
+        Ok(examples::render_examples(&source_root, &pkg_name, args))
+    }
 }
 
 /// Run the remote search pipeline.

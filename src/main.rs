@@ -23,9 +23,13 @@ fn main() -> Result<()> {
             let output = cargo_brief::run_search_pipeline(args)?;
             print!("{output}");
         }
-        BriefCommand::Examples(_) => {
-            eprintln!("error: 'examples' subcommand not yet implemented");
-            std::process::exit(1);
+        BriefCommand::Examples(args) => {
+            if let Some(spec) = &args.remote.clean {
+                cargo_brief::clean_cache(spec)?;
+                return Ok(());
+            }
+            let output = cargo_brief::run_examples_pipeline(args)?;
+            print!("{output}");
         }
     }
     Ok(())
