@@ -1,7 +1,8 @@
 ---
 title: "Multi-pattern positional args for search/examples"
-status: wip
+status: done
 started: 2026-03-21
+completed: 2026-03-21
 ---
 
 # Multi-pattern positional args for search/examples
@@ -38,3 +39,12 @@ empty Vec means no pattern (used with `--methods-of` alone).
 ## Complexity
 
 Low. CLI arg type change + join at call site. No pipeline changes.
+
+### Result (71dc666) - 26-03-21
+
+Implemented as designed. `SearchArgs.patterns` and `ExamplesArgs.patterns` are
+`Vec<String>` with `trailing_var_arg = true`. Helper methods `pattern()` join
+with space. All 117 integration tests pass. No pipeline changes needed.
+
+Spawned follow-up ticket: `idea/260321-feat-search-pattern-dsl.md` for
+operator-prefixed patterns (`-term`, `+term`) behind `--` separator.
