@@ -14,7 +14,7 @@ pub fn clean_cache(spec: &str) -> anyhow::Result<()> {
 }
 
 use std::collections::{HashMap, HashSet};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
 use rustdoc_types::{Id, ItemEnum, Visibility};
@@ -31,13 +31,76 @@ struct GlobExpansionResult {
     source_models: HashMap<String, CrateModel>,
 }
 
+/// Shared context produced after target resolution, consumed by api/search pipelines.
+struct PipelineContext {
+    manifest_path: Option<String>,
+    target_dir: PathBuf,
+    package_name: String,
+    module_path: Option<String>,
+    /// Observer package for same-crate detection. None → always external view.
+    observer_package: Option<String>,
+    toolchain: String,
+    verbose: bool,
+    /// Skip cargo rustdoc if JSON exists. True for non-workspace-member crates.
+    use_cache: bool,
+    /// Pre-computed crate header with version + features (remote api only).
+    crate_header: Option<String>,
+    /// Holds the remote workspace alive (TempDir drops on scope exit).
+    _workspace: Option<remote::WorkspaceDir>,
+}
+
+/// Generate rustdoc JSON, parse it (bincode-cached), build CrateModel, compute visibility.
+fn generate_and_parse_model(
+    ctx: &PipelineContext,
+) -> Result<(CrateModel, bool, Option<HashSet<Id>>)> {
+    if ctx.verbose {
+        eprintln!(
+            "[cargo-brief] Running cargo rustdoc for '{}'...",
+            ctx.package_name
+        );
+    }
+    let json_path = rustdoc_json::generate_rustdoc_json(
+        &ctx.package_name,
+        &ctx.toolchain,
+        ctx.manifest_path.as_deref(),
+        true, // always document private items
+        &ctx.target_dir,
+        ctx.verbose,
+        ctx.use_cache,
+    )
+    .with_context(|| format!("Failed to generate rustdoc JSON for '{}'", ctx.package_name))?;
+
+    if ctx.verbose {
+        eprintln!("[cargo-brief] Parsing rustdoc JSON...");
+    }
+    let krate = rustdoc_json::parse_rustdoc_json_cached(&json_path)
+        .with_context(|| format!("Failed to parse rustdoc JSON at '{}'", json_path.display()))?;
+    let model = CrateModel::from_crate(krate);
+
+    let same_crate = match &ctx.observer_package {
+        Some(obs) => obs == &ctx.package_name || obs.replace('-', "_") == model.crate_name(),
+        None => false,
+    };
+    let reachable = if !same_crate {
+        Some(compute_reachable_set(&model))
+    } else {
+        None
+    };
+
+    Ok((model, same_crate, reachable))
+}
+
 /// Run the API extraction pipeline and return the rendered output string.
 pub fn run_api_pipeline(args: &ApiArgs) -> Result<String> {
-    if let Some(spec) = &args.remote.crates {
-        return run_remote_api_pipeline(args, spec);
-    }
+    let ctx = if let Some(spec) = &args.remote.crates {
+        build_remote_context_api(args, spec)?
+    } else {
+        build_local_context_api(args)?
+    };
+    run_shared_api_pipeline(&ctx, args)
+}
 
-    // Step 0: Load cargo metadata and resolve target
+fn build_local_context_api(args: &ApiArgs) -> Result<PipelineContext> {
     if args.global.verbose {
         eprintln!(
             "[cargo-brief] Resolving target '{}'...",
@@ -54,76 +117,224 @@ pub fn run_api_pipeline(args: &ApiArgs) -> Result<String> {
     )
     .context("Failed to resolve target")?;
 
-    // Step 1: Generate rustdoc JSON
-    if args.global.verbose {
-        eprintln!(
-            "[cargo-brief] Running cargo rustdoc for '{}'...",
-            resolved.package_name
-        );
-    }
-    let json_path = rustdoc_json::generate_rustdoc_json(
-        &resolved.package_name,
-        &args.global.toolchain,
-        args.target.manifest_path.as_deref(),
-        true, // always document private items for visibility filtering
-        &metadata.target_dir,
-        args.global.verbose,
-    )
-    .with_context(|| {
-        format!(
-            "Failed to generate rustdoc JSON for crate '{}'",
-            resolved.package_name
-        )
-    })?;
-
-    // Step 2: Parse JSON
-    if args.global.verbose {
-        eprintln!("[cargo-brief] Parsing rustdoc JSON...");
-    }
-    let krate = rustdoc_json::parse_rustdoc_json(&json_path)
-        .with_context(|| format!("Failed to parse rustdoc JSON at '{}'", json_path.display()))?;
-
-    // Step 3: Build model
-    let model = CrateModel::from_crate(krate);
-
-    // Step 4: Determine if observer is in the same crate
-    let observer_crate = args
+    let observer_package = args
         .target
         .at_package
-        .as_deref()
-        .or(metadata.current_package.as_deref());
-    let same_crate = match observer_crate {
-        Some(obs) => obs == resolved.package_name || obs.replace('-', "_") == model.crate_name(),
-        None => false,
-    };
-    let reachable = if !same_crate {
-        Some(compute_reachable_set(&model))
+        .clone()
+        .or(metadata.current_package.clone());
+
+    Ok(PipelineContext {
+        manifest_path: args.target.manifest_path.clone(),
+        target_dir: metadata.target_dir,
+        package_name: resolved.package_name,
+        module_path: resolved.module_path,
+        observer_package,
+        toolchain: args.global.toolchain.clone(),
+        verbose: args.global.verbose,
+        use_cache: false, // workspace member — always regenerate
+        crate_header: None,
+        _workspace: None,
+    })
+}
+
+fn build_remote_context_api(args: &ApiArgs, spec: &str) -> Result<PipelineContext> {
+    // When --crates is used, the first positional arg (crate_name) may actually be
+    // a module path (e.g., `cargo brief api --crates bevy ecs` → crate_name="ecs").
+    // Merge it into module_path if it's not "self".
+    let module_path = if args.target.crate_name != "self" && args.target.module_path.is_none() {
+        Some(args.target.crate_name.clone())
     } else {
-        None
+        args.target.module_path.clone()
     };
 
-    // Step 5: Render
+    let (name, _) = remote::parse_crate_spec(spec);
+    if args.global.verbose {
+        eprintln!("[cargo-brief] Resolving workspace for '{name}'...");
+    }
+    let (workspace, resolved_version) =
+        remote::resolve_workspace(spec, args.remote.features.as_deref(), args.remote.no_cache)
+            .with_context(|| format!("Failed to create workspace for '{name}'"))?;
+
+    let manifest_path = workspace
+        .path()
+        .join("Cargo.toml")
+        .to_string_lossy()
+        .into_owned();
+
+    let metadata = resolve::load_cargo_metadata(Some(&manifest_path))
+        .context("Failed to load cargo metadata for remote crate")?;
+
+    let crate_header = build_remote_crate_header(
+        &name,
+        resolved_version.as_deref(),
+        workspace.path(),
+        args.remote.features.as_deref(),
+    );
+
+    Ok(PipelineContext {
+        manifest_path: Some(manifest_path),
+        target_dir: metadata.target_dir,
+        package_name: name,
+        module_path,
+        observer_package: None, // remote → always external view
+        toolchain: args.global.toolchain.clone(),
+        verbose: args.global.verbose,
+        use_cache: true, // remote — versions are locked
+        crate_header,
+        _workspace: Some(workspace),
+    })
+}
+
+fn run_shared_api_pipeline(ctx: &PipelineContext, args: &ApiArgs) -> Result<String> {
+    let (model, same_crate, reachable) = generate_and_parse_model(ctx)?;
+    let has_cross_crate = cross_crate::root_has_cross_crate_reexports(&model);
+
+    let mut output = if let Some(ref module_path) = ctx.module_path {
+        // Module targeting — try local first, then cross-crate resolution
+        if model.find_module(module_path).is_some() {
+            render_and_expand_globs(
+                &model,
+                Some(module_path),
+                args,
+                ctx,
+                same_crate,
+                reachable.as_ref(),
+            )?
+        } else {
+            // Cross-crate module resolution
+            if ctx.verbose {
+                eprintln!(
+                    "[cargo-brief] Module '{module_path}' not found locally, trying cross-crate resolution..."
+                );
+            }
+            if let Some(resolution) = cross_crate::resolve_cross_crate_module(
+                &model,
+                module_path,
+                &ctx.toolchain,
+                ctx.manifest_path.as_deref(),
+                &ctx.target_dir,
+                ctx.verbose,
+            ) {
+                let sub_reachable = Some(compute_reachable_set(&resolution.model));
+                let mut output = render::render_module_api(
+                    &resolution.model,
+                    resolution.inner_module_path.as_deref(),
+                    args,
+                    None,
+                    false,
+                    sub_reachable.as_ref(),
+                );
+                let result = expand_glob_reexports(
+                    &resolution.model,
+                    resolution.inner_module_path.as_deref(),
+                    &ctx.toolchain,
+                    ctx.manifest_path.as_deref(),
+                    &ctx.target_dir,
+                    ctx.verbose,
+                    ctx.use_cache,
+                );
+                apply_glob_expansions(&mut output, &result, args.expand_glob, &args.filter);
+                output
+            } else {
+                // Fall through to normal render (produces "module not found" error)
+                render_and_expand_globs(
+                    &model,
+                    Some(module_path),
+                    args,
+                    ctx,
+                    same_crate,
+                    reachable.as_ref(),
+                )?
+            }
+        }
+    } else if args.recursive && has_cross_crate {
+        // Recursive mode with cross-crate expansion
+        let mut output =
+            render_and_expand_globs(&model, None, args, ctx, same_crate, reachable.as_ref())?;
+        if ctx.verbose {
+            eprintln!("[cargo-brief] Discovering cross-crate re-exports...");
+        }
+        let sub_crates = cross_crate::discover_all_reexported_crates(
+            &model,
+            &ctx.toolchain,
+            ctx.manifest_path.as_deref(),
+            &ctx.target_dir,
+            ctx.verbose,
+        );
+        for sub in &sub_crates {
+            let sub_reachable = Some(compute_reachable_set(&sub.model));
+            let sub_output = render::render_module_api(
+                &sub.model,
+                None,
+                args,
+                None,
+                false,
+                sub_reachable.as_ref(),
+            );
+            output.push_str(&format!(
+                "\n// --- module {} (from sub-crate {}) ---\n",
+                sub.display_name,
+                sub.model.crate_name()
+            ));
+            output.push_str(&sub_output);
+        }
+        output
+    } else {
+        // Normal mode
+        render_and_expand_globs(
+            &model,
+            ctx.module_path.as_deref(),
+            args,
+            ctx,
+            same_crate,
+            reachable.as_ref(),
+        )?
+    };
+
+    // Enrich header with version + features if available
+    if let Some(header) = &ctx.crate_header
+        && let Some(first_newline) = output.find('\n')
+    {
+        let first_line = &output[..first_newline];
+        if first_line.starts_with("// crate ") {
+            output.replace_range(..first_newline, header);
+        }
+    }
+
+    Ok(output)
+}
+
+/// Render module API + expand globs.
+fn render_and_expand_globs(
+    model: &CrateModel,
+    module_path: Option<&str>,
+    args: &ApiArgs,
+    ctx: &PipelineContext,
+    same_crate: bool,
+    reachable: Option<&HashSet<Id>>,
+) -> Result<String> {
     let mut output = render::render_module_api(
-        &model,
-        resolved.module_path.as_deref(),
+        model,
+        module_path,
         args,
-        args.target.at_mod.as_deref(),
+        if same_crate {
+            args.target.at_mod.as_deref()
+        } else {
+            None
+        },
         same_crate,
-        reachable.as_ref(),
+        reachable,
     );
-
-    // Step 6: Expand glob re-exports
     let result = expand_glob_reexports(
-        &model,
-        resolved.module_path.as_deref(),
-        &args.global.toolchain,
-        args.target.manifest_path.as_deref(),
-        &metadata.target_dir,
-        args.global.verbose,
+        model,
+        module_path,
+        &ctx.toolchain,
+        ctx.manifest_path.as_deref(),
+        &ctx.target_dir,
+        ctx.verbose,
+        ctx.use_cache,
     );
-
     apply_glob_expansions(&mut output, &result, args.expand_glob, &args.filter);
-
     Ok(output)
 }
 
@@ -164,11 +375,15 @@ pub fn run_search_pipeline(args: &SearchArgs) -> Result<String> {
         return run_search_pipeline(&args);
     }
 
-    if let Some(spec) = &args.remote.crates {
-        return run_remote_search_pipeline(args, spec);
-    }
+    let ctx = if let Some(spec) = &args.remote.crates {
+        build_remote_context_search(args, spec)?
+    } else {
+        build_local_context_search(args)?
+    };
+    run_shared_search_pipeline(&ctx, args)
+}
 
-    // Local search pipeline
+fn build_local_context_search(args: &SearchArgs) -> Result<PipelineContext> {
     if args.global.verbose {
         eprintln!("[cargo-brief] Resolving target '{}'...", args.crate_name);
     }
@@ -178,58 +393,98 @@ pub fn run_search_pipeline(args: &SearchArgs) -> Result<String> {
     let resolved = resolve::resolve_target(&args.crate_name, None, &metadata)
         .context("Failed to resolve target")?;
 
+    let observer_package = args.at_package.clone().or(metadata.current_package.clone());
+
+    Ok(PipelineContext {
+        manifest_path: args.manifest_path.clone(),
+        target_dir: metadata.target_dir,
+        package_name: resolved.package_name,
+        module_path: None, // search doesn't target modules
+        observer_package,
+        toolchain: args.global.toolchain.clone(),
+        verbose: args.global.verbose,
+        use_cache: false, // workspace member — always regenerate
+        crate_header: None,
+        _workspace: None,
+    })
+}
+
+fn build_remote_context_search(args: &SearchArgs, spec: &str) -> Result<PipelineContext> {
+    let (name, _) = remote::parse_crate_spec(spec);
     if args.global.verbose {
-        eprintln!(
-            "[cargo-brief] Running cargo rustdoc for '{}'...",
-            resolved.package_name
-        );
+        eprintln!("[cargo-brief] Resolving workspace for '{name}'...");
     }
-    let json_path = rustdoc_json::generate_rustdoc_json(
-        &resolved.package_name,
-        &args.global.toolchain,
-        args.manifest_path.as_deref(),
-        true,
-        &metadata.target_dir,
-        args.global.verbose,
-    )
-    .with_context(|| {
-        format!(
-            "Failed to generate rustdoc JSON for crate '{}'",
-            resolved.package_name
-        )
-    })?;
+    let (workspace, _resolved_version) =
+        remote::resolve_workspace(spec, args.remote.features.as_deref(), args.remote.no_cache)
+            .with_context(|| format!("Failed to create workspace for '{name}'"))?;
 
-    if args.global.verbose {
-        eprintln!("[cargo-brief] Parsing rustdoc JSON...");
-    }
-    let krate = rustdoc_json::parse_rustdoc_json(&json_path)
-        .with_context(|| format!("Failed to parse rustdoc JSON at '{}'", json_path.display()))?;
+    let manifest_path = workspace
+        .path()
+        .join("Cargo.toml")
+        .to_string_lossy()
+        .into_owned();
 
-    let model = CrateModel::from_crate(krate);
+    let metadata = resolve::load_cargo_metadata(Some(&manifest_path))
+        .context("Failed to load cargo metadata for remote crate")?;
 
-    let observer_crate = args
-        .at_package
-        .as_deref()
-        .or(metadata.current_package.as_deref());
-    let same_crate = match observer_crate {
-        Some(obs) => obs == resolved.package_name || obs.replace('-', "_") == model.crate_name(),
-        None => false,
-    };
-    let reachable = if !same_crate {
-        Some(compute_reachable_set(&model))
-    } else {
-        None
-    };
+    Ok(PipelineContext {
+        manifest_path: Some(manifest_path),
+        target_dir: metadata.target_dir,
+        package_name: name,
+        module_path: None,      // search doesn't target modules
+        observer_package: None, // remote → always external view
+        toolchain: args.global.toolchain.clone(),
+        verbose: args.global.verbose,
+        use_cache: true, // remote — versions are locked
+        crate_header: None,
+        _workspace: Some(workspace),
+    })
+}
 
-    let output = search::render_search(
+fn run_shared_search_pipeline(ctx: &PipelineContext, args: &SearchArgs) -> Result<String> {
+    let (model, same_crate, reachable) = generate_and_parse_model(ctx)?;
+
+    let mut output = search::render_search(
         &model,
         &args.pattern,
         &args.filter,
         args.limit.as_deref(),
-        args.at_mod.as_deref(),
+        if same_crate {
+            args.at_mod.as_deref()
+        } else {
+            None
+        },
         same_crate,
         reachable.as_ref(),
     );
+
+    // Cross-crate search: discover sub-crates, search each
+    if cross_crate::root_has_cross_crate_reexports(&model) {
+        if ctx.verbose {
+            eprintln!("[cargo-brief] Discovering cross-crate re-exports...");
+        }
+        let sub_crates = cross_crate::discover_all_reexported_crates(
+            &model,
+            &ctx.toolchain,
+            ctx.manifest_path.as_deref(),
+            &ctx.target_dir,
+            ctx.verbose,
+        );
+        for sub in &sub_crates {
+            let sub_reachable = Some(compute_reachable_set(&sub.model));
+            let sub_output = search::render_search(
+                &sub.model,
+                &args.pattern,
+                &args.filter,
+                args.limit.as_deref(),
+                None,
+                false,
+                sub_reachable.as_ref(),
+            );
+            output.push_str(&sub_output);
+        }
+    }
+
     Ok(output)
 }
 
@@ -329,277 +584,6 @@ pub fn run_examples_pipeline(args: &ExamplesArgs) -> Result<String> {
     }
 }
 
-/// Run the remote search pipeline.
-fn run_remote_search_pipeline(args: &SearchArgs, spec: &str) -> Result<String> {
-    let (name, _) = remote::parse_crate_spec(spec);
-    if args.global.verbose {
-        eprintln!("[cargo-brief] Resolving workspace for '{name}'...");
-    }
-    let (workspace, _resolved_version) =
-        remote::resolve_workspace(spec, args.remote.features.as_deref(), args.remote.no_cache)
-            .with_context(|| format!("Failed to create workspace for '{name}'"))?;
-
-    let manifest_path = workspace
-        .path()
-        .join("Cargo.toml")
-        .to_string_lossy()
-        .into_owned();
-
-    let metadata = resolve::load_cargo_metadata(Some(&manifest_path))
-        .context("Failed to load cargo metadata for remote crate")?;
-
-    if args.global.verbose {
-        eprintln!("[cargo-brief] Running cargo rustdoc for '{name}'...");
-    }
-    let json_path = rustdoc_json::generate_rustdoc_json_cached(
-        &name,
-        &args.global.toolchain,
-        Some(&manifest_path),
-        true,
-        &metadata.target_dir,
-        args.global.verbose,
-    )
-    .with_context(|| format!("Failed to generate rustdoc JSON for remote crate '{name}'"))?;
-
-    if args.global.verbose {
-        eprintln!("[cargo-brief] Parsing rustdoc JSON...");
-    }
-    let krate = rustdoc_json::parse_rustdoc_json_cached(&json_path)?;
-    let model = CrateModel::from_crate(krate);
-    let reachable = Some(compute_reachable_set(&model));
-    let has_cross_crate = cross_crate::root_has_cross_crate_reexports(&model);
-
-    let mut output = search::render_search(
-        &model,
-        &args.pattern,
-        &args.filter,
-        args.limit.as_deref(),
-        None,
-        false,
-        reachable.as_ref(),
-    );
-
-    // Cross-crate search: discover sub-crates, search each
-    if has_cross_crate {
-        if args.global.verbose {
-            eprintln!("[cargo-brief] Discovering cross-crate re-exports...");
-        }
-        let sub_crates = cross_crate::discover_all_reexported_crates(
-            &model,
-            &args.global.toolchain,
-            Some(&manifest_path),
-            &metadata.target_dir,
-            args.global.verbose,
-        );
-        for sub in &sub_crates {
-            let sub_reachable = Some(compute_reachable_set(&sub.model));
-            let sub_output = search::render_search(
-                &sub.model,
-                &args.pattern,
-                &args.filter,
-                args.limit.as_deref(),
-                None,
-                false,
-                sub_reachable.as_ref(),
-            );
-            output.push_str(&sub_output);
-        }
-    }
-
-    Ok(output)
-}
-
-/// Run the remote API pipeline for a crate fetched via a cached or temp workspace.
-fn run_remote_api_pipeline(args: &ApiArgs, spec: &str) -> Result<String> {
-    // When --crates is used, the first positional arg (crate_name) may actually be
-    // a module path (e.g., `cargo brief api --crates bevy ecs` → crate_name="ecs").
-    // Merge it into module_path if it's not "self".
-    let module_path = if args.target.crate_name != "self" && args.target.module_path.is_none() {
-        Some(args.target.crate_name.clone())
-    } else {
-        args.target.module_path.clone()
-    };
-
-    let (name, _) = remote::parse_crate_spec(spec);
-    if args.global.verbose {
-        eprintln!("[cargo-brief] Resolving workspace for '{name}'...");
-    }
-    let (workspace, resolved_version) =
-        remote::resolve_workspace(spec, args.remote.features.as_deref(), args.remote.no_cache)
-            .with_context(|| format!("Failed to create workspace for '{name}'"))?;
-
-    let manifest_path = workspace
-        .path()
-        .join("Cargo.toml")
-        .to_string_lossy()
-        .into_owned();
-
-    let metadata = resolve::load_cargo_metadata(Some(&manifest_path))
-        .context("Failed to load cargo metadata for remote crate")?;
-
-    if args.global.verbose {
-        eprintln!("[cargo-brief] Running cargo rustdoc for '{name}'...");
-    }
-    let json_path = rustdoc_json::generate_rustdoc_json_cached(
-        &name,
-        &args.global.toolchain,
-        Some(&manifest_path),
-        true, // include private modules so facade crate internals are visible
-        &metadata.target_dir,
-        args.global.verbose,
-    )
-    .with_context(|| format!("Failed to generate rustdoc JSON for remote crate '{name}'"))?;
-
-    if args.global.verbose {
-        eprintln!("[cargo-brief] Parsing rustdoc JSON...");
-    }
-    let krate = rustdoc_json::parse_rustdoc_json_cached(&json_path)?;
-    let model = CrateModel::from_crate(krate);
-    let reachable = Some(compute_reachable_set(&model));
-    let has_cross_crate = cross_crate::root_has_cross_crate_reexports(&model);
-
-    // Build enriched crate header with version + features
-    let crate_header = build_remote_crate_header(
-        &name,
-        resolved_version.as_deref(),
-        workspace.path(),
-        args.remote.features.as_deref(),
-    );
-
-    let mut output = if let Some(ref module_path) = module_path {
-        // --- Module targeting with cross-crate resolution ---
-        if model.find_module(module_path).is_some() {
-            // Found locally — render normally
-            render_remote_normal(
-                &model,
-                Some(module_path),
-                args,
-                &manifest_path,
-                &metadata.target_dir,
-                reachable.as_ref(),
-            )?
-        } else {
-            if args.global.verbose {
-                eprintln!(
-                    "[cargo-brief] Module '{module_path}' not found locally, trying cross-crate resolution..."
-                );
-            }
-            if let Some(resolution) = cross_crate::resolve_cross_crate_module(
-                &model,
-                module_path,
-                &args.global.toolchain,
-                Some(&manifest_path),
-                &metadata.target_dir,
-                args.global.verbose,
-            ) {
-                // Cross-crate resolved: use sub-crate model
-                let sub_reachable = Some(compute_reachable_set(&resolution.model));
-                let mut output = render::render_module_api(
-                    &resolution.model,
-                    resolution.inner_module_path.as_deref(),
-                    args,
-                    None,
-                    false,
-                    sub_reachable.as_ref(),
-                );
-
-                let result = expand_glob_reexports(
-                    &resolution.model,
-                    resolution.inner_module_path.as_deref(),
-                    &args.global.toolchain,
-                    Some(&manifest_path),
-                    &metadata.target_dir,
-                    args.global.verbose,
-                );
-                apply_glob_expansions(&mut output, &result, args.expand_glob, &args.filter);
-                output
-            } else {
-                // Fall through to normal render (will produce "module not found" error)
-                render_remote_normal(
-                    &model,
-                    Some(module_path),
-                    args,
-                    &manifest_path,
-                    &metadata.target_dir,
-                    reachable.as_ref(),
-                )?
-            }
-        }
-    } else if args.recursive && has_cross_crate {
-        // --- Recursive mode with cross-crate expansion ---
-        if args.global.verbose {
-            eprintln!("[cargo-brief] Discovering cross-crate re-exports...");
-        }
-        let mut output = render::render_module_api(
-            &model,
-            module_path.as_deref(),
-            args,
-            None,
-            false,
-            reachable.as_ref(),
-        );
-
-        let result = expand_glob_reexports(
-            &model,
-            module_path.as_deref(),
-            &args.global.toolchain,
-            Some(&manifest_path),
-            &metadata.target_dir,
-            args.global.verbose,
-        );
-        apply_glob_expansions(&mut output, &result, args.expand_glob, &args.filter);
-
-        let sub_crates = cross_crate::discover_all_reexported_crates(
-            &model,
-            &args.global.toolchain,
-            Some(&manifest_path),
-            &metadata.target_dir,
-            args.global.verbose,
-        );
-        for sub in &sub_crates {
-            let sub_reachable = Some(compute_reachable_set(&sub.model));
-            let sub_output = render::render_module_api(
-                &sub.model,
-                None,
-                args,
-                None,
-                false,
-                sub_reachable.as_ref(),
-            );
-            output.push_str(&format!(
-                "\n// --- module {} (from sub-crate {}) ---\n",
-                sub.display_name,
-                sub.model.crate_name()
-            ));
-            output.push_str(&sub_output);
-        }
-
-        output
-    } else {
-        // --- Normal mode ---
-        render_remote_normal(
-            &model,
-            module_path.as_deref(),
-            args,
-            &manifest_path,
-            &metadata.target_dir,
-            reachable.as_ref(),
-        )?
-    };
-
-    // Enrich the first `// crate <name>` header with version + features
-    if let Some(header) = &crate_header {
-        if let Some(first_newline) = output.find('\n') {
-            let first_line = &output[..first_newline];
-            if first_line.starts_with("// crate ") {
-                output.replace_range(..first_newline, header);
-            }
-        }
-    }
-
-    Ok(output)
-}
-
 /// Build an enriched `// crate name[version] features = [...]` header for remote crates.
 /// Returns None if version cannot be determined.
 fn build_remote_crate_header(
@@ -622,30 +606,6 @@ fn build_remote_crate_header(
         header.push_str(&format!(" features = [{formatted}]"));
     }
     Some(header)
-}
-
-/// Render a remote crate in normal (non-search, non-cross-crate) mode.
-fn render_remote_normal(
-    model: &CrateModel,
-    module_path: Option<&str>,
-    args: &ApiArgs,
-    manifest_path: &str,
-    target_dir: &Path,
-    reachable: Option<&HashSet<Id>>,
-) -> Result<String> {
-    let mut output = render::render_module_api(model, module_path, args, None, false, reachable);
-
-    let result = expand_glob_reexports(
-        model,
-        module_path,
-        &args.global.toolchain,
-        Some(manifest_path),
-        target_dir,
-        args.global.verbose,
-    );
-    apply_glob_expansions(&mut output, &result, args.expand_glob, &args.filter);
-
-    Ok(output)
 }
 
 /// Apply glob expansion results to the rendered output.
@@ -727,6 +687,7 @@ fn expand_glob_reexports(
     manifest_path: Option<&str>,
     target_dir: &Path,
     verbose: bool,
+    use_cache: bool,
 ) -> GlobExpansionResult {
     let target_item = if let Some(path) = target_module_path {
         model.find_module(path)
@@ -762,10 +723,11 @@ fn expand_glob_reexports(
             false,
             target_dir,
             verbose,
+            use_cache,
         ) else {
             continue;
         };
-        let Ok(source_krate) = rustdoc_json::parse_rustdoc_json(&json_path) else {
+        let Ok(source_krate) = rustdoc_json::parse_rustdoc_json_cached(&json_path) else {
             continue;
         };
 

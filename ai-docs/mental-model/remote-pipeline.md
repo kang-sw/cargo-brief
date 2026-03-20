@@ -1,18 +1,17 @@
 # Remote Pipeline
 
 ## Entry Points
-- `src/lib.rs` — `run_remote_api_pipeline()` and `run_remote_search_pipeline()` (private helpers), `render_remote_normal()` (extracted helper).
+- `src/lib.rs` — `build_remote_context_api()` / `build_remote_context_search()` produce a `PipelineContext`; `run_shared_api_pipeline()` / `run_shared_search_pipeline()` consume it and are shared with the local path.
 - `src/remote.rs` — `parse_crate_spec()`, `resolve_workspace()`, `clean_cache()`, `WorkspaceDir`.
 - `src/cross_crate.rs` — `resolve_cross_crate_module()`, `discover_all_reexported_crates()`, `root_has_cross_crate_reexports()`.
 
 ## Module Contracts
-- `run_remote_api_pipeline()` guarantees: `WorkspaceDir` is held alive for the entire function scope. Manifest path is an owned `String` — no borrow chain. After building the primary model, `root_has_cross_crate_reexports()` is called once and the result gates all cross-crate branches.
-- Remote pipeline uses `document_private_items=true` for both the primary crate and sub-crates resolved via `cross_crate`. This deviates from the old contract in `visibility.md` — private modules are included so facade crate re-export chains remain traversable.
-- `run_remote_api_pipeline()` has three mutually exclusive sub-paths evaluated in order: (1) module-target+cross-crate, (2) recursive+cross-crate, (3) normal. Only the first matching path executes.
-- `run_examples_pipeline` remote path does not call `generate_rustdoc_json_cached` at all — it uses `resolve::find_dep_source_root` to locate the crate source dir on disk, then reads `.rs` files directly. No model is built.
+- `build_remote_context_api()` / `build_remote_context_search()` guarantee: `WorkspaceDir` is stored in `PipelineContext._workspace` to keep it alive for the entire pipeline. Manifest path is an owned `String` — no borrow chain. `PipelineContext.use_cache = true` for all remote contexts.
+- Both remote and local pipelines go through the same `run_shared_api_pipeline()` with three mutually exclusive sub-paths evaluated in order: (1) module-target+cross-crate, (2) recursive+cross-crate, (3) normal. Cross-crate discovery now also runs for local crates that have cross-crate re-exports.
+- `generate_rustdoc_json(..., use_cache=true)` skips `cargo rustdoc` if the `.json` file already exists in `target/doc/`. Only pass `use_cache=true` for remote pipelines where versions are locked — passing it for local workspace members skips regeneration after source changes.
+- `run_examples_pipeline` remote path does not call `generate_rustdoc_json` at all — it uses `resolve::find_dep_source_root` to locate the crate source dir on disk, then reads `.rs` files directly. No model is built.
 - `resolve_workspace(spec, features, no_cache)` returns `(WorkspaceDir, Option<String>)`. The second element is the resolved exact version string (e.g. `"1.0.200"`). Cached workspaces persist at `cache_dir()/name[version]` (or `name[version]+feat1+feat2` with alpha-sorted features). Cargo reuses build artifacts on subsequent calls. With `no_cache`, version resolution is best-effort and the workspace is a `TempDir`.
 - `clean_cache(spec)` with a non-empty spec glob-matches all directories starting with `name[` prefix and also removes `versions/{name}.json`. Empty spec removes all of `cache_dir()`. Prints removed paths and sizes to stderr.
-- `generate_rustdoc_json_cached()` skips `cargo rustdoc` if the `.json` file already exists in `target/doc/`. Only safe for remote pipelines where versions are locked.
 - `parse_rustdoc_json_cached()` reads/writes a `.bin` sidecar file next to the `.json`. If the `.bin` exists and is newer than the `.json`, it deserializes via bincode. A corrupted `.bin` silently falls back to JSON re-parse and overwrites the `.bin`.
 
 ## Coupling
@@ -21,7 +20,7 @@
 - `fetch_resolved_version(name, version_req)` calls the crates.io REST API (`/api/v1/crates/{name}`) and caches the response at `cache_dir()/versions/{name}.json` for 24h. Exact specs (starting with `=`) skip the network entirely. On API failure, stale cache is used with a stderr warning. If no cache exists and the network fails, the call returns an error.
 - `build_remote_crate_header()` uses `resolved_version` (from `resolve_workspace`) first, then falls back to reading Cargo.lock via `resolve_crate_version()`. This means the header can show the version before `cargo rustdoc` runs.
 - Cache location priority: `$CARGO_BRIEF_CACHE_DIR` > `$XDG_CACHE_HOME/cargo-brief/crates` > `$HOME/.cache/cargo-brief/crates`.
-- `cross_crate` resolution uses the same `manifest_path` and `target_dir` as the primary crate. Sub-crate JSON files land in the same `target/doc/` directory — they persist across invocations and are reused by `generate_rustdoc_json_cached`.
+- `cross_crate` resolution uses the same `manifest_path` and `target_dir` as the primary crate. Sub-crate JSON files land in the same `target/doc/` directory — they persist across invocations and are reused when `use_cache=true`.
 - `--clean` is handled in `main.rs` before `run_pipeline()` is called — it is an early exit, not a pipeline stage.
 
 ## Extension Points & Change Recipes
@@ -31,7 +30,7 @@
 
 ## Common Mistakes
 - No timeout on `cargo rustdoc` subprocess. Large crates (e.g., `bevy`) can hang for minutes on first build. User must Ctrl-C manually.
-- `generate_rustdoc_json_cached()` only checks if the `.json` file exists — it does not validate that the file corresponds to the requested crate version. With the new normalized cache dirs this is less likely in normal use, but manually placing a `.json` file in the cache dir would still be returned silently.
+- `generate_rustdoc_json(..., use_cache=true)` only checks if the `.json` file exists — it does not validate the file corresponds to the requested crate version. Manually placing a `.json` file in the cache dir would be returned silently.
 - Cross-crate module path not found after >5 re-export hops → `resolve_cross_crate_module` returns `None`, falls through to normal render, which then fails with "module not found". No hint that cross-crate resolution was attempted.
 
 ## Technical Debt

@@ -160,17 +160,18 @@ alternatives considered, and trade-offs — focus on _why_ this approach was cho
 
 ## Recent Work
 
+- v0.5.1+: Unified local/remote pipelines — `PipelineContext` → shared `run_shared_api_pipeline()` / `run_shared_search_pipeline()`. Cross-crate discovery now automatic for local crates too.
 - v0.5.1: `examples` subcommand — list/grep mode, `--tests`/`--benches` scope flags, smart-case, dynamic line numbers
 - v0.5.0: CLI subcommand refactor — `api`/`search`/`examples` subcommands, smart-case search, comma-separated OR matching
 - v0.4.1+: `--verbose` / `-v` flag for pipeline progress on stderr
 - v0.4.1: version-normalized cache dirs, crates.io API version resolution, `--clean` glob matching
 - v0.4.0: cross-crate module following, rustdoc JSON + bincode caching, version+features in remote crate header
-- v0.3.11: trait impl noise reduction — simple impls collapsed into per-type summary comments
 
 ## Workspace Reference
 
 - Crate name: `cargo-brief` (binary: `cargo-brief`, lib: `cargo_brief`)
 - Entry: `src/lib.rs` → `run_api_pipeline()` + `run_search_pipeline()` + `run_examples_pipeline()`, `src/main.rs` → subcommand dispatch
+- Pipeline: Both api/search build `PipelineContext` (local or remote), then call `run_shared_api_pipeline()` / `run_shared_search_pipeline()`
 - CLI types: `ApiArgs`, `SearchArgs`, `ExamplesArgs` + shared `TargetArgs`/`RemoteArgs`/`FilterArgs`/`GlobalArgs`
 - Modules: `cli`, `cross_crate`, `examples`, `remote`, `resolve`, `rustdoc_json`, `model`, `render`, `search`
 - Test fixture: `test_fixture/` (sample crate with all item types)

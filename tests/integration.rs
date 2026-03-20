@@ -17,6 +17,7 @@ fn fixture_model() -> CrateModel {
         true,
         &metadata.target_dir,
         false,
+        false, // test fixture — always regenerate
     )
     .expect("Failed to generate rustdoc JSON for test fixture");
 

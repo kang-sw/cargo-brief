@@ -88,14 +88,14 @@ lines with context and `*` markers. `--tests [DEPTH]` / `--benches [DEPTH]` exte
 
 ```
 src/
-  lib.rs           — re-exports all modules, run_api_pipeline() + run_search_pipeline() + run_examples_pipeline() entry points
+  lib.rs           — re-exports all modules, pipeline orchestration via PipelineContext → shared api/search functions
   examples.rs      — example/test/bench file scanning, list mode and grep mode rendering
   main.rs          — CLI arg parsing, subcommand dispatch
   cli.rs           — Subcommand types: ApiArgs, SearchArgs, ExamplesArgs + shared TargetArgs/RemoteArgs/FilterArgs/GlobalArgs
   cross_crate.rs   — cross-crate module following for facade crates
   remote.rs        — temp workspace creation for --crates (crates.io fetch) + cache management
   resolve.rs       — flexible target resolution (self, crate::module, fallback) + cargo metadata
-  rustdoc_json.rs  — JSON generation/parsing + cached variants (JSON skip + bincode)
+  rustdoc_json.rs  — JSON generation (with use_cache param) + parsing (bincode-cached)
   model.rs         — CrateModel with module index, visibility resolution
   render.rs        — pseudo-Rust rendering of all item types
   search.rs        — search mode: leaf item walker + one-line-per-item renderer
@@ -131,8 +131,9 @@ Parsed via `rustdoc-types` 0.57. Post-macro-expansion output.
 - Core pipeline complete. All item types supported. 117 integration tests.
 - Flexible package name resolution: `self`, `crate::module`, file path→module. Bare names always resolve as package.
 - Remote crate support: `--crates <spec>` fetches any crate from crates.io. Workspaces cached at `~/.cache/cargo-brief/crates/` with version-normalized directory names (`name[version]`). Exact version resolved via crates.io API with 24h cache; bare specs auto-update.
-- **Cross-crate module following**: Facade crates (bevy, axum) that re-export from sub-crates now support module targeting (`bevy ecs`), `--search`, and `--recursive`. Re-export chains are followed automatically (max 5 hops).
-- **rustdoc JSON + bincode caching**: Remote pipeline skips JSON generation when file exists; parsed JSON cached as bincode for 5-10x faster reloads. `--clean [SPEC]` manages disk usage.
+- **Unified pipeline**: Local and remote entry points produce a `PipelineContext`, then call shared `run_shared_api_pipeline()` / `run_shared_search_pipeline()`. Cross-crate discovery fires automatically for both local and remote crates.
+- **Cross-crate module following**: Facade crates (bevy, axum) that re-export from sub-crates now support module targeting (`bevy ecs`), `--search`, and `--recursive`. Re-export chains are followed automatically (max 5 hops). Works for both local and remote crates.
+- **rustdoc JSON + bincode caching**: Single `generate_rustdoc_json()` with `use_cache` parameter. Workspace members always regenerate; non-members skip if JSON exists. Bincode parse cache always used. `--clean [SPEC]` manages disk usage.
 - Visibility auto-detection: `same_crate` inferred from cwd package context. Cross-crate views use reachability-based filtering.
 - Glob re-export expansion: Phase 1 (individual `pub use` lines) + Phase 2 (`--expand-glob` inlines full definitions).
 - Search mode: `cargo brief search <pattern>` finds leaf items with smart-case matching (all-lowercase = insensitive, any uppercase = sensitive). Comma-separated = OR groups, space-separated = AND within group.
@@ -182,7 +183,7 @@ Domain-oriented operational knowledge in `ai-docs/mental-model/`:
 ## Next Up (priority order)
 
 1. **`tickets/idea/260316-feat-output-summary-mode.md`** — P2: `--summary` TOC mode
-   (Examples subcommand completed — `tickets/done/260319-feat-examples-subcommand.md`)
+   (Pipeline unification completed — `tickets/done/260320-refactor-unify-local-remote-pipeline.md`)
 
 ## Backlog
 

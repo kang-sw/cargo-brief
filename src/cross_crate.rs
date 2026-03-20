@@ -102,13 +102,14 @@ pub fn resolve_cross_crate_module(
         }
 
         let source_crate = extract_crate_name(&use_item.source);
-        let Ok(json_path) = rustdoc_json::generate_rustdoc_json_cached(
+        let Ok(json_path) = rustdoc_json::generate_rustdoc_json(
             &source_crate,
             toolchain,
             manifest_path,
             true,
             target_dir,
             verbose,
+            true, // cross-crate — use cache
         ) else {
             continue;
         };
@@ -225,13 +226,14 @@ pub fn discover_all_reexported_crates(
         }
 
         let source_crate = extract_crate_name(&use_item.source);
-        let Ok(json_path) = rustdoc_json::generate_rustdoc_json_cached(
+        let Ok(json_path) = rustdoc_json::generate_rustdoc_json(
             &source_crate,
             toolchain,
             manifest_path,
             true,
             target_dir,
             verbose,
+            true, // cross-crate — use cache
         ) else {
             eprintln!("warning: failed to generate JSON for '{source_crate}', skipping");
             continue;
@@ -350,13 +352,14 @@ fn follow_use_chain(
             break; // cycle detected
         }
 
-        let json_path = rustdoc_json::generate_rustdoc_json_cached(
+        let json_path = rustdoc_json::generate_rustdoc_json(
             &crate_name,
             toolchain,
             manifest_path,
             true,
             target_dir,
             verbose,
+            true, // cross-crate — use cache
         )
         .ok()?;
         let krate = rustdoc_json::parse_rustdoc_json_cached(&json_path).ok()?;
@@ -435,13 +438,14 @@ fn resolve_single_reexport(
             break;
         }
 
-        let json_path = rustdoc_json::generate_rustdoc_json_cached(
+        let json_path = rustdoc_json::generate_rustdoc_json(
             &crate_name,
             toolchain,
             manifest_path,
             true,
             target_dir,
             verbose,
+            true, // cross-crate — use cache
         )
         .ok()?;
         let krate = rustdoc_json::parse_rustdoc_json_cached(&json_path).ok()?;

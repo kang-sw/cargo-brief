@@ -14,7 +14,20 @@ pub fn generate_rustdoc_json(
     document_private_items: bool,
     target_dir: &Path,
     verbose: bool,
+    use_cache: bool,
 ) -> Result<PathBuf> {
+    if use_cache {
+        let base_name = crate_name.split('@').next().unwrap_or(crate_name);
+        let json_name = base_name.replace('-', "_");
+        let json_path = target_dir.join("doc").join(format!("{json_name}.json"));
+        if json_path.exists() {
+            if verbose {
+                eprintln!("[cargo-brief] Using cached rustdoc JSON for '{crate_name}'");
+            }
+            return Ok(json_path);
+        }
+    }
+
     let mut cmd = Command::new("cargo");
     cmd.arg(format!("+{toolchain}"));
     cmd.args(["rustdoc", "-p", crate_name, "--lib"]);
@@ -119,35 +132,6 @@ pub fn generate_rustdoc_json(
     }
 
     Ok(json_path)
-}
-
-/// Skip `cargo rustdoc` if the JSON already exists in `target/doc/`.
-/// For remote (--crates) pipeline only — versions are locked so output is stable.
-pub fn generate_rustdoc_json_cached(
-    crate_name: &str,
-    toolchain: &str,
-    manifest_path: Option<&str>,
-    document_private_items: bool,
-    target_dir: &Path,
-    verbose: bool,
-) -> Result<PathBuf> {
-    let base_name = crate_name.split('@').next().unwrap_or(crate_name);
-    let json_name = base_name.replace('-', "_");
-    let json_path = target_dir.join("doc").join(format!("{json_name}.json"));
-    if json_path.exists() {
-        if verbose {
-            eprintln!("[cargo-brief] Using cached rustdoc JSON for '{crate_name}'");
-        }
-        return Ok(json_path);
-    }
-    generate_rustdoc_json(
-        crate_name,
-        toolchain,
-        manifest_path,
-        document_private_items,
-        target_dir,
-        verbose,
-    )
 }
 
 /// Parse rustdoc JSON with bincode caching. If a `.bin` file exists and is

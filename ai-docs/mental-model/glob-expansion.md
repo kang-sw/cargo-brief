@@ -5,13 +5,13 @@
 - `src/render.rs` — `render_inlined_items()` renders Phase 2 full definitions.
 
 ## Module Contracts
-- `expand_glob_reexports()` guarantees: scans only the target module's direct children for `Use` items with `is_glob=true`. Returns `GlobExpansionResult` with both `item_names` (Phase 1) and `source_models` (Phase 2). Errors during source crate JSON generation are silently skipped (`else { continue }`).
+- `expand_glob_reexports()` guarantees: scans only the target module's direct children for `Use` items with `is_glob=true`. Returns `GlobExpansionResult` with both `item_names` (Phase 1) and `source_models` (Phase 2). Errors during source crate JSON generation are silently skipped (`else { continue }`). Receives `use_cache: bool` threaded from `PipelineContext` — `false` for local workspace members, `true` for remote/version-locked crates.
 - `apply_glob_expansions()` guarantees: replaces glob lines using exact string matching (`pub use {source}::*;\n`). Only the FIRST occurrence of each glob line is replaced.
 - `render_inlined_items()` guarantees: renders with `observer=source_crate_name` and `same_crate=false` (hardcoded). Deduplicates across sources via `seen_names: HashSet`.
 
 ## Coupling
 - Render output format ↔ glob detection: `render_module_api()` MUST emit glob re-exports as exactly `pub use {source}::*;\n`. `apply_glob_expansions()` searches for this exact pattern. Any formatting change (whitespace, comments, semicolons) → silent failure.
-- `document_private_items` in glob expansion: Always `false` (lib.rs:214), even for same-crate globs. Internal crate globs → `pub(crate)` items absent from source JSON → silently missing from expansion.
+- `document_private_items` in glob expansion: Always `false` in `expand_glob_reexports()`, even for same-crate globs. Internal crate globs → `pub(crate)` items absent from source JSON → silently missing from expansion.
 - `render_inlined_items` calls `should_render_item` at lines 130 and 147, so `--no-*` filters ARE applied to Phase 2 inlined definitions.
 
 ## Extension Points & Change Recipes
