@@ -135,7 +135,7 @@ Parsed via `rustdoc-types` 0.57. Post-macro-expansion output.
 - **Cross-crate module following**: Facade crates (bevy, axum) that re-export from sub-crates now support module targeting (`bevy ecs`), `--search`, and `--recursive`. Re-export chains are followed automatically (max 5 hops). Works for both local and remote crates.
 - **rustdoc JSON + bincode caching**: Single `generate_rustdoc_json()` with `use_cache` parameter. Workspace members always regenerate; non-members skip if JSON exists. Bincode parse cache always used. `--clean [SPEC]` manages disk usage.
 - Visibility auto-detection: `same_crate` inferred from cwd package context. Cross-crate views use reachability-based filtering.
-- Glob re-export expansion: Phase 1 (individual `pub use` lines) + Phase 2 (`--expand-glob` inlines full definitions).
+- Glob re-export expansion: Phase 1 (individual `pub use` lines) + Phase 2 (`--expand-glob` inlines full definitions). **Recursive**: cross-crate glob chains followed up to depth 8 with cycle prevention. Underscore/hyphen package name fallback.
 - Search mode: `cargo brief search <pattern>` finds leaf items with smart-case matching (all-lowercase = insensitive, any uppercase = sensitive). Comma-separated = OR groups, space-separated = AND within group.
 - `--methods-of <TYPE>`: shorthand for search pattern + exclusion flags (methods/fields only).
 - Crate-level docs: root module `//!` comments rendered after `// crate <name>` header. `--no-crate-docs` suppresses independently.
@@ -145,7 +145,7 @@ Parsed via `rustdoc-types` 0.57. Post-macro-expansion output.
 - Re-export kind annotations: `pub use` lines show `// struct`, `// trait`, etc.
 - **Examples subcommand**: `cargo brief examples <target> [pattern]` greps example/test/bench source files. List mode (no pattern) shows files with `//!` docs; grep mode shows matches with `*` markers, dynamic line numbers, context control. `--tests [DEPTH]` / `--benches [DEPTH]` extend scope. Smart-case matching.
 - Dependencies: `clap` 4, `rustdoc-types` 0.57, `serde_json` 1, `anyhow` 1, `tempfile` 3, `bincode` 1, `semver` 1, `ureq` 2.
-- Test fixture (`test_fixture/`) covers all supported item types.
+- Test fixture (`test_fixture/`) covers all supported item types. Now a workspace with `glob-source`/`glob-inner` sub-crates for cross-crate glob chain testing.
 
 ## Mental Model Documents
 

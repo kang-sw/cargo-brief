@@ -185,3 +185,25 @@ that can be fixed separately.
 
 - 260320-refactor-unify-local-remote-pipeline: pipeline unification that
   structurally resolves root cause A (Phase 3)
+
+### Result (Root Cause B) - 26-03-21
+
+**Implemented:** Recursive cross-crate glob re-export expansion (fixes #4, #5).
+
+- `expand_glob_reexports()` now recursively follows `is_glob=true` Use items
+  in source crate roots via `collect_glob_items_recursive()` (max depth 8,
+  cycle-safe via `visited: HashSet<String>`).
+- New `try_generate_rustdoc_json()` helper handles underscore→hyphen package
+  name fallback (rustdoc `use_item.source` gives Rust identifiers but
+  `cargo -p` needs package names).
+- `GlobExpansionResult.source_models` changed to `HashMap<String, Vec<CrateModel>>`
+  to carry recursively discovered models alongside the direct source model.
+- `apply_glob_expansions()` Phase 2 iterates all models in the Vec.
+- Test fixture converted to workspace with `glob-source`/`glob-inner` sub-crates
+  testing a 2-level cross-crate glob chain.
+- 3 new integration tests (Phase 1, Phase 2, search).
+
+**Deviation from plan:** Added `try_generate_rustdoc_json()` — not in original plan
+but required because `use_item.source` uses underscores while cargo needs hyphens.
+
+**Remaining:** Root Cause A (#1–#3), #6, #8 still open.

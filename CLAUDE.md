@@ -160,6 +160,7 @@ alternatives considered, and trade-offs — focus on _why_ this approach was cho
 
 ## Recent Work
 
+- v0.5.1+: Recursive cross-crate glob expansion — `expand_glob_reexports()` follows nested `pub use crate::*` chains (max depth 8, cycle-safe). `try_generate_rustdoc_json()` handles underscore↔hyphen package name fallback. `source_models` is `Vec<CrateModel>` per source.
 - v0.5.1+: Unified local/remote pipelines — `PipelineContext` → shared `run_shared_api_pipeline()` / `run_shared_search_pipeline()`. Cross-crate discovery now automatic for local crates too.
 - v0.5.1: `examples` subcommand — list/grep mode, `--tests`/`--benches` scope flags, smart-case, dynamic line numbers
 - v0.5.0: CLI subcommand refactor — `api`/`search`/`examples` subcommands, smart-case search, comma-separated OR matching
@@ -174,8 +175,8 @@ alternatives considered, and trade-offs — focus on _why_ this approach was cho
 - Pipeline: Both api/search build `PipelineContext` (local or remote), then call `run_shared_api_pipeline()` / `run_shared_search_pipeline()`
 - CLI types: `ApiArgs`, `SearchArgs`, `ExamplesArgs` + shared `TargetArgs`/`RemoteArgs`/`FilterArgs`/`GlobalArgs`
 - Modules: `cli`, `cross_crate`, `examples`, `remote`, `resolve`, `rustdoc_json`, `model`, `render`, `search`
-- Test fixture: `test_fixture/` (sample crate with all item types)
-- Integration tests: `tests/integration.rs` (117 tests)
+- Test fixture: `test_fixture/` (workspace with `glob-source`/`glob-inner` sub-crates for cross-crate glob chain testing)
+- Integration tests: `tests/integration.rs` (120 tests)
 
 ## Documented Dependencies
 

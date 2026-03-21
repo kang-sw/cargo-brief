@@ -276,3 +276,7 @@ pub(crate) mod hidden_reexport {
 }
 
 pub use hidden_reexport::*;
+
+// --- Cross-crate glob re-export chain ---
+// test-fixture → glob-source → glob-inner (2-level chain)
+pub use glob_source::*;

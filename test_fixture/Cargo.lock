@@ -3,5 +3,19 @@
 version = 4
 
 [[package]]
+name = "glob-inner"
+version = "0.1.0"
+
+[[package]]
+name = "glob-source"
+version = "0.1.0"
+dependencies = [
+ "glob-inner",
+]
+
+[[package]]
 name = "test-fixture"
 version = "0.1.0"
+dependencies = [
+ "glob-source",
+]

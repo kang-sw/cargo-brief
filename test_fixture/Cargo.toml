@@ -2,3 +2,9 @@
 name = "test-fixture"
 version = "0.1.0"
 edition = "2021"
+
+[workspace]
+members = ["glob-source", "glob-inner"]
+
+[dependencies]
+glob-source = { path = "glob-source" }

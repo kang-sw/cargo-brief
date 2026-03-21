@@ -1,0 +1,7 @@
+[package]
+name = "glob-source"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+glob-inner = { path = "../glob-inner" }

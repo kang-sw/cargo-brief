@@ -13,7 +13,7 @@
 - `cross_crate` depends on `rustdoc_json` (for `generate_rustdoc_json(..., true)` / `parse_rustdoc_json_cached`) and `model`. It never calls `remote` or `resolve`.
 
 ## Coupling
-- `render` → `lib.rs`: Glob re-export output format must match exactly. `render_module_api()` emits `pub use {source}::*;\n` for top-level globs (no indent); `apply_glob_expansions()` searches for this exact string without indentation. Indented globs (from deeper modules) would not match — this coupling is fragile. Change either side without the other → globs silently remain unexpanded.
+- `render` → `lib.rs`: Glob re-export output format must match after whitespace normalization. `render_module_api()` emits `pub use {source}::*;`; `replace_glob_lines()` normalizes each line by collapsing whitespace before comparing to the pattern `pub use {source}::*;`. Indentation is preserved and re-applied to replacement lines. Any structural change to the glob line (extra tokens, different keyword order) → globs silently remain unexpanded.
 - `cli` → all test files: Test helpers construct `ApiArgs` by building all four flattened structs (`TargetArgs`, `RemoteArgs`, `FilterArgs`, `GlobalArgs`) plus the per-subcommand fields. Adding a field to any of these structs causes compile errors across all helpers — intentional, not silent.
 - `lib.rs` → `resolve` + `rustdoc_json`: `manifest_path` is threaded through without validation. If it points to the wrong Cargo.toml, failure surfaces at JSON generation time, not at metadata loading.
 - `cross_crate` → `rustdoc_json` caching: `cross_crate` calls `generate_rustdoc_json(..., use_cache=true)` and `parse_rustdoc_json_cached`. `expand_glob_reexports` threads `use_cache` from `PipelineContext`, so local pipelines pass `false` (always regenerate) and remote pipelines pass `true` (skip if JSON exists). All callers share the same `target/doc/` directory — `.bin` cache files accumulate there and are never cleaned by `--clean`.
@@ -26,6 +26,6 @@
 - Calling `render_item()` for a new item type without a preceding `is_visible_from()` check → private items appear in output.
 
 ## Technical Debt
-- String-based glob detection/replacement in `apply_glob_expansions` — fragile, first-occurrence-only semantics. See `glob-expansion.md`.
+- String-based glob detection/replacement in `apply_glob_expansions` — fragile (whitespace-normalized string matching). See `glob-expansion.md`.
 - `--verbose` / `-v` prints progress to stderr; messages are in `lib.rs` only (not in utility modules).
 - Cross-crate hop limit is hardcoded at 5 in `cross_crate.rs`. Deep facade chains (>5 hops) silently fall back to "module not found".

@@ -2034,3 +2034,86 @@ fn test_examples_smart_case() {
         "Uppercase pattern should not match:\n{output}"
     );
 }
+
+// === Cross-Crate Glob Re-Export Expansion Tests ===
+
+/// Phase 1: expand_glob=false, items from both glob-source and glob-inner
+/// should appear as individual `pub use glob_source::...` lines.
+#[test]
+fn test_cross_crate_glob_phase1() {
+    let mut args = default_args();
+    args.expand_glob = false;
+    let output = cargo_brief::run_api_pipeline(&args).unwrap();
+
+    // GlobSourceItem is a direct item in glob-source
+    assert!(
+        output.contains("GlobSourceItem"),
+        "Phase 1 should list GlobSourceItem from glob-source:\n{output}"
+    );
+    // GlobInnerItem is re-exported via glob-source → glob-inner chain
+    assert!(
+        output.contains("GlobInnerItem"),
+        "Phase 1 should list GlobInnerItem from glob-inner via recursive expansion:\n{output}"
+    );
+    // GlobInnerTrait should also appear
+    assert!(
+        output.contains("GlobInnerTrait"),
+        "Phase 1 should list GlobInnerTrait from glob-inner via recursive expansion:\n{output}"
+    );
+}
+
+/// Phase 2: expand_glob=true, full struct/trait definitions from both
+/// glob-source and glob-inner should be inlined.
+#[test]
+fn test_cross_crate_glob_phase2() {
+    let mut args = default_args();
+    args.expand_glob = true;
+    let output = cargo_brief::run_api_pipeline(&args).unwrap();
+
+    // Full struct definition from glob-inner (2 levels deep)
+    assert!(
+        output.contains("struct GlobInnerItem"),
+        "Phase 2 should inline full GlobInnerItem definition:\n{output}"
+    );
+    assert!(
+        output.contains("deep_field"),
+        "Phase 2 should include GlobInnerItem fields:\n{output}"
+    );
+    // Full trait definition from glob-inner
+    assert!(
+        output.contains("trait GlobInnerTrait"),
+        "Phase 2 should inline full GlobInnerTrait definition:\n{output}"
+    );
+    assert!(
+        output.contains("inner_method"),
+        "Phase 2 should include GlobInnerTrait methods:\n{output}"
+    );
+    // Full struct from glob-source (1 level deep)
+    assert!(
+        output.contains("struct GlobSourceItem"),
+        "Phase 2 should inline full GlobSourceItem definition:\n{output}"
+    );
+}
+
+/// Search should find items from cross-crate glob re-exports.
+#[test]
+fn test_cross_crate_glob_search() {
+    let model = fixture_model();
+    let filter = default_filter();
+    let reachable = compute_reachable_set(&model);
+
+    // GlobSourceItem should be directly findable
+    let output = search::render_search(
+        &model,
+        "GlobSourceItem",
+        &filter,
+        None,
+        None,
+        false,
+        Some(&reachable),
+    );
+    assert!(
+        output.contains("GlobSourceItem"),
+        "search should find GlobSourceItem via cross-crate glob:\n{output}"
+    );
+}

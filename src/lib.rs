@@ -27,8 +27,8 @@ use model::{CrateModel, compute_reachable_set};
 struct GlobExpansionResult {
     /// Phase 1 data: source crate → sorted list of public item names
     item_names: HashMap<String, Vec<String>>,
-    /// Phase 2 data: source crate → full CrateModel
-    source_models: HashMap<String, CrateModel>,
+    /// Phase 2 data: source crate → full CrateModels (direct + recursively discovered)
+    source_models: HashMap<String, Vec<CrateModel>>,
 }
 
 /// Shared context produced after target resolution, consumed by api/search pipelines.
@@ -617,10 +617,17 @@ fn apply_glob_expansions(
     filter: &FilterArgs,
 ) {
     if expand_glob && !result.source_models.is_empty() {
-        // Phase 2: inline full definitions from source crates
+        // Phase 2: inline full definitions from source crates (including recursive models)
         let mut seen_names = HashSet::new();
-        for (source, source_model) in &result.source_models {
-            let rendered = render::render_inlined_items(source_model, filter, &mut seen_names);
+        for (source, models) in &result.source_models {
+            let mut rendered = String::new();
+            for model in models {
+                rendered.push_str(&render::render_inlined_items(
+                    model,
+                    filter,
+                    &mut seen_names,
+                ));
+            }
             let pattern = format!("pub use {source}::*;");
             replace_glob_lines(output, &pattern, &rendered);
         }
@@ -676,11 +683,55 @@ fn find_normalized_line(text: &str, pattern: &str) -> Option<(usize, usize, Stri
     None
 }
 
+/// Try generating rustdoc JSON for a crate, falling back to hyphenated name.
+///
+/// Rustdoc `use_item.source` gives Rust identifiers (underscores), but
+/// `cargo rustdoc -p` expects package names (hyphens). Try the original name
+/// first, then try with `_` → `-` if it fails.
+fn try_generate_rustdoc_json(
+    source: &str,
+    toolchain: &str,
+    manifest_path: Option<&str>,
+    target_dir: &Path,
+    verbose: bool,
+    use_cache: bool,
+) -> Option<PathBuf> {
+    // Try original name first (works for crates without hyphens)
+    if let Ok(path) = rustdoc_json::generate_rustdoc_json(
+        source,
+        toolchain,
+        manifest_path,
+        false,
+        target_dir,
+        verbose,
+        use_cache,
+    ) {
+        return Some(path);
+    }
+    // Fallback: try hyphenated name (glob_source → glob-source)
+    let hyphenated = source.replace('_', "-");
+    if hyphenated != source {
+        if let Ok(path) = rustdoc_json::generate_rustdoc_json(
+            &hyphenated,
+            toolchain,
+            manifest_path,
+            false,
+            target_dir,
+            verbose,
+            use_cache,
+        ) {
+            return Some(path);
+        }
+    }
+    None
+}
+
 /// Detect glob re-exports in the target module and expand each by generating
 /// rustdoc JSON for the source crate and enumerating its public items.
 ///
 /// Returns both item names (for Phase 1 `pub use` lines) and source models
-/// (for Phase 2 full definition inlining).
+/// (for Phase 2 full definition inlining). Recursively follows cross-crate
+/// glob chains (max depth 8).
 fn expand_glob_reexports(
     model: &CrateModel,
     target_module_path: Option<&str>,
@@ -717,11 +768,10 @@ fn expand_glob_reexports(
         let source = &use_item.source;
 
         // Generate JSON for the source crate (pub items only, no private items)
-        let Ok(json_path) = rustdoc_json::generate_rustdoc_json(
+        let Some(json_path) = try_generate_rustdoc_json(
             source,
             toolchain,
             manifest_path,
-            false,
             target_dir,
             verbose,
             use_cache,
@@ -733,35 +783,128 @@ fn expand_glob_reexports(
         };
 
         let source_model = CrateModel::from_crate(source_krate);
-        let Some(root) = source_model.root_module() else {
-            continue;
-        };
+        let mut all_items = Vec::new();
+        let mut all_models = Vec::new();
+        let mut visited = HashSet::new();
+        visited.insert(source.clone());
 
-        let mut items: Vec<String> = source_model
-            .module_children(root)
-            .iter()
-            .filter(|(_, item)| matches!(item.visibility, Visibility::Public))
-            .filter(|(_, item)| !matches!(item.inner, ItemEnum::Module(_)))
-            .filter_map(|(_, item)| {
-                // Use items store their name in inner.use.name, not item.name
-                item.name.clone().or_else(|| {
-                    if let ItemEnum::Use(u) = &item.inner {
-                        Some(u.name.clone())
-                    } else {
-                        None
-                    }
-                })
-            })
-            .collect();
+        collect_glob_items_recursive(
+            &source_model,
+            toolchain,
+            manifest_path,
+            target_dir,
+            verbose,
+            use_cache,
+            &mut visited,
+            &mut all_items,
+            &mut all_models,
+            0,
+        );
 
-        items.sort();
-        items.dedup();
-        item_names.insert(source.clone(), items);
-        source_models.insert(source.clone(), source_model);
+        all_items.sort();
+        all_items.dedup();
+
+        // Direct source model goes first (index 0)
+        let mut models = vec![source_model];
+        models.extend(all_models);
+
+        item_names.insert(source.clone(), all_items);
+        source_models.insert(source.clone(), models);
     }
 
     GlobExpansionResult {
         item_names,
         source_models,
+    }
+}
+
+/// Recursively collect public item names and models from a source crate.
+///
+/// For each child of the source model's root:
+/// - `is_glob=true` Use: attempt to generate rustdoc JSON for the source and recurse
+/// - Non-glob Use: collect the re-exported name
+/// - Direct item (non-module): collect the item name
+/// - Module: skip (same as top-level expansion)
+fn collect_glob_items_recursive(
+    source_model: &CrateModel,
+    toolchain: &str,
+    manifest_path: Option<&str>,
+    target_dir: &Path,
+    verbose: bool,
+    use_cache: bool,
+    visited: &mut HashSet<String>,
+    all_items: &mut Vec<String>,
+    all_models: &mut Vec<CrateModel>,
+    depth: usize,
+) {
+    const MAX_DEPTH: usize = 8;
+
+    let Some(root) = source_model.root_module() else {
+        return;
+    };
+
+    for (_, child) in source_model.module_children(root) {
+        if !matches!(child.visibility, Visibility::Public) {
+            continue;
+        }
+        if matches!(child.inner, ItemEnum::Module(_)) {
+            continue;
+        }
+
+        if let ItemEnum::Use(use_item) = &child.inner {
+            if use_item.is_glob {
+                // Cross-crate glob — recurse if within depth limit
+                if depth >= MAX_DEPTH {
+                    continue;
+                }
+                let nested_source = &use_item.source;
+                if !visited.insert(nested_source.clone()) {
+                    continue; // cycle prevention
+                }
+                if verbose {
+                    eprintln!(
+                        "[cargo-brief] Following nested glob re-export: {nested_source} (depth {})",
+                        depth + 1
+                    );
+                }
+                let Some(json_path) = try_generate_rustdoc_json(
+                    nested_source,
+                    toolchain,
+                    manifest_path,
+                    target_dir,
+                    verbose,
+                    use_cache,
+                ) else {
+                    continue; // intra-crate path or missing dep — skip
+                };
+                let Ok(nested_krate) = rustdoc_json::parse_rustdoc_json_cached(&json_path) else {
+                    continue;
+                };
+                let nested_model = CrateModel::from_crate(nested_krate);
+                collect_glob_items_recursive(
+                    &nested_model,
+                    toolchain,
+                    manifest_path,
+                    target_dir,
+                    verbose,
+                    use_cache,
+                    visited,
+                    all_items,
+                    all_models,
+                    depth + 1,
+                );
+                all_models.push(nested_model);
+            } else {
+                // Non-glob Use: collect the re-exported name
+                if let Some(name) = child.name.as_ref().or(Some(&use_item.name)) {
+                    all_items.push(name.clone());
+                }
+            }
+        } else {
+            // Direct item (struct, trait, fn, etc.)
+            if let Some(name) = &child.name {
+                all_items.push(name.clone());
+            }
+        }
     }
 }
