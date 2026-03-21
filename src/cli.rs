@@ -87,13 +87,7 @@ PATTERN SYNTAX:
     =Name    exact — final path segment (after last ::) equals \"Name\"
     -term    exclude — remove matches (works with substring, glob, or -=exact)
 
-  Exclusions are global across all OR groups.
-
-OUTPUT:
-  fn module::Type::method(&self, arg: T) -> Ret;
-  struct module::StructName { .. };
-  field module::Struct::field_name: Type;
-  variant module::Enum::Variant(T1, T2);")]
+  Exclusions are global across all OR groups.")]
     Search(SearchArgs),
 
     /// Grep example/test/bench source files from a crate
@@ -129,13 +123,7 @@ EXAMPLES:
   cargo brief summary --crates tokio@1 --features full
 
   # Summarize a specific module
-  cargo brief summary --crates bevy bevy::ecs
-
-OUTPUT:
-  One line per visible module with item counts:
-    mod io;          // 4 traits, 15 structs, 8 fns
-    mod sync::mpsc;  // 4 structs
-    // root: 5 macros, 2 fns")]
+  cargo brief summary --crates bevy bevy::ecs")]
     Summary(SummaryArgs),
 }
 

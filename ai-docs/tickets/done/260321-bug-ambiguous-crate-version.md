@@ -55,7 +55,7 @@ versions.
 - `generate_rustdoc_json` already handles `@version` in cache lookup (line 21)
 - Must not break the common case where only one version exists
 
-### Result (pending) - 26-03-21
+### Result (512db47, 46dc0f3) - 26-03-21
 
 Implemented Cargo.lock version tracking + auto-retry approach (approach 2 from plan).
 
@@ -80,6 +80,10 @@ instead of `cargo metadata` resolve graph. Avoids second subprocess call or
 removing `--no-deps` from existing call. Pre-warming resolves names upfront;
 auto-retry in `generate_rustdoc_json` covers edge cases.
 
-**Known limitation:** Verbose mode (`-v`) uses `Stdio::inherit()` and can't
-capture stderr for auto-retry. Pre-warming resolves names before per-crate
-calls, so this is not a practical issue.
+**Follow-up fixes (post-review):**
+- `load_or_find_source_crate` now calls `resolve_spec()` upfront before
+  `generate_rustdoc_json`, fixing verbose-mode errors for multi-version
+  crates discovered via deep walk (not found by pre-warming BFS).
+- Local context builders now set `use_cache` based on workspace membership
+  instead of hardcoding `false` — non-workspace deps (e.g. `bevy` from a
+  game project) no longer re-run `cargo rustdoc` on every invocation.
