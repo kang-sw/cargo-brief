@@ -31,6 +31,14 @@ fn main() -> Result<()> {
             let output = cargo_brief::run_examples_pipeline(args)?;
             print!("{output}");
         }
+        BriefCommand::Summary(args) => {
+            if let Some(spec) = &args.remote.clean {
+                cargo_brief::clean_cache(spec)?;
+                return Ok(());
+            }
+            let output = cargo_brief::run_summary_pipeline(args)?;
+            print!("{output}");
+        }
     }
     Ok(())
 }

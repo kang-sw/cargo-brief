@@ -1,9 +1,12 @@
-use cargo_brief::cli::{ApiArgs, ExamplesArgs, FilterArgs, GlobalArgs, RemoteArgs, TargetArgs};
+use cargo_brief::cli::{
+    ApiArgs, ExamplesArgs, FilterArgs, GlobalArgs, RemoteArgs, SummaryArgs, TargetArgs,
+};
 use cargo_brief::model::{CrateModel, compute_reachable_set};
 use cargo_brief::render::render_module_api;
 use cargo_brief::resolve;
 use cargo_brief::rustdoc_json;
 use cargo_brief::search;
+use cargo_brief::summary;
 
 /// Generate the model from the test fixture once (per test).
 fn fixture_model() -> CrateModel {
@@ -2172,5 +2175,174 @@ fn methods_of_exact_match_finds_correct_type() {
     assert!(
         !output.contains("DerivedStruct"),
         "--methods-of PubStruct should not include DerivedStruct items:\n{output}"
+    );
+}
+
+// === Summary Subcommand Tests ===
+
+#[test]
+fn test_summary_root_same_crate() {
+    let model = fixture_model();
+    let output = summary::render_summary(&model, None, true, None);
+
+    // Should have the crate header
+    assert!(
+        output.starts_with("// crate test_fixture"),
+        "summary should start with crate header:\n{output}"
+    );
+    // Should list the outer module with counts
+    assert!(
+        output.contains("mod outer;"),
+        "summary should list mod outer:\n{output}"
+    );
+    // outer has traits, structs, enums, fns, etc.
+    assert!(
+        output.contains("traits"),
+        "outer module should have traits:\n{output}"
+    );
+    assert!(
+        output.contains("structs"),
+        "outer module should have structs:\n{output}"
+    );
+    // Should have root-level items (deprecated_function, DeprecatedStruct, etc.)
+    assert!(
+        output.contains("// root:"),
+        "summary should have root items:\n{output}"
+    );
+}
+
+#[test]
+fn test_summary_external_view() {
+    let model = fixture_model();
+    let reachable = compute_reachable_set(&model);
+    let output = summary::render_summary(&model, None, false, Some(&reachable));
+
+    // Should have the crate header
+    assert!(
+        output.starts_with("// crate test_fixture"),
+        "summary should start with crate header:\n{output}"
+    );
+    // pub(crate) items should not be counted — external view
+    // hidden_reexport module itself is pub(crate), but its items are glob-reexported
+    // So hidden_reexport should NOT appear as a module
+    assert!(
+        !output.contains("mod hidden_reexport"),
+        "pub(crate) module should not appear in external view:\n{output}"
+    );
+    // outer module should still appear
+    assert!(
+        output.contains("mod outer;"),
+        "public module should appear:\n{output}"
+    );
+}
+
+#[test]
+fn test_summary_module_scoped() {
+    let model = fixture_model();
+    let output = summary::render_summary(&model, Some("outer"), true, None);
+
+    // Should reference the scoped module in header
+    assert!(
+        output.contains("// crate test_fixture::outer"),
+        "scoped summary should reference module in header:\n{output}"
+    );
+    // Should list inner module
+    assert!(
+        output.contains("mod inner;"),
+        "should list inner submodule:\n{output}"
+    );
+    // Should have root-level counts for outer's direct items
+    assert!(
+        output.contains("// root:"),
+        "should have root counts for outer's items:\n{output}"
+    );
+}
+
+#[test]
+fn test_summary_empty_module_omitted() {
+    let model = fixture_model();
+    let reachable = compute_reachable_set(&model);
+    let output = summary::render_summary(&model, Some("outer"), false, Some(&reachable));
+
+    // outer::inner has InnerPub (public) but InnerCrate, InnerSuper, InnerRestricted
+    // are not public. inner should appear if it has at least one public item.
+    // Check that any module line with zero items is absent.
+    for line in output.lines() {
+        if line.starts_with("mod ") {
+            assert!(
+                line.contains("//"),
+                "module line should have counts (empty modules omitted): {line}"
+            );
+        }
+    }
+}
+
+#[test]
+fn test_summary_pipeline() {
+    let args = SummaryArgs {
+        target: TargetArgs {
+            crate_name: "test-fixture".to_string(),
+            module_path: None,
+            at_package: None,
+            at_mod: None,
+            manifest_path: Some("test_fixture/Cargo.toml".to_string()),
+        },
+        remote: RemoteArgs {
+            crates: None,
+            features: None,
+            no_cache: false,
+            clean: None,
+        },
+        global: GlobalArgs {
+            toolchain: "nightly".to_string(),
+            verbose: false,
+        },
+    };
+    let output = cargo_brief::run_summary_pipeline(&args).unwrap();
+    assert!(
+        output.contains("// crate test_fixture"),
+        "pipeline should produce summary with crate header:\n{output}"
+    );
+    assert!(
+        output.contains("mod outer"),
+        "pipeline should list outer module:\n{output}"
+    );
+}
+
+#[test]
+fn test_summary_column_alignment() {
+    let model = fixture_model();
+    let output = summary::render_summary(&model, None, true, None);
+
+    // All mod lines should have their // comments at the same column
+    let mod_lines: Vec<&str> = output.lines().filter(|l| l.starts_with("mod ")).collect();
+    if mod_lines.len() >= 2 {
+        let comment_positions: Vec<usize> = mod_lines.iter().filter_map(|l| l.find("//")).collect();
+        let first = comment_positions[0];
+        for (i, &pos) in comment_positions.iter().enumerate() {
+            assert_eq!(
+                pos, first,
+                "comment columns should be aligned: line {} has // at {}, expected {}",
+                i, pos, first
+            );
+        }
+    }
+}
+
+#[test]
+fn test_summary_reexport_counted_as_target_kind() {
+    let model = fixture_model();
+    let reachable = compute_reachable_set(&model);
+    let output = summary::render_summary(&model, None, false, Some(&reachable));
+
+    // `pub use outer::PubStruct as ReExported;` should be counted as a struct at root level
+    // The root should have structs in its count
+    let root_line = output
+        .lines()
+        .find(|l| l.starts_with("// root:"))
+        .expect("should have root line");
+    assert!(
+        root_line.contains("structs"),
+        "re-exported struct should be counted as struct at root:\n{output}"
     );
 }

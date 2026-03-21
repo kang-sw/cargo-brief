@@ -113,6 +113,25 @@ MATCHING:
   Smart-case: all-lowercase pattern = case-insensitive, any uppercase = case-sensitive.
   Without a pattern, lists files with their //! doc comments.")]
     Examples(ExamplesArgs),
+
+    /// Show a compact module-level summary with item counts
+    #[command(after_help = "\
+EXAMPLES:
+  # Summarize the current crate
+  cargo brief summary self
+
+  # Summarize a remote crate
+  cargo brief summary --crates tokio@1 --features full
+
+  # Summarize a specific module
+  cargo brief summary --crates bevy bevy::ecs
+
+OUTPUT:
+  One line per visible module with item counts:
+    mod io;          // 4 traits, 15 structs, 8 fns
+    mod sync::mpsc;  // 4 structs
+    // root: 5 macros, 2 fns")]
+    Summary(SummaryArgs),
 }
 
 // === Shared Args Groups ===
@@ -354,6 +373,19 @@ pub struct ExamplesArgs {
     /// Include benches/ directory [default depth: unlimited]
     #[arg(long, num_args(0..=1), default_missing_value = "999", value_name = "DEPTH")]
     pub benches: Option<u32>,
+}
+
+/// Arguments for the `summary` subcommand.
+#[derive(Args, Debug, Clone)]
+pub struct SummaryArgs {
+    #[command(flatten)]
+    pub target: TargetArgs,
+
+    #[command(flatten)]
+    pub remote: RemoteArgs,
+
+    #[command(flatten)]
+    pub global: GlobalArgs,
 }
 
 impl ExamplesArgs {

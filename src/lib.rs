@@ -7,6 +7,7 @@ pub mod render;
 pub mod resolve;
 pub mod rustdoc_json;
 pub mod search;
+pub mod summary;
 
 /// Clean cached remote crate workspaces. Empty spec = all.
 pub fn clean_cache(spec: &str) -> anyhow::Result<()> {
@@ -19,7 +20,7 @@ use std::path::{Path, PathBuf};
 use anyhow::{Context, Result};
 use rustdoc_types::{Id, ItemEnum, Visibility};
 
-use cli::{ApiArgs, ExamplesArgs, FilterArgs, SearchArgs};
+use cli::{ApiArgs, ExamplesArgs, FilterArgs, SearchArgs, SummaryArgs};
 use model::{CrateModel, compute_reachable_set};
 
 /// Result of glob re-export expansion. Contains both the item names (for Phase 1
@@ -618,6 +619,152 @@ pub fn run_examples_pipeline(args: &ExamplesArgs) -> Result<String> {
 
         Ok(examples::render_examples(&source_root, &pkg_name, args))
     }
+}
+
+/// Run the summary pipeline and return the rendered output string.
+pub fn run_summary_pipeline(args: &SummaryArgs) -> Result<String> {
+    let ctx = if let Some(spec) = &args.remote.crates {
+        build_remote_context_summary(args, spec)?
+    } else {
+        build_local_context_summary(args)?
+    };
+    run_shared_summary_pipeline(&ctx)
+}
+
+fn build_local_context_summary(args: &SummaryArgs) -> Result<PipelineContext> {
+    if args.global.verbose {
+        eprintln!(
+            "[cargo-brief] Resolving target '{}'...",
+            args.target.crate_name
+        );
+    }
+    let metadata = resolve::load_cargo_metadata(args.target.manifest_path.as_deref())
+        .context("Failed to load cargo metadata")?;
+
+    let resolved = resolve::resolve_target(
+        &args.target.crate_name,
+        args.target.module_path.as_deref(),
+        &metadata,
+    )
+    .context("Failed to resolve target")?;
+
+    let observer_package = args
+        .target
+        .at_package
+        .clone()
+        .or(metadata.current_package.clone());
+
+    Ok(PipelineContext {
+        manifest_path: args.target.manifest_path.clone(),
+        target_dir: metadata.target_dir,
+        package_name: resolved.package_name,
+        module_path: resolved.module_path,
+        observer_package,
+        toolchain: args.global.toolchain.clone(),
+        verbose: args.global.verbose,
+        use_cache: false,
+        crate_header: None,
+        _workspace: None,
+    })
+}
+
+fn build_remote_context_summary(args: &SummaryArgs, spec: &str) -> Result<PipelineContext> {
+    // Same module-path extraction logic as api subcommand
+    let module_path = if args.target.crate_name != "self" && args.target.module_path.is_none() {
+        let name = &args.target.crate_name;
+        if let Some(idx) = name.find("::") {
+            let rest = &name[idx + 2..];
+            if rest.is_empty() {
+                None
+            } else {
+                Some(rest.to_string())
+            }
+        } else {
+            Some(name.clone())
+        }
+    } else {
+        args.target.module_path.clone()
+    };
+
+    let (name, _) = remote::parse_crate_spec(spec);
+    if args.global.verbose {
+        eprintln!("[cargo-brief] Resolving workspace for '{name}'...");
+    }
+    let (workspace, resolved_version) =
+        remote::resolve_workspace(spec, args.remote.features.as_deref(), args.remote.no_cache)
+            .with_context(|| format!("Failed to create workspace for '{name}'"))?;
+
+    let manifest_path = workspace
+        .path()
+        .join("Cargo.toml")
+        .to_string_lossy()
+        .into_owned();
+
+    let metadata = resolve::load_cargo_metadata(Some(&manifest_path))
+        .context("Failed to load cargo metadata for remote crate")?;
+
+    let crate_header = build_remote_crate_header(
+        &name,
+        resolved_version.as_deref(),
+        workspace.path(),
+        args.remote.features.as_deref(),
+    );
+
+    Ok(PipelineContext {
+        manifest_path: Some(manifest_path),
+        target_dir: metadata.target_dir,
+        package_name: name,
+        module_path,
+        observer_package: None,
+        toolchain: args.global.toolchain.clone(),
+        verbose: args.global.verbose,
+        use_cache: true,
+        crate_header,
+        _workspace: Some(workspace),
+    })
+}
+
+fn run_shared_summary_pipeline(ctx: &PipelineContext) -> Result<String> {
+    let (model, same_crate, reachable) = generate_and_parse_model(ctx)?;
+
+    let mut output = summary::render_summary(
+        &model,
+        ctx.module_path.as_deref(),
+        same_crate,
+        reachable.as_ref(),
+    );
+
+    // Cross-crate: if facade and no module scoping, discover sub-crates
+    if ctx.module_path.is_none() && cross_crate::root_has_cross_crate_reexports(&model) {
+        if ctx.verbose {
+            eprintln!("[cargo-brief] Discovering cross-crate re-exports...");
+        }
+        let sub_crates = cross_crate::discover_all_reexported_crates(
+            &model,
+            &ctx.toolchain,
+            ctx.manifest_path.as_deref(),
+            &ctx.target_dir,
+            ctx.verbose,
+        );
+        for sub in &sub_crates {
+            let sub_reachable = Some(compute_reachable_set(&sub.model));
+            let sub_output =
+                summary::render_summary(&sub.model, None, false, sub_reachable.as_ref());
+            summary::merge_sub_crate_summary(&mut output, &sub_output, &sub.display_name);
+        }
+    }
+
+    // Enrich header with version + features if available
+    if let Some(header) = &ctx.crate_header
+        && let Some(first_newline) = output.find('\n')
+    {
+        let first_line = &output[..first_newline];
+        if first_line.starts_with("// crate ") {
+            output.replace_range(..first_newline, header);
+        }
+    }
+
+    Ok(output)
 }
 
 /// Build an enriched `// crate name[version] features = [...]` header for remote crates.
