@@ -139,10 +139,21 @@ fn build_local_context_api(args: &ApiArgs) -> Result<PipelineContext> {
 
 fn build_remote_context_api(args: &ApiArgs, spec: &str) -> Result<PipelineContext> {
     // When --crates is used, the first positional arg (crate_name) may actually be
-    // a module path (e.g., `cargo brief api --crates bevy ecs` → crate_name="ecs").
-    // Merge it into module_path if it's not "self".
+    // a module path (e.g., `cargo brief api --crates bevy ecs` → crate_name="ecs",
+    // or `cargo brief api --crates bevy bevy::ecs` → crate_name="bevy::ecs").
+    // Parse "::" to extract module path, consistent with resolve_target Case 2.
     let module_path = if args.target.crate_name != "self" && args.target.module_path.is_none() {
-        Some(args.target.crate_name.clone())
+        let name = &args.target.crate_name;
+        if let Some(idx) = name.find("::") {
+            let rest = &name[idx + 2..];
+            if rest.is_empty() {
+                None
+            } else {
+                Some(rest.to_string())
+            }
+        } else {
+            Some(name.clone())
+        }
     } else {
         args.target.module_path.clone()
     };
