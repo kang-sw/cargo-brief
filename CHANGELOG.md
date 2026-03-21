@@ -24,6 +24,7 @@ All notable changes to this project will be documented in this file.
 
 ### Performance
 
+- **Batch rustdoc JSON pre-warming**: Cross-crate facade expansion (e.g., `bevy` with 44+ sub-crates) now batch-generates rustdoc JSON via a single `cargo doc` invocation with `RUSTDOCFLAGS`, instead of sequential per-crate `cargo rustdoc` calls. Package names are validated against `Cargo.lock` before batching (prevents `cargo doc` abort on invalid names). Recursive BFS discovers transitive sub-crate dependencies level by level (max depth 8). Existing per-crate calls hit the pre-warmed cache.
 - Cross-crate glob expansion now caches rustdoc JSON for non-workspace dependencies (identified via `cargo metadata`). External deps locked by `Cargo.lock` are treated as immutable — repeat queries skip `cargo rustdoc` entirely.
 
 ## [0.5.1] - 2026-03-20
