@@ -1,9 +1,9 @@
 ---
-title: "--summary / TOC mode for large crates"
+title: "summary subcommand — module TOC with item counts"
 status: idea
 ---
 
-# Idea: `--summary` / TOC mode for large crates
+# Summary Subcommand
 
 ## Priority: P2
 
@@ -16,39 +16,48 @@ Large crates produce thousands of lines with no progressive disclosure:
 
 An LLM exploring an unfamiliar crate needs a 20-30 line overview first,
 then targeted drill-down. Currently the only option is reading the full
-output or using `--search` (which requires knowing what to search for).
+output or using `search` (which requires knowing what to search for).
 
-## Ideas
+## Design (confirmed)
 
-### A. `--summary` flag
+New subcommand: `cargo brief summary <target> [OPTIONS]`
 
-Ultra-compact TOC: module names + item counts + top re-exports.
+### Output format
 
 ```
-// crate tokio (6 modules, 5 macros)
-mod io       // 4 traits, 15 structs, 8 fns
-mod net      // 5 structs (TcpStream, TcpListener, UdpSocket, ...)
-mod runtime  // 3 structs (Runtime, Builder, Handle)
-mod sync     // 8 structs (Mutex, RwLock, Semaphore, Notify, ...)
-mod task     // 3 fns (spawn, spawn_blocking, spawn_local), 2 structs
-mod time     // 3 structs (Instant, Interval, Sleep), 3 fns
-// top-level: spawn, pin!, select!, join!, try_join!, task_local!
+// crate tokio v1.38.0
+mod io;                 // 4 traits, 15 structs, 8 fns
+mod io::util;           // 12 structs, 6 fns
+mod sync;               // 2 traits, 8 structs, 3 fns
+mod sync::mpsc;         // 4 structs
+mod task;               // 2 structs, 3 fns
+mod time;               // 3 structs, 3 fns
+// root: 5 macros, 2 fns
 ```
 
-### B. Token budget mode `--max-tokens N`
+- Counts only, no item names — keeps output predictable and compact
+- Zero-count kinds omitted
+- All visible submodules listed flat (not tree)
+- Existing visibility system applied (reachable set, is_visible_from)
+- `pub use hidden::*` items counted at the re-exporting module level
 
-Estimate output tokens and auto-truncate with a `// ... N more items` message.
-Useful when the LLM agent has a fixed context budget.
+### Target resolution
 
-### C. Smarter default depth
+Shares the same target resolution as `api`/`search`:
+- `cargo brief summary bevy::ecs` → crate bevy, module ecs
+- `cargo brief summary --crates tokio` → remote crate
+- `cargo brief summary self` → current package
 
-When output exceeds N lines, auto-suggest `--compact` or `--search`:
-```
-// crate axum (2,220 lines) — use --compact (438 lines) or --search <pattern>
-```
+### Shared options
+
+`--crates`, `--features`, `--toolchain`, `-v`, `--manifest-path` — same as
+other subcommands.
+
+## Prerequisites
+
+- ~~`--crates` positional arg `crate::module` parsing~~ (fixed: 39ad132)
 
 ## Complexity
 
-- A: Medium — requires counting items per module without rendering them
-- B: Medium — token estimation + truncation logic
-- C: Low — just a comment in the output header
+Medium. New `summary.rs` module + `SummaryArgs` in cli.rs + pipeline
+in lib.rs. No changes to existing api/search/examples pipelines.
