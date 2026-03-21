@@ -2428,6 +2428,177 @@ fn test_search_kind_no_match() {
     );
 }
 
+// === Search Pattern DSL Tests ===
+
+#[test]
+fn search_glob_star_matches_suffix() {
+    let model = fixture_model();
+    let output = search_output(&model, "*Enum");
+    assert!(
+        output.contains("enum outer::PlainEnum"),
+        "glob *Enum should match PlainEnum:\n{output}"
+    );
+    assert!(
+        output.contains("enum outer::TupleEnum"),
+        "glob *Enum should match TupleEnum:\n{output}"
+    );
+    assert!(
+        output.contains("enum outer::StructEnum"),
+        "glob *Enum should match StructEnum:\n{output}"
+    );
+    // Should NOT match things that don't end with Enum (check for "struct outer" to avoid doc comments)
+    assert!(
+        !output.contains("struct outer"),
+        "glob *Enum should not match structs:\n{output}"
+    );
+}
+
+#[test]
+fn search_glob_question_mark() {
+    let model = fixture_model();
+    let output = search_output(&model, "*::?lpha");
+    assert!(
+        output.contains("Alpha"),
+        "glob ?lpha should match Alpha:\n{output}"
+    );
+    assert!(
+        !output.contains("Beta"),
+        "glob ?lpha should not match Beta:\n{output}"
+    );
+}
+
+#[test]
+fn search_glob_mid_pattern() {
+    let model = fixture_model();
+    // Full-path anchored: need leading * to match "outer::PubStruct::pub_method"
+    let output = search_output(&model, "*pub*method");
+    assert!(
+        output.contains("pub_method"),
+        "glob *pub*method should match pub_method:\n{output}"
+    );
+}
+
+#[test]
+fn search_bare_word_still_substring() {
+    let model = fixture_model();
+    let output = search_output(&model, "Struct");
+    // Substring still works — matches PubStruct, GenericStruct, etc.
+    assert!(
+        output.contains("PubStruct"),
+        "bare word Struct should substring-match PubStruct:\n{output}"
+    );
+}
+
+#[test]
+fn search_exclude_basic() {
+    let model = fixture_model();
+    let output = search_output(&model, "function -async");
+    assert!(
+        output.contains("free_function"),
+        "should find free_function:\n{output}"
+    );
+    assert!(
+        !output.contains("async_function"),
+        "should exclude async_function:\n{output}"
+    );
+}
+
+#[test]
+fn search_exclude_glob() {
+    let model = fixture_model();
+    let output = search_output(&model, "*Enum -*Tuple*");
+    assert!(
+        output.contains("PlainEnum"),
+        "should find PlainEnum:\n{output}"
+    );
+    assert!(
+        !output.contains("TupleEnum"),
+        "glob exclusion should remove TupleEnum:\n{output}"
+    );
+}
+
+#[test]
+fn search_exclude_global_across_or() {
+    let model = fixture_model();
+    let output = search_output(&model, "PlainEnum,TupleEnum -Alpha");
+    // Check for "::Alpha" to avoid matching the search pattern in the header line
+    assert!(
+        !output.contains("::Alpha"),
+        "exclusion -Alpha should apply across OR groups:\n{output}"
+    );
+    assert!(
+        output.contains("Beta") || output.contains("PlainEnum") || output.contains("TupleEnum"),
+        "should still find non-excluded items:\n{output}"
+    );
+}
+
+#[test]
+fn search_exact_match() {
+    let model = fixture_model();
+    let output = search_output(&model, "=Alpha");
+    assert!(
+        output.contains("Alpha"),
+        "=Alpha should find Alpha variant:\n{output}"
+    );
+    // Should not find items that merely contain "Alpha" as substring
+    // (Alpha is only a variant name, so exact match and substring would match the same here)
+    assert!(
+        output.contains("(1 results)") || output.contains("Alpha"),
+        "=Alpha should find results:\n{output}"
+    );
+}
+
+#[test]
+fn search_exact_no_substring() {
+    let model = fixture_model();
+    let output = search_output(&model, "=Struct");
+    // No item has "Struct" as its exact final component — PubStruct, GenericStruct, etc. all have longer names
+    assert!(
+        output.contains("(0 results)"),
+        "=Struct should not match PubStruct (exact match only):\n{output}"
+    );
+}
+
+#[test]
+fn search_exact_case_insensitive() {
+    let model = fixture_model();
+    let output = search_output(&model, "=alpha");
+    assert!(
+        output.contains("Alpha"),
+        "=alpha should match Alpha (smart-case: all lowercase = case insensitive):\n{output}"
+    );
+}
+
+#[test]
+fn search_combined_exact_and_exclude() {
+    let model = fixture_model();
+    let output = search_output(&model, "=pub_method,=pub_field -pub_field");
+    assert!(
+        output.contains("pub_method"),
+        "should keep pub_method:\n{output}"
+    );
+    // Check for "::pub_field" to avoid matching the search pattern in the header line
+    assert!(
+        !output.contains("::pub_field"),
+        "should exclude pub_field:\n{output}"
+    );
+}
+
+#[test]
+fn search_glob_and_substring_and() {
+    let model = fixture_model();
+    let output = search_output(&model, "outer *Struct");
+    // AND of substring "outer" and glob "*Struct"
+    assert!(
+        output.contains("PubStruct"),
+        "should match outer::PubStruct:\n{output}"
+    );
+    assert!(
+        output.contains("GenericStruct"),
+        "should match outer::GenericStruct:\n{output}"
+    );
+}
+
 #[test]
 fn test_search_kind_trait() {
     let model = fixture_model();

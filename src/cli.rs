@@ -75,13 +75,33 @@ EXAMPLES:
   # OR-match with comma: find items matching either term
   cargo brief search self \"EventReader,EventWriter\"
 
+  # Glob wildcards, exact match, and exclusion
+  cargo brief search bevy \"Shader*Ref\"
+  cargo brief search bevy \"=Router\"
+  cargo brief search bevy -- spawn -test
+
 SEARCH MATCHING:
   Multiple pattern arguments are joined with spaces (AND-matched).
-  Smart-case: all-lowercase pattern → case-insensitive, any uppercase → case-sensitive.
-  Space-separated words are AND-matched: \"World spawn\" finds items whose path contains both.
-  Comma-separated terms are OR-matched: \"Foo,Bar\" finds items matching either.
-  Comma splits into OR groups; within each group, spaces are AND.
-  Example: \"World spawn,despawn\" matches paths containing (World AND spawn) OR (despawn).
+  Smart-case: all-lowercase → case-insensitive, any uppercase → case-sensitive.
+
+  OPERATORS (per token):
+    word        Substring: path contains \"word\" (default, same as before)
+    w*ld        Glob: * = 0+ chars, ? = 1 char (activates when token has * or ?)
+    =Name       Exact: final path component (after last ::) equals \"Name\"
+    -term       Exclude: remove results matching term (substring, glob, or -=exact)
+
+  COMBINING:
+    Space = AND: \"World spawn\" requires both in path
+    Comma = OR: \"Foo,Bar\" matches either
+    Exclusions are global: \"-test\" removes matches from ALL OR groups
+    Stacking: -=Name excludes items whose final component is \"Name\"
+
+  EXAMPLES:
+    cargo brief search bevy \"Shader*Ref\"          # glob
+    cargo brief search bevy \"=Router\"              # exact name only
+    cargo brief search bevy -- spawn -test         # exclude (-- required for -prefix)
+    cargo brief search bevy \"*Plugin*,*Resource* -test\"  # OR + exclusion
+    cargo brief search self \"=new,=default\"        # exact OR
 
 OUTPUT:
   One line per match with full path prefix:

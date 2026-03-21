@@ -1,6 +1,7 @@
 ---
 title: "Search pattern DSL — glob wildcards, exclusion, exact match"
-status: todo
+status: wip
+started: 2026-03-21
 ---
 
 # Search Pattern DSL
@@ -99,3 +100,16 @@ cargo brief search http -- =Request --search-kind struct
 
 Medium. Pattern parsing + glob-to-regex conversion + filter pipeline.
 ~80 lines of new matching logic in `search.rs`.
+
+### Result - 26-03-21
+
+Implemented all three operators: glob (`*`/`?`), exclusion (`-term`), exact (`=term`).
+
+- `TokenKind` enum + `ParsedPattern` struct + `parse_pattern()` + `glob_match()` + `token_matches()` added to `src/search.rs` after `parse_search_limit()`.
+- Replaced the old substring-only OR/AND matching block in `render_search_inner()` with `parse_pattern()` dispatch + global exclusion post-filter.
+- Glob matching uses iterative two-pointer algorithm (~25 lines), no regex dependency needed.
+- Exclusions are global across OR groups as designed.
+- Smart-case applies uniformly to all token types.
+- Updated CLI `after_help` text with operator docs and examples.
+- 15 unit tests for `glob_match` + `parse_pattern`, 12 integration tests covering all operators and combinations.
+- All 146 integration tests pass. No clippy regressions.

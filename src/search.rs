@@ -120,6 +120,136 @@ fn parse_search_limit(raw: Option<&str>) -> (usize, Option<usize>) {
     }
 }
 
+// === Pattern DSL ===
+
+/// A parsed token kind.
+enum TokenKind {
+    /// `path.contains(s)` — bare word, no wildcards
+    Substring(String),
+    /// `glob_match(pat, path)` — token contains `*` or `?`
+    Glob(String),
+    /// `path.rsplit("::").next() == Some(name)` — `=term` syntax
+    Exact(String),
+}
+
+/// Parsed result of the full pattern string.
+struct ParsedPattern {
+    /// OR groups of positive (include) tokens. Each group is AND-matched.
+    or_groups: Vec<Vec<TokenKind>>,
+    /// Exclusion tokens from all groups, applied as global post-filter.
+    exclusions: Vec<TokenKind>,
+}
+
+/// Parse a pattern string into structured tokens.
+///
+/// 1. Split by `,` → OR groups.
+/// 2. Each group: split by whitespace → raw tokens.
+/// 3. Per token: strip `-` prefix → exclusion. Strip `=` prefix → Exact.
+///    Contains `*`/`?` → Glob. Else → Substring.
+/// 4. Apply case normalization if `!case_sensitive`.
+fn parse_pattern(pattern: &str, case_sensitive: bool) -> ParsedPattern {
+    let mut or_groups: Vec<Vec<TokenKind>> = Vec::new();
+    let mut exclusions: Vec<TokenKind> = Vec::new();
+
+    for group_str in pattern.split(',') {
+        let mut group_tokens: Vec<TokenKind> = Vec::new();
+
+        for raw_token in group_str.split_whitespace() {
+            let (is_exclude, rest) = if let Some(rest) = raw_token.strip_prefix('-') {
+                (true, rest)
+            } else {
+                (false, raw_token)
+            };
+
+            // Skip empty remainder (bare `-` or bare `=`)
+            if rest.is_empty() {
+                continue;
+            }
+
+            let token = if let Some(name) = rest.strip_prefix('=') {
+                if name.is_empty() {
+                    continue;
+                }
+                let name = if case_sensitive {
+                    name.to_string()
+                } else {
+                    name.to_lowercase()
+                };
+                TokenKind::Exact(name)
+            } else if rest.contains('*') || rest.contains('?') {
+                let pat = if case_sensitive {
+                    rest.to_string()
+                } else {
+                    rest.to_lowercase()
+                };
+                TokenKind::Glob(pat)
+            } else {
+                let s = if case_sensitive {
+                    rest.to_string()
+                } else {
+                    rest.to_lowercase()
+                };
+                TokenKind::Substring(s)
+            };
+
+            if is_exclude {
+                exclusions.push(token);
+            } else {
+                group_tokens.push(token);
+            }
+        }
+
+        if !group_tokens.is_empty() {
+            or_groups.push(group_tokens);
+        }
+    }
+
+    ParsedPattern {
+        or_groups,
+        exclusions,
+    }
+}
+
+/// Iterative glob matcher supporting `*` (0+ chars) and `?` (1 char).
+fn glob_match(pattern: &str, text: &str) -> bool {
+    let pat = pattern.as_bytes();
+    let txt = text.as_bytes();
+    let (mut pi, mut ti) = (0, 0);
+    let (mut star_pi, mut star_ti) = (usize::MAX, 0);
+
+    while ti < txt.len() {
+        if pi < pat.len() && (pat[pi] == b'?' || pat[pi] == txt[ti]) {
+            pi += 1;
+            ti += 1;
+        } else if pi < pat.len() && pat[pi] == b'*' {
+            star_pi = pi;
+            star_ti = ti;
+            pi += 1;
+        } else if star_pi != usize::MAX {
+            pi = star_pi + 1;
+            star_ti += 1;
+            ti = star_ti;
+        } else {
+            return false;
+        }
+    }
+
+    while pi < pat.len() && pat[pi] == b'*' {
+        pi += 1;
+    }
+
+    pi == pat.len()
+}
+
+/// Check if a token matches a path string.
+fn token_matches(token: &TokenKind, path: &str) -> bool {
+    match token {
+        TokenKind::Substring(s) => path.contains(s.as_str()),
+        TokenKind::Glob(g) => glob_match(g, path),
+        TokenKind::Exact(name) => path.rsplit("::").next() == Some(name.as_str()),
+    }
+}
+
 /// Run search mode: find all leaf items matching the pattern and render them.
 pub fn render_search(
     model: &CrateModel,
@@ -234,27 +364,9 @@ fn render_search_inner(
 
     // Smart-case: all-lowercase → case-insensitive, any uppercase → case-sensitive
     let case_sensitive = pattern.chars().any(|c| c.is_uppercase());
+    let parsed = parse_pattern(pattern, case_sensitive);
 
-    // Comma-separated OR groups, each group is AND of space-separated tokens.
-    // Empty groups (from trailing commas) are filtered out to avoid matching everything.
-    let or_groups: Vec<Vec<String>> = pattern
-        .split(',')
-        .map(|group| {
-            group
-                .split_whitespace()
-                .map(|t| {
-                    if case_sensitive {
-                        t.to_string()
-                    } else {
-                        t.to_lowercase()
-                    }
-                })
-                .collect()
-        })
-        .filter(|group: &Vec<String>| !group.is_empty())
-        .collect();
-
-    // Filter by pattern
+    // Positive pattern matching (OR of AND groups)
     let mut matched: Vec<&LeafItem> = leaves
         .iter()
         .filter(|leaf| {
@@ -263,11 +375,27 @@ fn render_search_inner(
             } else {
                 leaf.path.to_lowercase()
             };
-            or_groups
+            parsed
+                .or_groups
                 .iter()
-                .any(|group| group.iter().all(|tok| path.contains(tok.as_str())))
+                .any(|group| group.iter().all(|tok| token_matches(tok, &path)))
         })
         .collect();
+
+    // Global exclusions
+    if !parsed.exclusions.is_empty() {
+        matched.retain(|leaf| {
+            let path = if case_sensitive {
+                leaf.path.clone()
+            } else {
+                leaf.path.to_lowercase()
+            };
+            !parsed
+                .exclusions
+                .iter()
+                .any(|tok| token_matches(tok, &path))
+        });
+    }
 
     // --methods-of: exact parent-type segment matching
     if let Some(type_name) = methods_of {
@@ -1028,4 +1156,114 @@ fn collect_impl_summary(model: &CrateModel, item: &Item, args: &FilterArgs) -> S
     }
 
     format!("// {}", parts.join(", "))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn glob_match_star_any() {
+        assert!(glob_match("*", "anything"));
+        assert!(glob_match("*", ""));
+    }
+
+    #[test]
+    fn glob_match_question_mark() {
+        assert!(glob_match("?", "a"));
+        assert!(!glob_match("?", ""));
+        assert!(!glob_match("?", "ab"));
+    }
+
+    #[test]
+    fn glob_match_prefix_star() {
+        assert!(glob_match("*Enum", "PlainEnum"));
+        assert!(glob_match("*Enum", "Enum"));
+        assert!(!glob_match("*Enum", "EnumX"));
+    }
+
+    #[test]
+    fn glob_match_suffix_star() {
+        assert!(glob_match("a*b", "ab"));
+        assert!(glob_match("a*b", "axb"));
+        assert!(glob_match("a*b", "axxxb"));
+        assert!(!glob_match("a*b", "axbc"));
+    }
+
+    #[test]
+    fn glob_match_mid_question() {
+        assert!(glob_match("a?c", "abc"));
+        assert!(!glob_match("a?c", "ac"));
+        assert!(!glob_match("a?c", "abbc"));
+    }
+
+    #[test]
+    fn glob_match_multi_star() {
+        assert!(glob_match("*x*y*", "xxy"));
+        assert!(glob_match("*x*y*", "aaxbbycc"));
+        assert!(!glob_match("*x*y*", "aaxbb"));
+    }
+
+    #[test]
+    fn glob_match_exact() {
+        assert!(glob_match("hello", "hello"));
+        assert!(!glob_match("hello", "hello!"));
+        assert!(!glob_match("hello", "hell"));
+    }
+
+    #[test]
+    fn glob_match_empty() {
+        assert!(glob_match("", ""));
+        assert!(!glob_match("", "a"));
+    }
+
+    #[test]
+    fn parse_pattern_basic() {
+        let p = parse_pattern("foo bar", true);
+        assert_eq!(p.or_groups.len(), 1);
+        assert_eq!(p.or_groups[0].len(), 2);
+        assert!(p.exclusions.is_empty());
+    }
+
+    #[test]
+    fn parse_pattern_or_groups() {
+        let p = parse_pattern("foo,bar baz", true);
+        assert_eq!(p.or_groups.len(), 2);
+        assert_eq!(p.or_groups[0].len(), 1);
+        assert_eq!(p.or_groups[1].len(), 2);
+    }
+
+    #[test]
+    fn parse_pattern_exclusion() {
+        let p = parse_pattern("foo -bar", true);
+        assert_eq!(p.or_groups.len(), 1);
+        assert_eq!(p.exclusions.len(), 1);
+    }
+
+    #[test]
+    fn parse_pattern_exact() {
+        let p = parse_pattern("=Name", true);
+        assert_eq!(p.or_groups.len(), 1);
+        assert!(matches!(&p.or_groups[0][0], TokenKind::Exact(n) if n == "Name"));
+    }
+
+    #[test]
+    fn parse_pattern_exclude_exact() {
+        let p = parse_pattern("-=Name", true);
+        assert!(p.or_groups.is_empty());
+        assert_eq!(p.exclusions.len(), 1);
+        assert!(matches!(&p.exclusions[0], TokenKind::Exact(n) if n == "Name"));
+    }
+
+    #[test]
+    fn parse_pattern_glob_detected() {
+        let p = parse_pattern("foo*bar", true);
+        assert!(matches!(&p.or_groups[0][0], TokenKind::Glob(_)));
+    }
+
+    #[test]
+    fn parse_pattern_case_insensitive() {
+        let p = parse_pattern("Foo", false);
+        assert!(matches!(&p.or_groups[0][0], TokenKind::Substring(s) if s == "foo"));
+    }
 }

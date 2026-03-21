@@ -1,11 +1,11 @@
 # Overview
 
 ## Entry Points
-- `src/lib.rs` — `run_api_pipeline(&ApiArgs)`, `run_search_pipeline(&SearchArgs)`, and `run_examples_pipeline(&ExamplesArgs)` are the three pipeline entry points; start here.
-- `src/main.rs` — CLI dispatch only: parses `BriefCommand` enum and dispatches to the three pipeline functions (dual invocation: `cargo brief <sub>` vs `cargo-brief <sub>`).
+- `src/lib.rs` — `run_api_pipeline`, `run_search_pipeline`, `run_examples_pipeline`, and `run_summary_pipeline` are the four pipeline entry points; start here.
+- `src/main.rs` — CLI dispatch only: parses `BriefCommand` enum and dispatches to the four pipeline functions (dual invocation: `cargo brief <sub>` vs `cargo-brief <sub>`).
 
 ## Module Contracts
-- `lib.rs` guarantees: three public pipeline functions. Both `run_api_pipeline` and `run_search_pipeline` follow the same two-phase structure: (1) build a `PipelineContext` via `build_local_context_*` or `build_remote_context_*`, then (2) call the shared `run_shared_api_pipeline` / `run_shared_search_pipeline`. Both local and remote paths get cross-crate discovery through the shared pipeline. `run_examples_pipeline` is disk-only — no rustdoc JSON, no model building; it reads `.rs` files directly from `examples/`, `tests/`, and `benches/` directories. No stage within a path may be reordered.
+- `lib.rs` guarantees: four public pipeline functions. Both `run_api_pipeline` and `run_search_pipeline` follow the same two-phase structure: (1) build a `PipelineContext` via `build_local_context_*` or `build_remote_context_*`, then (2) call the shared `run_shared_api_pipeline` / `run_shared_search_pipeline`. Both local and remote paths get cross-crate discovery through the shared pipeline. `run_examples_pipeline` is disk-only — no rustdoc JSON, no model building; it reads `.rs` files directly from `examples/`, `tests/`, and `benches/` directories. `run_summary_pipeline` uses the same `PipelineContext` two-phase structure as api/search. No stage within a path may be reordered.
 - `resolve`, `rustdoc_json`, `remote`, and `cross_crate` are pure utilities with zero internal dependencies on each other. They can be tested in isolation.
 - `model` depends only on `rustdoc_types` (external). `render` depends on `model` + `cli`.
 - `examples` depends only on `cli` (for `ExamplesArgs`). It has no dependency on `model`, `render`, `rustdoc_json`, or `resolve`.

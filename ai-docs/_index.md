@@ -136,7 +136,7 @@ Parsed via `rustdoc-types` 0.57. Post-macro-expansion output.
 - **rustdoc JSON + bincode caching**: Single `generate_rustdoc_json()` with `use_cache` parameter. Workspace members always regenerate; non-members skip if JSON exists. Bincode parse cache always used. `--clean [SPEC]` manages disk usage.
 - Visibility auto-detection: `same_crate` inferred from cwd package context. Cross-crate views use reachability-based filtering.
 - Glob re-export expansion: Phase 1 (individual `pub use` lines) + Phase 2 (`--expand-glob` inlines full definitions). **Recursive**: cross-crate glob chains followed up to depth 8 with cycle prevention. Underscore/hyphen package name fallback.
-- Search mode: `cargo brief search <pattern>` finds leaf items with smart-case matching (all-lowercase = insensitive, any uppercase = sensitive). Comma-separated = OR groups, space-separated = AND within group.
+- Search mode: `cargo brief search <pattern>` finds leaf items with smart-case matching (all-lowercase = insensitive, any uppercase = sensitive). Comma-separated = OR groups, space-separated = AND within group. Pattern DSL operators: glob wildcards (`*`/`?`, full-path anchored), exclusion (`-term`, global post-filter), exact name match (`=term`, final `::` segment). Operators are embedded in tokens — no new CLI flags.
 - `--methods-of <TYPE>`: exact parent-type matching (shows only methods/fields of the named type, not substring matches). Zero-result sub-crate headers suppressed in normal mode.
 - Crate-level docs: root module `//!` comments rendered after `// crate <name>` header. `--no-crate-docs` suppresses independently.
 - Trait impl collapsing: simple trait impls (no assoc items) collapsed into per-type summary comments. `--all` expands.
@@ -188,4 +188,3 @@ Domain-oriented operational knowledge in `ai-docs/mental-model/`:
 ## Backlog
 
 - `tickets/idea/260316-feat-search-kind-filter.md` — P2: `--search-kind` filter
-- `tickets/idea/260315-research-search-regex.md` — regex/glob search patterns

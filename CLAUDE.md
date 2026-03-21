@@ -160,6 +160,7 @@ alternatives considered, and trade-offs — focus on _why_ this approach was cho
 
 ## Recent Work
 
+- v0.5.1+: Search pattern DSL — glob wildcards (`*`/`?`), exclusion (`-term`), exact name match (`=term`). `parse_pattern()` + `glob_match()` + `token_matches()` in `src/search.rs`. No new CLI flags; operators embedded in tokens. 12 integration + 15 unit tests.
 - v0.5.1+: `summary` subcommand — compact module-level overview with item counts per kind. `src/summary.rs` with `render_summary()` + `merge_sub_crate_summary()`. Cross-crate facade support. 7 integration tests.
 - v0.5.1+: Recursive cross-crate glob expansion — `expand_glob_reexports()` follows nested `pub use crate::*` chains (max depth 8, cycle-safe). `try_generate_rustdoc_json()` handles underscore↔hyphen package name fallback. `source_models` is `Vec<CrateModel>` per source.
 - v0.5.1+: Unified local/remote pipelines — `PipelineContext` → shared `run_shared_api_pipeline()` / `run_shared_search_pipeline()` / `run_shared_summary_pipeline()`. Cross-crate discovery now automatic for local crates too.
