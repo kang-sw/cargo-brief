@@ -63,52 +63,37 @@ RESOLUTION RULES:
     /// Search for items by name across a crate
     #[command(after_help = "\
 EXAMPLES:
-  # Search for items by name (smart-case: lowercase=insensitive, uppercase=sensitive)
+  # Substring search (smart-case: all-lowercase = insensitive)
   cargo brief search --crates axum@0.8 Router route
-
-  # Multiple patterns are AND-matched (no quotes needed)
   cargo brief search --crates bevy ShaderRef Material
 
-  # List all methods/fields of a type
+  # OR-match with comma, methods-of
+  cargo brief search self \"EventReader,EventWriter\"
   cargo brief search --crates bytes@1 --methods-of Bytes
 
-  # OR-match with comma: find items matching either term
-  cargo brief search self \"EventReader,EventWriter\"
+  # Glob, exact match, exclusion
+  cargo brief search bevy \"Shader*Ref\"               # * = 0+ chars, ? = 1 char
+  cargo brief search bevy \"=Router\"                   # final :: segment only
+  cargo brief search bevy -- spawn -test              # -- needed for -prefix args
+  cargo brief search bevy \"*Plugin*,*Resource* -test\"
 
-  # Glob wildcards, exact match, and exclusion
-  cargo brief search bevy \"Shader*Ref\"
-  cargo brief search bevy \"=Router\"
-  cargo brief search bevy -- spawn -test
-
-SEARCH MATCHING:
-  Multiple pattern arguments are joined with spaces (AND-matched).
+PATTERN SYNTAX:
   Smart-case: all-lowercase → case-insensitive, any uppercase → case-sensitive.
+  Space = AND, comma = OR. Multiple args are joined with spaces.
 
-  OPERATORS (per token):
-    word        Substring: path contains \"word\" (default, same as before)
-    w*ld        Glob: * = 0+ chars, ? = 1 char (activates when token has * or ?)
-    =Name       Exact: final path component (after last ::) equals \"Name\"
-    -term       Exclude: remove results matching term (substring, glob, or -=exact)
+  Operators (per token):
+    word     substring — path contains \"word\"
+    w*ld     glob — * matches 0+ chars, ? matches 1 char (full-path anchored)
+    =Name    exact — final path segment (after last ::) equals \"Name\"
+    -term    exclude — remove matches (works with substring, glob, or -=exact)
 
-  COMBINING:
-    Space = AND: \"World spawn\" requires both in path
-    Comma = OR: \"Foo,Bar\" matches either
-    Exclusions are global: \"-test\" removes matches from ALL OR groups
-    Stacking: -=Name excludes items whose final component is \"Name\"
-
-  EXAMPLES:
-    cargo brief search bevy \"Shader*Ref\"          # glob
-    cargo brief search bevy \"=Router\"              # exact name only
-    cargo brief search bevy -- spawn -test         # exclude (-- required for -prefix)
-    cargo brief search bevy \"*Plugin*,*Resource* -test\"  # OR + exclusion
-    cargo brief search self \"=new,=default\"        # exact OR
+  Exclusions are global across all OR groups.
 
 OUTPUT:
-  One line per match with full path prefix:
-    fn module::Type::method(&self, arg: T) -> Ret;
-    struct module::StructName;
-    field module::Struct::field_name: Type;
-    variant module::Enum::Variant(T1, T2);")]
+  fn module::Type::method(&self, arg: T) -> Ret;
+  struct module::StructName { .. };
+  field module::Struct::field_name: Type;
+  variant module::Enum::Variant(T1, T2);")]
     Search(SearchArgs),
 
     /// Grep example/test/bench source files from a crate
