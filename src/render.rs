@@ -1502,6 +1502,125 @@ fn render_docs(item: &Item, indent: &str, args: &FilterArgs, output: &mut String
     }
 }
 
+// === Cross-crate virtual tree rendering ===
+
+use crate::cross_crate::{AccessibleItemKind, CrossCrateIndex};
+
+/// Render a virtual module tree from a `CrossCrateIndex`.
+///
+/// Groups accessible items by path segments and renders them inside
+/// nested `mod { }` wrappers, looking up actual item definitions from
+/// `source_models`.
+pub fn render_cross_crate_api(
+    index: &CrossCrateIndex,
+    _facade_crate_name: &str,
+    args: &ApiArgs,
+) -> String {
+    let mut output = String::new();
+
+    // Build a virtual tree from accessible paths
+    let mut root = VirtualNode::default();
+
+    for entry in &index.items {
+        if entry.item_kind == AccessibleItemKind::Module {
+            // Modules create tree structure but don't render as items
+            root.ensure_path(&entry.accessible_path);
+            continue;
+        }
+        root.insert_item(&entry.accessible_path, entry.crate_idx, &entry.item_id);
+    }
+
+    // Render the tree
+    render_virtual_tree(&root, index, args, "", &mut output);
+
+    output
+}
+
+/// A node in the virtual module tree.
+#[derive(Default)]
+struct VirtualNode {
+    children: std::collections::BTreeMap<String, VirtualNode>,
+    /// Leaf items at this level: (crate_idx, item_id)
+    items: Vec<(usize, Id)>,
+}
+
+impl VirtualNode {
+    /// Ensure all intermediate path segments exist.
+    fn ensure_path(&mut self, path: &str) {
+        let mut node = self;
+        for seg in path.split("::") {
+            node = node.children.entry(seg.to_string()).or_default();
+        }
+    }
+
+    /// Insert a leaf item at the right position in the tree.
+    fn insert_item(&mut self, path: &str, crate_idx: usize, item_id: &Id) {
+        let segments: Vec<&str> = path.split("::").collect();
+        let mut node = self;
+
+        // Navigate to parent
+        for &seg in &segments[..segments.len().saturating_sub(1)] {
+            node = node.children.entry(seg.to_string()).or_default();
+        }
+
+        node.items.push((crate_idx, *item_id));
+    }
+}
+
+/// Recursively render a virtual module tree.
+fn render_virtual_tree(
+    node: &VirtualNode,
+    index: &CrossCrateIndex,
+    args: &ApiArgs,
+    indent: &str,
+    output: &mut String,
+) {
+    let child_indent = format!("{indent}    ");
+
+    // Render child modules
+    for (name, child_node) in &node.children {
+        output.push_str(&format!("\n{indent}mod {name} {{\n"));
+        render_virtual_tree(child_node, index, args, &child_indent, output);
+        output.push_str(&format!("{indent}}}\n"));
+    }
+
+    // Render leaf items at this level
+    for &(crate_idx, ref item_id) in &node.items {
+        let (model, _) = &index.source_models[crate_idx];
+        let Some(item) = model.krate.index.get(item_id) else {
+            continue;
+        };
+
+        if !should_render_item(item, &args.filter) {
+            continue;
+        }
+
+        let observer = model.crate_name().to_string();
+        render_item(
+            model,
+            item,
+            item_id,
+            indent,
+            &args.filter,
+            &observer,
+            false,
+            output,
+        );
+
+        // Render impl blocks for types
+        let impl_ids: Vec<Id> = match &item.inner {
+            ItemEnum::Struct(s) => s.impls.clone(),
+            ItemEnum::Enum(e) => e.impls.clone(),
+            ItemEnum::Union(u) => u.impls.clone(),
+            _ => Vec::new(),
+        };
+
+        if !impl_ids.is_empty() {
+            render_inlined_impl_blocks(model, &args.filter, &observer, &impl_ids, "", output);
+        }
+    }
+}
+
 // === Type formatting ===
 
 fn format_visibility(vis: &Visibility) -> String {

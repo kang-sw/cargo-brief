@@ -277,35 +277,23 @@ fn run_shared_api_pipeline(ctx: &PipelineContext, args: &ApiArgs) -> Result<Stri
             }
         }
     } else if args.recursive && has_cross_crate {
-        // Recursive mode with cross-crate expansion
+        // Recursive mode with cross-crate expansion via accessible-path index
         let mut output =
             render_and_expand_globs(&model, None, args, ctx, same_crate, reachable.as_ref())?;
         if ctx.verbose {
-            eprintln!("[cargo-brief] Discovering cross-crate re-exports...");
+            eprintln!("[cargo-brief] Building cross-crate accessible path index...");
         }
-        let sub_crates = cross_crate::discover_all_reexported_crates(
+        let index = cross_crate::build_cross_crate_index(
             &model,
             &ctx.toolchain,
             ctx.manifest_path.as_deref(),
             &ctx.target_dir,
             ctx.verbose,
+            &ctx.workspace_members,
         );
-        for sub in &sub_crates {
-            let sub_reachable = Some(compute_reachable_set(&sub.model));
-            let sub_output = render::render_module_api(
-                &sub.model,
-                None,
-                args,
-                None,
-                false,
-                sub_reachable.as_ref(),
-            );
-            output.push_str(&format!(
-                "\n// --- module {} (from sub-crate {}) ---\n",
-                sub.display_name,
-                sub.model.crate_name()
-            ));
-            output.push_str(&sub_output);
+        let cross_output = render::render_cross_crate_api(&index, model.crate_name(), args);
+        if !cross_output.is_empty() {
+            output.push_str(&cross_output);
         }
         output
     } else {
@@ -514,27 +502,31 @@ fn run_shared_search_pipeline(ctx: &PipelineContext, args: &SearchArgs) -> Resul
         reachable.as_ref(),
     );
 
-    // Cross-crate search: discover sub-crates, search each
+    // Cross-crate search: build unified index, search with accessible paths
     if cross_crate::root_has_cross_crate_reexports(&model) {
         pre_warm_cross_crate_json(&model, ctx);
         if ctx.verbose {
-            eprintln!("[cargo-brief] Discovering cross-crate re-exports...");
+            eprintln!("[cargo-brief] Building cross-crate accessible path index...");
         }
-        let sub_crates = cross_crate::discover_all_reexported_crates(
+        let index = cross_crate::build_cross_crate_index(
             &model,
             &ctx.toolchain,
             ctx.manifest_path.as_deref(),
             &ctx.target_dir,
             ctx.verbose,
+            &ctx.workspace_members,
         );
-        for sub in &sub_crates {
-            let sub_reachable = Some(compute_reachable_set(&sub.model));
-            let sub_output = search_fn(&sub.model, None, false, sub_reachable.as_ref());
-            // Suppress zero-result sub-crate headers unless verbose
-            if !ctx.verbose && sub_output.contains("(0 results)") {
-                continue;
-            }
-            output.push_str(&sub_output);
+        let cross_output = search::search_cross_crate_index(
+            &index,
+            model.crate_name(),
+            &pattern,
+            &args.filter,
+            args.limit.as_deref(),
+            search_kind,
+            methods_of,
+        );
+        if !cross_output.is_empty() {
+            output.push_str(&cross_output);
         }
     }
 
@@ -759,24 +751,23 @@ fn run_shared_summary_pipeline(ctx: &PipelineContext) -> Result<String> {
         reachable.as_ref(),
     );
 
-    // Cross-crate: if facade and no module scoping, discover sub-crates
+    // Cross-crate: if facade and no module scoping, build accessible-path index
     if ctx.module_path.is_none() && cross_crate::root_has_cross_crate_reexports(&model) {
         pre_warm_cross_crate_json(&model, ctx);
         if ctx.verbose {
-            eprintln!("[cargo-brief] Discovering cross-crate re-exports...");
+            eprintln!("[cargo-brief] Building cross-crate accessible path index...");
         }
-        let sub_crates = cross_crate::discover_all_reexported_crates(
+        let index = cross_crate::build_cross_crate_index(
             &model,
             &ctx.toolchain,
             ctx.manifest_path.as_deref(),
             &ctx.target_dir,
             ctx.verbose,
+            &ctx.workspace_members,
         );
-        for sub in &sub_crates {
-            let sub_reachable = Some(compute_reachable_set(&sub.model));
-            let sub_output =
-                summary::render_summary(&sub.model, None, false, sub_reachable.as_ref());
-            summary::merge_sub_crate_summary(&mut output, &sub_output, &sub.display_name);
+        let cross_summary = summary::summarize_cross_crate_index(&index);
+        if !cross_summary.is_empty() {
+            output.push_str(&cross_summary);
         }
     }
 

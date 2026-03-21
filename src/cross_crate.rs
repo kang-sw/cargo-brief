@@ -4,14 +4,75 @@
 //! `bevy → pub use bevy_internal::* → pub use bevy_ecs as ecs`.
 //! This module resolves such chains by generating rustdoc JSON for
 //! intermediate crates and following Use items.
+//!
+//! ## CrossCrateIndex
+//!
+//! `build_cross_crate_index()` builds a unified accessible-path index for
+//! facade crates. Each item gets an `accessible_path` reflecting how users
+//! actually `use` it (e.g. `render::render_resource::AsBindGroup` instead of
+//! `bevy_render::render_resource::bind_group::AsBindGroup`).
 
 use std::collections::HashSet;
 use std::path::Path;
 
-use rustdoc_types::{ItemEnum, Visibility};
+use rustdoc_types::{Id, Item, ItemEnum, Visibility};
 
-use crate::model::CrateModel;
+use crate::model::{CrateModel, ReachableInfo, compute_reachable_set};
 use crate::rustdoc_json;
+
+/// An item accessible from the facade crate's public API, with its
+/// resolved accessible path and a pointer to its definition.
+pub struct AccessibleEntry {
+    /// Path from the facade root, e.g. "render::render_resource::AsBindGroup"
+    pub accessible_path: String,
+    /// Index into `CrossCrateIndex.source_models`
+    pub crate_idx: usize,
+    /// Item ID within `source_models[crate_idx].krate.index`
+    pub item_id: Id,
+    /// The kind of item (for search filtering / rendering dispatch)
+    pub item_kind: AccessibleItemKind,
+}
+
+/// Coarse item kind — enough for search/summary, not full rendering.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AccessibleItemKind {
+    Module,
+    Function,
+    Struct,
+    Enum,
+    Trait,
+    Union,
+    TypeAlias,
+    Constant,
+    Static,
+    Macro,
+}
+
+impl AccessibleItemKind {
+    fn from_item(item: &Item) -> Option<Self> {
+        match &item.inner {
+            ItemEnum::Module(_) => Some(Self::Module),
+            ItemEnum::Function(_) => Some(Self::Function),
+            ItemEnum::Struct(_) => Some(Self::Struct),
+            ItemEnum::Enum(_) => Some(Self::Enum),
+            ItemEnum::Trait(_) => Some(Self::Trait),
+            ItemEnum::Union(_) => Some(Self::Union),
+            ItemEnum::TypeAlias(_) => Some(Self::TypeAlias),
+            ItemEnum::Constant { .. } => Some(Self::Constant),
+            ItemEnum::Static(_) => Some(Self::Static),
+            ItemEnum::Macro(_) => Some(Self::Macro),
+            _ => None,
+        }
+    }
+}
+
+/// Unified cross-crate accessible-path index.
+pub struct CrossCrateIndex {
+    /// All loaded source crate models, each paired with its ReachableInfo.
+    pub source_models: Vec<(CrateModel, ReachableInfo)>,
+    /// All accessible items, sorted by `accessible_path`.
+    pub items: Vec<AccessibleEntry>,
+}
 
 /// Result of resolving a cross-crate module path.
 pub struct CrossCrateResolution {
@@ -353,6 +414,570 @@ pub fn collect_external_crate_names(model: &CrateModel) -> Vec<String> {
     }
 
     seen.into_iter().collect()
+}
+
+/// Build a unified cross-crate accessible-path index for a facade crate.
+///
+/// Walks the primary model's public API top-down, following glob/named
+/// re-exports into sub-crates. Each discovered item gets an `accessible_path`
+/// reflecting how users actually `use` it through the facade.
+#[allow(clippy::too_many_arguments)]
+pub fn build_cross_crate_index(
+    primary_model: &CrateModel,
+    toolchain: &str,
+    manifest_path: Option<&str>,
+    target_dir: &Path,
+    verbose: bool,
+    workspace_members: &HashSet<String>,
+) -> CrossCrateIndex {
+    let mut source_models: Vec<(CrateModel, ReachableInfo)> = Vec::new();
+    let mut items: Vec<AccessibleEntry> = Vec::new();
+    let mut visited_crates: HashSet<String> = HashSet::new();
+    visited_crates.insert(primary_model.crate_name().to_string());
+
+    let ctx = WalkParams {
+        toolchain,
+        manifest_path,
+        target_dir,
+        verbose,
+        workspace_members,
+    };
+
+    let Some(root) = primary_model.root_module() else {
+        return CrossCrateIndex {
+            source_models,
+            items,
+        };
+    };
+
+    walk_accessible(
+        primary_model,
+        root,
+        "",
+        None, // no crate_idx — primary model items are rendered by the main pipeline
+        0,
+        &mut visited_crates,
+        &mut source_models,
+        &mut items,
+        &ctx,
+    );
+
+    // Dedup: group by (crate_idx, item_id), keep shortest non-prelude path
+    dedup_accessible_entries(&mut items);
+
+    // Sort by accessible_path
+    items.sort_by(|a, b| a.accessible_path.cmp(&b.accessible_path));
+
+    CrossCrateIndex {
+        source_models,
+        items,
+    }
+}
+
+/// Immutable walk parameters threaded through the recursion.
+struct WalkParams<'a> {
+    toolchain: &'a str,
+    manifest_path: Option<&'a str>,
+    target_dir: &'a Path,
+    verbose: bool,
+    workspace_members: &'a HashSet<String>,
+}
+
+/// Recursive walk collecting accessible items with prefix tracking.
+///
+/// `source_models` and `items` are split to allow loading new models
+/// while walking into already-loaded ones.
+#[allow(clippy::too_many_arguments)]
+fn walk_accessible(
+    model: &CrateModel,
+    module_item: &Item,
+    prefix: &str,
+    crate_idx: Option<usize>, // None = primary model (skip registering)
+    depth: usize,
+    visited_crates: &mut HashSet<String>,
+    source_models: &mut Vec<(CrateModel, ReachableInfo)>,
+    items: &mut Vec<AccessibleEntry>,
+    ctx: &WalkParams,
+) {
+    if depth > 8 {
+        return;
+    }
+
+    let crate_name = model.crate_name().to_string();
+    let reachable = compute_reachable_set(model);
+    let children = model.module_children(module_item);
+
+    for (child_id, child) in &children {
+        // Visibility: use reachable set for external view
+        if !reachable.reachable.contains(child_id) {
+            continue;
+        }
+
+        match &child.inner {
+            ItemEnum::Module(_) => {
+                let name = match &child.name {
+                    Some(n) => n.as_str(),
+                    None => continue,
+                };
+
+                // Skip glob-private modules (flatten their items at current level)
+                if reachable.glob_private_modules.contains(child_id) {
+                    walk_accessible(
+                        model,
+                        child,
+                        prefix,
+                        crate_idx,
+                        depth + 1,
+                        visited_crates,
+                        source_models,
+                        items,
+                        ctx,
+                    );
+                    continue;
+                }
+
+                // Public module — only register if it's actually visible
+                if !matches!(child.visibility, Visibility::Public) {
+                    continue;
+                }
+
+                let child_prefix = join_path(prefix, name);
+
+                if let Some(ci) = crate_idx {
+                    items.push(AccessibleEntry {
+                        accessible_path: child_prefix.clone(),
+                        crate_idx: ci,
+                        item_id: Id(child_id.0),
+                        item_kind: AccessibleItemKind::Module,
+                    });
+                }
+
+                walk_accessible(
+                    model,
+                    child,
+                    &child_prefix,
+                    crate_idx,
+                    depth + 1,
+                    visited_crates,
+                    source_models,
+                    items,
+                    ctx,
+                );
+            }
+            ItemEnum::Use(use_item) => {
+                if !matches!(child.visibility, Visibility::Public) {
+                    continue;
+                }
+
+                if use_item.is_glob {
+                    handle_glob_reexport(
+                        model,
+                        use_item,
+                        &crate_name,
+                        prefix,
+                        crate_idx,
+                        depth,
+                        visited_crates,
+                        source_models,
+                        items,
+                        ctx,
+                    );
+                } else {
+                    handle_named_reexport(
+                        model,
+                        child,
+                        use_item,
+                        &crate_name,
+                        prefix,
+                        crate_idx,
+                        depth,
+                        visited_crates,
+                        source_models,
+                        items,
+                        ctx,
+                    );
+                }
+            }
+            // Leaf items (fn, struct, enum, trait, etc.)
+            _ => {
+                if let Some(ci) = crate_idx {
+                    let name = match &child.name {
+                        Some(n) => n.as_str(),
+                        None => continue,
+                    };
+                    if let Some(kind) = AccessibleItemKind::from_item(child) {
+                        items.push(AccessibleEntry {
+                            accessible_path: join_path(prefix, name),
+                            crate_idx: ci,
+                            item_id: Id(child_id.0),
+                            item_kind: kind,
+                        });
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// Handle a `pub use source::*` glob re-export during the walk.
+#[allow(clippy::too_many_arguments)]
+fn handle_glob_reexport(
+    model: &CrateModel,
+    use_item: &rustdoc_types::Use,
+    crate_name: &str,
+    prefix: &str,
+    crate_idx: Option<usize>,
+    depth: usize,
+    visited_crates: &mut HashSet<String>,
+    source_models: &mut Vec<(CrateModel, ReachableInfo)>,
+    items: &mut Vec<AccessibleEntry>,
+    ctx: &WalkParams,
+) {
+    if is_intra_crate_source(&use_item.source, crate_name) {
+        // Intra-crate glob: resolve source module and walk it
+        let source_path = use_item
+            .source
+            .strip_prefix("self::")
+            .or_else(|| use_item.source.strip_prefix(&format!("{crate_name}::")))
+            .unwrap_or(&use_item.source);
+
+        if let Some(source_mod) = model.find_module(source_path) {
+            let is_private = !matches!(source_mod.visibility, Visibility::Public);
+            let walk_prefix = if is_private {
+                prefix.to_string()
+            } else {
+                join_path(
+                    prefix,
+                    source_path.rsplit("::").next().unwrap_or(source_path),
+                )
+            };
+            walk_accessible(
+                model,
+                source_mod,
+                &walk_prefix,
+                crate_idx,
+                depth + 1,
+                visited_crates,
+                source_models,
+                items,
+                ctx,
+            );
+        }
+    } else {
+        // Cross-crate glob: load the source crate
+        let source_crate = extract_crate_name(&use_item.source);
+        let sub_path = use_item.source.split_once("::").map(|(_, p)| p.to_string());
+
+        if let Some(ci) =
+            load_or_find_source_crate(&source_crate, source_models, visited_crates, ctx)
+        {
+            // Get the start module Id, then drop the borrow before recursing.
+            // We need to find the right module item to walk into.
+            let start_id = if let Some(ref sp) = sub_path {
+                source_models[ci].0.find_module(sp).and_then(|_| {
+                    // Find the Id for this module
+                    let full = format!("{}::{sp}", source_models[ci].0.crate_name());
+                    source_models[ci].0.module_index.get(&full).cloned()
+                })
+            } else {
+                Some(source_models[ci].0.krate.root)
+            };
+
+            if let Some(start_id) = start_id {
+                // Use a raw pointer to avoid the borrow conflict.
+                // SAFETY: We only append to source_models (never remove/reorder),
+                // and ci is a stable index. The pointer remains valid because
+                // walk_accessible only appends new entries at the end.
+                let model_ptr: *const CrateModel = &source_models[ci].0;
+                let sub_model = unsafe { &*model_ptr };
+                if let Some(start_mod) = sub_model.krate.index.get(&start_id) {
+                    walk_accessible(
+                        sub_model,
+                        start_mod,
+                        prefix,
+                        Some(ci),
+                        depth + 1,
+                        visited_crates,
+                        source_models,
+                        items,
+                        ctx,
+                    );
+                }
+            }
+        }
+    }
+}
+
+/// Handle a `pub use source as alias` named re-export during the walk.
+#[allow(clippy::too_many_arguments)]
+fn handle_named_reexport(
+    model: &CrateModel,
+    child: &Item,
+    use_item: &rustdoc_types::Use,
+    crate_name: &str,
+    prefix: &str,
+    crate_idx: Option<usize>,
+    depth: usize,
+    visited_crates: &mut HashSet<String>,
+    source_models: &mut Vec<(CrateModel, ReachableInfo)>,
+    items: &mut Vec<AccessibleEntry>,
+    ctx: &WalkParams,
+) {
+    let alias = child.name.as_deref().unwrap_or(&use_item.name);
+
+    if is_intra_crate_source(&use_item.source, crate_name) {
+        // Intra-crate named re-export: follow the target
+        if let Some(target_id) = &use_item.id
+            && let Some(target) = model.krate.index.get(target_id)
+        {
+            let target_path = join_path(prefix, alias);
+            if matches!(target.inner, ItemEnum::Module(_)) {
+                if let Some(ci) = crate_idx {
+                    items.push(AccessibleEntry {
+                        accessible_path: target_path.clone(),
+                        crate_idx: ci,
+                        item_id: *target_id,
+                        item_kind: AccessibleItemKind::Module,
+                    });
+                }
+                walk_accessible(
+                    model,
+                    target,
+                    &target_path,
+                    crate_idx,
+                    depth + 1,
+                    visited_crates,
+                    source_models,
+                    items,
+                    ctx,
+                );
+            } else if let Some(ci) = crate_idx
+                && let Some(kind) = AccessibleItemKind::from_item(target)
+            {
+                items.push(AccessibleEntry {
+                    accessible_path: target_path,
+                    crate_idx: ci,
+                    item_id: *target_id,
+                    item_kind: kind,
+                });
+            }
+        }
+    } else {
+        // Cross-crate named re-export
+        let source_crate = extract_crate_name(&use_item.source);
+        let sub_path = use_item.source.split_once("::").map(|(_, p)| p.to_string());
+
+        if let Some(ci) =
+            load_or_find_source_crate(&source_crate, source_models, visited_crates, ctx)
+        {
+            let alias_path = join_path(prefix, alias);
+
+            if let Some(ref sp) = sub_path {
+                // Source points to something inside the crate
+                let has_module = source_models[ci].0.find_module(sp).is_some();
+
+                if has_module {
+                    let mod_id = {
+                        let full = format!("{}::{sp}", source_models[ci].0.crate_name());
+                        source_models[ci].0.module_index.get(&full).cloned()
+                    };
+                    items.push(AccessibleEntry {
+                        accessible_path: alias_path.clone(),
+                        crate_idx: ci,
+                        item_id: source_models[ci].0.krate.root,
+                        item_kind: AccessibleItemKind::Module,
+                    });
+                    if let Some(mod_id) = mod_id {
+                        let model_ptr: *const CrateModel = &source_models[ci].0;
+                        let sub_model = unsafe { &*model_ptr };
+                        if let Some(mod_item) = sub_model.krate.index.get(&mod_id) {
+                            walk_accessible(
+                                sub_model,
+                                mod_item,
+                                &alias_path,
+                                Some(ci),
+                                depth + 1,
+                                visited_crates,
+                                source_models,
+                                items,
+                                ctx,
+                            );
+                        }
+                    }
+                } else {
+                    // Try to find a leaf item by name
+                    let item_name = sp.rsplit("::").next().unwrap_or(sp);
+                    find_and_register_item(&source_models[ci].0, item_name, &alias_path, ci, items);
+                }
+            } else {
+                // Source is just a crate name → recurse from root with alias
+                let root_id = source_models[ci].0.krate.root;
+                items.push(AccessibleEntry {
+                    accessible_path: alias_path.clone(),
+                    crate_idx: ci,
+                    item_id: root_id,
+                    item_kind: AccessibleItemKind::Module,
+                });
+                let model_ptr: *const CrateModel = &source_models[ci].0;
+                let sub_model = unsafe { &*model_ptr };
+                if let Some(root) = sub_model.krate.index.get(&root_id) {
+                    walk_accessible(
+                        sub_model,
+                        root,
+                        &alias_path,
+                        Some(ci),
+                        depth + 1,
+                        visited_crates,
+                        source_models,
+                        items,
+                        ctx,
+                    );
+                }
+            }
+        }
+    }
+}
+
+/// Load a source crate model, or find its index if already loaded.
+fn load_or_find_source_crate(
+    source_crate_name: &str,
+    source_models: &mut Vec<(CrateModel, ReachableInfo)>,
+    visited_crates: &mut HashSet<String>,
+    ctx: &WalkParams,
+) -> Option<usize> {
+    // Check if already loaded
+    for (i, (model, _)) in source_models.iter().enumerate() {
+        if model.crate_name() == source_crate_name {
+            return Some(i);
+        }
+    }
+
+    // Not yet loaded — generate JSON and parse
+    let use_cache = !ctx.workspace_members.contains(source_crate_name)
+        && !ctx
+            .workspace_members
+            .contains(&source_crate_name.replace('_', "-"));
+
+    let json_path = rustdoc_json::generate_rustdoc_json(
+        source_crate_name,
+        ctx.toolchain,
+        ctx.manifest_path,
+        true, // document private items
+        ctx.target_dir,
+        ctx.verbose,
+        use_cache,
+    )
+    .ok()
+    .or_else(|| {
+        // Fallback: try hyphenated name
+        let hyphenated = source_crate_name.replace('_', "-");
+        if hyphenated != source_crate_name {
+            rustdoc_json::generate_rustdoc_json(
+                &hyphenated,
+                ctx.toolchain,
+                ctx.manifest_path,
+                true,
+                ctx.target_dir,
+                ctx.verbose,
+                use_cache,
+            )
+            .ok()
+        } else {
+            None
+        }
+    })?;
+
+    let krate = rustdoc_json::parse_rustdoc_json_cached(&json_path).ok()?;
+    let model = CrateModel::from_crate(krate);
+
+    visited_crates.insert(source_crate_name.to_string());
+
+    let reachable = compute_reachable_set(&model);
+    let ci = source_models.len();
+    source_models.push((model, reachable));
+
+    Some(ci)
+}
+
+/// Find an item by name in a model's root and register it.
+fn find_and_register_item(
+    model: &CrateModel,
+    item_name: &str,
+    accessible_path: &str,
+    crate_idx: usize,
+    items: &mut Vec<AccessibleEntry>,
+) {
+    let Some(root) = model.root_module() else {
+        return;
+    };
+    for (child_id, child) in model.module_children(root) {
+        let name = child.name.as_deref().or(match &child.inner {
+            ItemEnum::Use(u) => Some(u.name.as_str()),
+            _ => None,
+        });
+        if name == Some(item_name)
+            && let Some(kind) = AccessibleItemKind::from_item(child)
+        {
+            items.push(AccessibleEntry {
+                accessible_path: accessible_path.to_string(),
+                crate_idx,
+                item_id: Id(child_id.0),
+                item_kind: kind,
+            });
+            return;
+        }
+    }
+}
+
+/// Join path segments, handling empty prefix.
+fn join_path(prefix: &str, name: &str) -> String {
+    if prefix.is_empty() {
+        name.to_string()
+    } else {
+        format!("{prefix}::{name}")
+    }
+}
+
+/// Dedup entries: group by (crate_idx, item_id), keep shortest non-prelude path.
+fn dedup_accessible_entries(items: &mut Vec<AccessibleEntry>) {
+    use std::collections::HashMap;
+
+    // Group by (crate_idx, item_id) — keep best entry index
+    let mut best: HashMap<(usize, u32), usize> = HashMap::new();
+
+    for (i, entry) in items.iter().enumerate() {
+        let key = (entry.crate_idx, entry.item_id.0);
+        let dominated = if let Some(&existing_idx) = best.get(&key) {
+            let existing = &items[existing_idx];
+            prefer_path(&entry.accessible_path, &existing.accessible_path)
+        } else {
+            true // no existing entry
+        };
+        if dominated {
+            best.insert(key, i);
+        }
+    }
+
+    let keep: HashSet<usize> = best.into_values().collect();
+    let mut idx = 0;
+    items.retain(|_| {
+        let k = keep.contains(&idx);
+        idx += 1;
+        k
+    });
+}
+
+/// Returns true if `candidate` should replace `existing`.
+/// Prefers non-prelude paths; among those, shorter wins.
+fn prefer_path(candidate: &str, existing: &str) -> bool {
+    let candidate_prelude = candidate.split("::").any(|seg| seg == "prelude");
+    let existing_prelude = existing.split("::").any(|seg| seg == "prelude");
+
+    match (candidate_prelude, existing_prelude) {
+        (false, true) => true,  // candidate has no prelude, existing does
+        (true, false) => false, // candidate has prelude, existing doesn't
+        _ => candidate.len() < existing.len(), // both same prelude status: shorter wins
+    }
 }
 
 // === Internal helpers ===

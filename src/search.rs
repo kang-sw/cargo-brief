@@ -13,16 +13,16 @@ use crate::model::{CrateModel, ReachableInfo, is_visible_from};
 use crate::render;
 
 /// A leaf item discovered by the walker, with its full display path and kind.
-struct LeafItem<'a> {
+pub(crate) struct LeafItem<'a> {
     /// Full path without crate prefix, e.g. `outer::PubStruct::pub_field`
-    path: String,
-    item: &'a Item,
-    kind: LeafKind,
+    pub(crate) path: String,
+    pub(crate) item: &'a Item,
+    pub(crate) kind: LeafKind,
     /// Extra rendering context (e.g. parent type name for fields/variants)
-    context: LeafContext<'a>,
+    pub(crate) context: LeafContext<'a>,
 }
 
-enum LeafKind {
+pub(crate) enum LeafKind {
     Function,
     Struct,
     Enum,
@@ -83,7 +83,7 @@ impl LeafKind {
 }
 
 /// Extra context needed to render certain leaf types.
-enum LeafContext<'a> {
+pub(crate) enum LeafContext<'a> {
     None,
     /// For fields: the parent struct
     Field {
@@ -845,7 +845,12 @@ fn walk_impl_blocks<'a>(
 // === Rendering ===
 
 /// Render a single leaf item as a one-liner.
-fn render_leaf(output: &mut String, model: &CrateModel, leaf: &LeafItem, args: &FilterArgs) {
+pub(crate) fn render_leaf(
+    output: &mut String,
+    model: &CrateModel,
+    leaf: &LeafItem,
+    args: &FilterArgs,
+) {
     // Doc comment: first line only (suppressed by --no-docs / --compact)
     if !args.no_docs
         && !args.compact
@@ -1154,6 +1159,321 @@ fn collect_impl_summary(model: &CrateModel, item: &Item, args: &FilterArgs) -> S
     }
 
     format!("// {}", parts.join(", "))
+}
+
+// === Cross-crate index search ===
+
+use crate::cross_crate::{AccessibleItemKind, CrossCrateIndex};
+
+/// Search a `CrossCrateIndex` and render results with accessible paths.
+///
+/// Iterates accessible items, matches against the pattern, and renders
+/// each match as a one-liner using the accessible path instead of the
+/// internal crate path.
+#[allow(clippy::too_many_arguments)]
+pub fn search_cross_crate_index(
+    index: &CrossCrateIndex,
+    facade_crate_name: &str,
+    pattern: &str,
+    filter: &FilterArgs,
+    limit: Option<&str>,
+    search_kind: Option<&str>,
+    methods_of: Option<&str>,
+) -> String {
+    // Smart-case
+    let case_sensitive = pattern.chars().any(|c| c.is_uppercase());
+    let parsed = parse_pattern(pattern, case_sensitive);
+
+    // Collect matching leaves from the index
+    let mut matched: Vec<(&str, LeafItem)> = Vec::new();
+
+    for entry in &index.items {
+        // Skip modules — they're structural, not searchable leaves
+        if entry.item_kind == AccessibleItemKind::Module {
+            continue;
+        }
+
+        // Filter by kind
+        if should_skip_kind(entry.item_kind, filter) {
+            continue;
+        }
+
+        let (model, _reachable) = &index.source_models[entry.crate_idx];
+        let Some(item) = model.krate.index.get(&entry.item_id) else {
+            continue;
+        };
+
+        // Build a LeafItem with the accessible path
+        let kind = match entry.item_kind {
+            AccessibleItemKind::Function => LeafKind::Function,
+            AccessibleItemKind::Struct => LeafKind::Struct,
+            AccessibleItemKind::Enum => LeafKind::Enum,
+            AccessibleItemKind::Trait => LeafKind::Trait,
+            AccessibleItemKind::Union => LeafKind::Union,
+            AccessibleItemKind::TypeAlias => LeafKind::TypeAlias,
+            AccessibleItemKind::Constant => LeafKind::Constant,
+            AccessibleItemKind::Static => LeafKind::Static,
+            AccessibleItemKind::Macro => LeafKind::Macro,
+            AccessibleItemKind::Module => continue,
+        };
+
+        // Also walk impl blocks for types
+        let mut type_leaves = Vec::new();
+        if matches!(
+            entry.item_kind,
+            AccessibleItemKind::Struct | AccessibleItemKind::Enum | AccessibleItemKind::Union
+        ) {
+            walk_type_impl_items(
+                model,
+                item,
+                &entry.accessible_path,
+                filter,
+                &mut type_leaves,
+            );
+        }
+
+        // Also walk trait items for traits
+        if entry.item_kind == AccessibleItemKind::Trait {
+            walk_trait_items(
+                model,
+                item,
+                &entry.accessible_path,
+                filter,
+                &mut type_leaves,
+            );
+        }
+
+        // Register the main item
+        let leaf = LeafItem {
+            path: entry.accessible_path.clone(),
+            item,
+            kind,
+            context: LeafContext::None,
+        };
+        matched.push((facade_crate_name, leaf));
+
+        // Register impl/trait items
+        for tl in type_leaves {
+            matched.push((facade_crate_name, tl));
+        }
+    }
+
+    // Pattern matching
+    let mut filtered: Vec<&LeafItem> = matched
+        .iter()
+        .filter(|(_, leaf)| {
+            let path = if case_sensitive {
+                leaf.path.clone()
+            } else {
+                leaf.path.to_lowercase()
+            };
+            parsed
+                .or_groups
+                .iter()
+                .any(|group| group.iter().all(|tok| token_matches(tok, &path)))
+        })
+        .map(|(_, leaf)| leaf)
+        .collect();
+
+    // Global exclusions
+    if !parsed.exclusions.is_empty() {
+        filtered.retain(|leaf| {
+            let path = if case_sensitive {
+                leaf.path.clone()
+            } else {
+                leaf.path.to_lowercase()
+            };
+            !parsed
+                .exclusions
+                .iter()
+                .any(|tok| token_matches(tok, &path))
+        });
+    }
+
+    // --methods-of
+    if let Some(type_name) = methods_of {
+        let suffix = format!("::{type_name}::");
+        let prefix_pat = format!("{type_name}::");
+        filtered.retain(|leaf| leaf.path.contains(&suffix) || leaf.path.starts_with(&prefix_pat));
+    }
+
+    // --search-kind
+    if let Some(kind_spec) = search_kind {
+        let kinds: Vec<&str> = kind_spec.split(',').map(|s| s.trim()).collect();
+        filtered.retain(|leaf| kinds.iter().any(|k| leaf.kind.matches_kind_str(k)));
+    }
+
+    // Sort: primary by kind, secondary by path
+    filtered.sort_by(|a, b| {
+        a.kind
+            .sort_key()
+            .cmp(&b.kind.sort_key())
+            .then_with(|| a.path.cmp(&b.path))
+    });
+
+    let total = filtered.len();
+    let (offset, search_limit) = parse_search_limit(limit);
+    let offset = offset.min(total);
+    let end = search_limit
+        .map(|n| (offset + n).min(total))
+        .unwrap_or(total);
+    let skipped_after = total - end;
+
+    // Render — no separate header, results blend with primary crate output
+    let mut output = String::new();
+
+    for leaf in &filtered[offset..end] {
+        // Find the model for this leaf to pass to render_leaf
+        let model = matched
+            .iter()
+            .find(|(_, l)| std::ptr::eq(*leaf, l))
+            .map(|(_, l)| l);
+        let _ = model; // We need to find the right source model
+        // Use the first source model that contains the item
+        let source_model = index
+            .source_models
+            .iter()
+            .find(|(m, _)| m.krate.index.values().any(|i| std::ptr::eq(i, leaf.item)))
+            .map(|(m, _)| m);
+
+        if let Some(model) = source_model {
+            render_leaf(&mut output, model, leaf, filter);
+        }
+    }
+
+    if skipped_after > 0 {
+        output.push_str(&format!("// ... and {skipped_after} more results\n"));
+    }
+
+    output
+}
+
+/// Check if a kind should be skipped based on filter flags.
+fn should_skip_kind(kind: AccessibleItemKind, filter: &FilterArgs) -> bool {
+    match kind {
+        AccessibleItemKind::Function => filter.no_functions,
+        AccessibleItemKind::Struct => filter.no_structs,
+        AccessibleItemKind::Enum => filter.no_enums,
+        AccessibleItemKind::Trait => filter.no_traits,
+        AccessibleItemKind::Union => filter.no_unions,
+        AccessibleItemKind::TypeAlias => filter.no_aliases,
+        AccessibleItemKind::Constant | AccessibleItemKind::Static => filter.no_constants,
+        AccessibleItemKind::Macro => filter.no_macros,
+        AccessibleItemKind::Module => false,
+    }
+}
+
+/// Walk impl blocks of a type, collecting method/assoc items with accessible paths.
+fn walk_type_impl_items<'a>(
+    model: &'a CrateModel,
+    type_item: &'a Item,
+    type_path: &str,
+    filter: &FilterArgs,
+    leaves: &mut Vec<LeafItem<'a>>,
+) {
+    let impls = match &type_item.inner {
+        ItemEnum::Struct(s) => &s.impls,
+        ItemEnum::Enum(e) => &e.impls,
+        ItemEnum::Union(u) => &u.impls,
+        _ => return,
+    };
+
+    for impl_id in impls {
+        let Some(impl_item) = model.krate.index.get(impl_id) else {
+            continue;
+        };
+        let ItemEnum::Impl(impl_block) = &impl_item.inner else {
+            continue;
+        };
+
+        if !filter.all && (impl_block.is_synthetic || impl_block.blanket_impl.is_some()) {
+            continue;
+        }
+
+        for item_id in &impl_block.items {
+            let Some(item) = model.krate.index.get(item_id) else {
+                continue;
+            };
+            let iname = item.name.as_deref().unwrap_or("?");
+            let item_path = format!("{type_path}::{iname}");
+
+            match &item.inner {
+                ItemEnum::Function(_) if !filter.no_functions => {
+                    leaves.push(LeafItem {
+                        path: item_path,
+                        item,
+                        kind: LeafKind::Function,
+                        context: LeafContext::ImplMethod,
+                    });
+                }
+                ItemEnum::AssocType { .. } if !filter.no_aliases => {
+                    leaves.push(LeafItem {
+                        path: item_path,
+                        item,
+                        kind: LeafKind::AssocType,
+                        context: LeafContext::AssocType,
+                    });
+                }
+                ItemEnum::AssocConst { .. } if !filter.no_constants => {
+                    leaves.push(LeafItem {
+                        path: item_path,
+                        item,
+                        kind: LeafKind::AssocConst,
+                        context: LeafContext::AssocConst,
+                    });
+                }
+                _ => {}
+            }
+        }
+    }
+}
+
+/// Walk trait items, collecting methods/assoc items with accessible paths.
+fn walk_trait_items<'a>(
+    model: &'a CrateModel,
+    trait_item: &'a Item,
+    trait_path: &str,
+    filter: &FilterArgs,
+    leaves: &mut Vec<LeafItem<'a>>,
+) {
+    let ItemEnum::Trait(t) = &trait_item.inner else {
+        return;
+    };
+    for item_id in &t.items {
+        let Some(item) = model.krate.index.get(item_id) else {
+            continue;
+        };
+        let iname = item.name.as_deref().unwrap_or("?");
+        let item_path = format!("{trait_path}::{iname}");
+
+        match &item.inner {
+            ItemEnum::Function(_) if !filter.no_functions => {
+                leaves.push(LeafItem {
+                    path: item_path,
+                    item,
+                    kind: LeafKind::Function,
+                    context: LeafContext::ImplMethod,
+                });
+            }
+            ItemEnum::AssocType { .. } if !filter.no_aliases => {
+                leaves.push(LeafItem {
+                    path: item_path,
+                    item,
+                    kind: LeafKind::AssocType,
+                    context: LeafContext::AssocType,
+                });
+            }
+            ItemEnum::AssocConst { .. } if !filter.no_constants => {
+                leaves.push(LeafItem {
+                    path: item_path,
+                    item,
+                    kind: LeafKind::AssocConst,
+                    context: LeafContext::AssocConst,
+                });
+            }
+            _ => {}
+        }
+    }
 }
 
 #[cfg(test)]

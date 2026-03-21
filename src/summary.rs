@@ -312,6 +312,83 @@ pub fn merge_sub_crate_summary(main_output: &mut String, sub_output: &str, displ
     }
 }
 
+use crate::cross_crate::{AccessibleItemKind, CrossCrateIndex};
+
+/// Summarize a `CrossCrateIndex` by counting items per top-level accessible path segment.
+///
+/// Returns summary lines in the same format as `render_summary`, ready to
+/// be appended to the main crate's summary output.
+pub fn summarize_cross_crate_index(index: &CrossCrateIndex) -> String {
+    let mut module_summaries: BTreeMap<String, ModuleSummary> = BTreeMap::new();
+    let mut root_summary = ModuleSummary::default();
+
+    for entry in &index.items {
+        if entry.item_kind == AccessibleItemKind::Module {
+            // Ensure the module path entry exists
+            module_summaries
+                .entry(entry.accessible_path.clone())
+                .or_default();
+            continue;
+        }
+
+        let kind = match entry.item_kind {
+            AccessibleItemKind::Struct => ItemKind::Struct,
+            AccessibleItemKind::Enum => ItemKind::Enum,
+            AccessibleItemKind::Function => ItemKind::Function,
+            AccessibleItemKind::Trait => ItemKind::Trait,
+            AccessibleItemKind::TypeAlias => ItemKind::TypeAlias,
+            AccessibleItemKind::Constant | AccessibleItemKind::Static => ItemKind::Constant,
+            AccessibleItemKind::Macro => ItemKind::Macro,
+            AccessibleItemKind::Union => ItemKind::Union,
+            AccessibleItemKind::Module => continue,
+        };
+
+        // Determine which module this item belongs to
+        if let Some(last_sep) = entry.accessible_path.rfind("::") {
+            let module_path = &entry.accessible_path[..last_sep];
+            module_summaries
+                .entry(module_path.to_string())
+                .or_default()
+                .increment(kind);
+        } else {
+            // Root-level item
+            root_summary.increment(kind);
+        }
+    }
+
+    let mut output = String::new();
+
+    // Collect non-empty module lines for column alignment
+    let mut mod_lines: Vec<(String, String)> = Vec::new();
+    for (path, summary) in &module_summaries {
+        if summary.is_empty() {
+            continue;
+        }
+        let decl = format!("mod {path};");
+        let comment = summary.format_counts();
+        mod_lines.push((decl, comment));
+    }
+
+    if !mod_lines.is_empty() {
+        let max_decl_width = mod_lines.iter().map(|(d, _)| d.len()).max().unwrap_or(0);
+
+        for (decl, comment) in &mod_lines {
+            let padding = max_decl_width - decl.len() + 1;
+            output.push_str(decl);
+            output.push_str(&" ".repeat(padding));
+            output.push_str(&format!("// {comment}\n"));
+        }
+    }
+
+    // Root items (rare for cross-crate, but possible from glob flattening)
+    if !root_summary.is_empty() {
+        let counts = root_summary.format_counts();
+        output.push_str(&format!("// root: {counts}\n"));
+    }
+
+    output
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
