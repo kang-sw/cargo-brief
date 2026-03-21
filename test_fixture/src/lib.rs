@@ -235,6 +235,20 @@ pub mod outer {
             write!(f, "{}", self.value)
         }
     }
+
+    // --- Private module with pub items, glob-re-exported (nested) ---
+    // Mirrors bevy's `mod bind_group; pub use bind_group::*;` pattern
+    mod nested_private {
+        pub struct NestedPrivateStruct {
+            pub field: i32,
+        }
+
+        pub trait NestedPrivateTrait {
+            fn nested_method(&self);
+        }
+    }
+
+    pub use nested_private::*;
 }
 
 // --- Deprecated / Non-exhaustive test items ---

@@ -1925,6 +1925,48 @@ fn test_glob_reexport_api_renders_items() {
     );
 }
 
+// === Nested Private Module Glob Re-export Tests ===
+
+#[test]
+fn test_nested_private_glob_reexport_search() {
+    let model = fixture_model();
+    let filter = default_filter();
+    let reachable = compute_reachable_set(&model);
+    let output = search::render_search(
+        &model,
+        "NestedPrivate",
+        &filter,
+        None,
+        None,
+        false,
+        Some(&reachable),
+    );
+    assert!(
+        output.contains("NestedPrivateStruct"),
+        "search should find NestedPrivateStruct via nested private glob re-export:\n{output}"
+    );
+    assert!(
+        output.contains("NestedPrivateTrait"),
+        "search should find NestedPrivateTrait via nested private glob re-export:\n{output}"
+    );
+}
+
+#[test]
+fn test_nested_private_glob_reexport_api() {
+    let model = fixture_model();
+    let args = default_args();
+    let reachable = compute_reachable_set(&model);
+    let output = render_module_api(&model, Some("outer"), &args, None, false, Some(&reachable));
+    assert!(
+        output.contains("NestedPrivateStruct"),
+        "API for outer module should include NestedPrivateStruct via nested private glob:\n{output}"
+    );
+    assert!(
+        output.contains("NestedPrivateTrait"),
+        "API for outer module should include NestedPrivateTrait via nested private glob:\n{output}"
+    );
+}
+
 // === Examples Subcommand Tests ===
 
 fn default_examples_args() -> ExamplesArgs {

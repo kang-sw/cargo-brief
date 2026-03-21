@@ -200,11 +200,16 @@ pub fn compute_reachable_set(model: &CrateModel) -> HashSet<Id> {
     // Root module is always reachable
     reachable.insert(model.krate.root);
 
-    walk_public(model, root, &mut reachable);
+    walk_public(model, root, model.crate_name(), &mut reachable);
     reachable
 }
 
-fn walk_public(model: &CrateModel, module_item: &Item, reachable: &mut HashSet<Id>) {
+fn walk_public(
+    model: &CrateModel,
+    module_item: &Item,
+    module_path: &str,
+    reachable: &mut HashSet<Id>,
+) {
     let children = model.module_children(module_item);
 
     for (child_id, child) in &children {
@@ -215,7 +220,11 @@ fn walk_public(model: &CrateModel, module_item: &Item, reachable: &mut HashSet<I
         match &child.inner {
             ItemEnum::Module(_) => {
                 reachable.insert(**child_id);
-                walk_public(model, child, reachable);
+                let child_mod_path = match &child.name {
+                    Some(name) => format!("{module_path}::{name}"),
+                    None => module_path.to_string(),
+                };
+                walk_public(model, child, &child_mod_path, reachable);
             }
             ItemEnum::Use(use_item) if !use_item.is_glob => {
                 reachable.insert(**child_id);
@@ -232,9 +241,17 @@ fn walk_public(model: &CrateModel, module_item: &Item, reachable: &mut HashSet<I
                     .source
                     .strip_prefix("self::")
                     .unwrap_or(&use_item.source);
-                if let Some((mod_id, mod_item)) = model.find_module_entry(source) {
+                // Try relative to current module first (handles nested private modules
+                // like bevy's `mod bind_group; pub use bind_group::*;` inside render_resource)
+                let relative = format!("{module_path}::{source}");
+                if let Some((mod_id, mod_item)) = model.find_module_entry(&relative) {
                     if reachable.insert(*mod_id) {
-                        walk_public(model, mod_item, reachable);
+                        walk_public(model, mod_item, &relative, reachable);
+                    }
+                } else if let Some((mod_id, mod_item)) = model.find_module_entry(source) {
+                    if reachable.insert(*mod_id) {
+                        let full = format!("{}::{source}", model.crate_name());
+                        walk_public(model, mod_item, &full, reachable);
                     }
                 }
             }
