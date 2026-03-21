@@ -1586,7 +1586,7 @@ fn render_virtual_tree(
 
     // Render leaf items at this level
     for &(crate_idx, ref item_id) in &node.items {
-        let (model, _) = &index.source_models[crate_idx];
+        let model = &index.source_models[crate_idx].0;
         let Some(item) = model.krate.index.get(item_id) else {
             continue;
         };

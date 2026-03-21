@@ -1173,7 +1173,7 @@ use crate::cross_crate::{AccessibleItemKind, CrossCrateIndex};
 #[allow(clippy::too_many_arguments)]
 pub fn search_cross_crate_index(
     index: &CrossCrateIndex,
-    facade_crate_name: &str,
+    _facade_crate_name: &str,
     pattern: &str,
     filter: &FilterArgs,
     limit: Option<&str>,
@@ -1184,26 +1184,22 @@ pub fn search_cross_crate_index(
     let case_sensitive = pattern.chars().any(|c| c.is_uppercase());
     let parsed = parse_pattern(pattern, case_sensitive);
 
-    // Collect matching leaves from the index
-    let mut matched: Vec<(&str, LeafItem)> = Vec::new();
+    // Collect matching leaves from the index, paired with crate_idx for O(1) model lookup
+    let mut matched: Vec<(usize, LeafItem)> = Vec::new();
 
     for entry in &index.items {
-        // Skip modules — they're structural, not searchable leaves
         if entry.item_kind == AccessibleItemKind::Module {
             continue;
         }
-
-        // Filter by kind
         if should_skip_kind(entry.item_kind, filter) {
             continue;
         }
 
-        let (model, _reachable) = &index.source_models[entry.crate_idx];
+        let model = &index.source_models[entry.crate_idx].0;
         let Some(item) = model.krate.index.get(&entry.item_id) else {
             continue;
         };
 
-        // Build a LeafItem with the accessible path
         let kind = match entry.item_kind {
             AccessibleItemKind::Function => LeafKind::Function,
             AccessibleItemKind::Struct => LeafKind::Struct,
@@ -1217,7 +1213,6 @@ pub fn search_cross_crate_index(
             AccessibleItemKind::Module => continue,
         };
 
-        // Also walk impl blocks for types
         let mut type_leaves = Vec::new();
         if matches!(
             entry.item_kind,
@@ -1231,8 +1226,6 @@ pub fn search_cross_crate_index(
                 &mut type_leaves,
             );
         }
-
-        // Also walk trait items for traits
         if entry.item_kind == AccessibleItemKind::Trait {
             walk_trait_items(
                 model,
@@ -1243,23 +1236,23 @@ pub fn search_cross_crate_index(
             );
         }
 
-        // Register the main item
-        let leaf = LeafItem {
-            path: entry.accessible_path.clone(),
-            item,
-            kind,
-            context: LeafContext::None,
-        };
-        matched.push((facade_crate_name, leaf));
+        matched.push((
+            entry.crate_idx,
+            LeafItem {
+                path: entry.accessible_path.clone(),
+                item,
+                kind,
+                context: LeafContext::None,
+            },
+        ));
 
-        // Register impl/trait items
         for tl in type_leaves {
-            matched.push((facade_crate_name, tl));
+            matched.push((entry.crate_idx, tl));
         }
     }
 
     // Pattern matching
-    let mut filtered: Vec<&LeafItem> = matched
+    let mut filtered: Vec<(usize, &LeafItem)> = matched
         .iter()
         .filter(|(_, leaf)| {
             let path = if case_sensitive {
@@ -1272,12 +1265,12 @@ pub fn search_cross_crate_index(
                 .iter()
                 .any(|group| group.iter().all(|tok| token_matches(tok, &path)))
         })
-        .map(|(_, leaf)| leaf)
+        .map(|(ci, leaf)| (*ci, leaf))
         .collect();
 
     // Global exclusions
     if !parsed.exclusions.is_empty() {
-        filtered.retain(|leaf| {
+        filtered.retain(|(_, leaf)| {
             let path = if case_sensitive {
                 leaf.path.clone()
             } else {
@@ -1294,21 +1287,22 @@ pub fn search_cross_crate_index(
     if let Some(type_name) = methods_of {
         let suffix = format!("::{type_name}::");
         let prefix_pat = format!("{type_name}::");
-        filtered.retain(|leaf| leaf.path.contains(&suffix) || leaf.path.starts_with(&prefix_pat));
+        filtered
+            .retain(|(_, leaf)| leaf.path.contains(&suffix) || leaf.path.starts_with(&prefix_pat));
     }
 
     // --search-kind
     if let Some(kind_spec) = search_kind {
         let kinds: Vec<&str> = kind_spec.split(',').map(|s| s.trim()).collect();
-        filtered.retain(|leaf| kinds.iter().any(|k| leaf.kind.matches_kind_str(k)));
+        filtered.retain(|(_, leaf)| kinds.iter().any(|k| leaf.kind.matches_kind_str(k)));
     }
 
     // Sort: primary by kind, secondary by path
     filtered.sort_by(|a, b| {
-        a.kind
+        a.1.kind
             .sort_key()
-            .cmp(&b.kind.sort_key())
-            .then_with(|| a.path.cmp(&b.path))
+            .cmp(&b.1.kind.sort_key())
+            .then_with(|| a.1.path.cmp(&b.1.path))
     });
 
     let total = filtered.len();
@@ -1319,26 +1313,12 @@ pub fn search_cross_crate_index(
         .unwrap_or(total);
     let skipped_after = total - end;
 
-    // Render — no separate header, results blend with primary crate output
+    // Render — direct model lookup via stored crate_idx
     let mut output = String::new();
 
-    for leaf in &filtered[offset..end] {
-        // Find the model for this leaf to pass to render_leaf
-        let model = matched
-            .iter()
-            .find(|(_, l)| std::ptr::eq(*leaf, l))
-            .map(|(_, l)| l);
-        let _ = model; // We need to find the right source model
-        // Use the first source model that contains the item
-        let source_model = index
-            .source_models
-            .iter()
-            .find(|(m, _)| m.krate.index.values().any(|i| std::ptr::eq(i, leaf.item)))
-            .map(|(m, _)| m);
-
-        if let Some(model) = source_model {
-            render_leaf(&mut output, model, leaf, filter);
-        }
+    for &(ci, ref leaf) in &filtered[offset..end] {
+        let model = &index.source_models[ci].0;
+        render_leaf(&mut output, model, leaf, filter);
     }
 
     if skipped_after > 0 {

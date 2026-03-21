@@ -12,6 +12,9 @@
 //! actually `use` it (e.g. `render::render_resource::AsBindGroup` instead of
 //! `bevy_render::render_resource::bind_group::AsBindGroup`).
 
+// Vec<Box<...>> is intentional for pointer stability across Vec reallocation.
+#![allow(clippy::vec_box)]
+
 use std::collections::HashSet;
 use std::path::Path;
 
@@ -69,7 +72,11 @@ impl AccessibleItemKind {
 /// Unified cross-crate accessible-path index.
 pub struct CrossCrateIndex {
     /// All loaded source crate models, each paired with its ReachableInfo.
-    pub source_models: Vec<(CrateModel, ReachableInfo)>,
+    /// Box provides stable heap addresses — raw pointers into source_models
+    /// remain valid even when the Vec reallocates on push. This is intentional,
+    /// not redundant boxing.
+    #[allow(clippy::vec_box)]
+    pub source_models: Vec<Box<(CrateModel, ReachableInfo)>>,
     /// All accessible items, sorted by `accessible_path`.
     pub items: Vec<AccessibleEntry>,
 }
@@ -430,7 +437,7 @@ pub fn build_cross_crate_index(
     verbose: bool,
     workspace_members: &HashSet<String>,
 ) -> CrossCrateIndex {
-    let mut source_models: Vec<(CrateModel, ReachableInfo)> = Vec::new();
+    let mut source_models: Vec<Box<(CrateModel, ReachableInfo)>> = Vec::new();
     let mut items: Vec<AccessibleEntry> = Vec::new();
     let mut visited_crates: HashSet<String> = HashSet::new();
     visited_crates.insert(primary_model.crate_name().to_string());
@@ -450,11 +457,13 @@ pub fn build_cross_crate_index(
         };
     };
 
+    let primary_reachable = compute_reachable_set(primary_model);
     walk_accessible(
         primary_model,
         root,
         "",
         None, // no crate_idx — primary model items are rendered by the main pipeline
+        &primary_reachable,
         0,
         &mut visited_crates,
         &mut source_models,
@@ -493,9 +502,10 @@ fn walk_accessible(
     module_item: &Item,
     prefix: &str,
     crate_idx: Option<usize>, // None = primary model (skip registering)
+    reachable: &ReachableInfo,
     depth: usize,
     visited_crates: &mut HashSet<String>,
-    source_models: &mut Vec<(CrateModel, ReachableInfo)>,
+    source_models: &mut Vec<Box<(CrateModel, ReachableInfo)>>,
     items: &mut Vec<AccessibleEntry>,
     ctx: &WalkParams,
 ) {
@@ -504,7 +514,6 @@ fn walk_accessible(
     }
 
     let crate_name = model.crate_name().to_string();
-    let reachable = compute_reachable_set(model);
     let children = model.module_children(module_item);
 
     for (child_id, child) in &children {
@@ -527,6 +536,7 @@ fn walk_accessible(
                         child,
                         prefix,
                         crate_idx,
+                        reachable,
                         depth + 1,
                         visited_crates,
                         source_models,
@@ -557,6 +567,7 @@ fn walk_accessible(
                     child,
                     &child_prefix,
                     crate_idx,
+                    reachable,
                     depth + 1,
                     visited_crates,
                     source_models,
@@ -576,6 +587,7 @@ fn walk_accessible(
                         &crate_name,
                         prefix,
                         crate_idx,
+                        reachable,
                         depth,
                         visited_crates,
                         source_models,
@@ -590,6 +602,7 @@ fn walk_accessible(
                         &crate_name,
                         prefix,
                         crate_idx,
+                        reachable,
                         depth,
                         visited_crates,
                         source_models,
@@ -627,14 +640,14 @@ fn handle_glob_reexport(
     crate_name: &str,
     prefix: &str,
     crate_idx: Option<usize>,
+    reachable: &ReachableInfo,
     depth: usize,
     visited_crates: &mut HashSet<String>,
-    source_models: &mut Vec<(CrateModel, ReachableInfo)>,
+    source_models: &mut Vec<Box<(CrateModel, ReachableInfo)>>,
     items: &mut Vec<AccessibleEntry>,
     ctx: &WalkParams,
 ) {
     if is_intra_crate_source(&use_item.source, crate_name) {
-        // Intra-crate glob: resolve source module and walk it
         let source_path = use_item
             .source
             .strip_prefix("self::")
@@ -656,6 +669,7 @@ fn handle_glob_reexport(
                 source_mod,
                 &walk_prefix,
                 crate_idx,
+                reachable,
                 depth + 1,
                 visited_crates,
                 source_models,
@@ -684,18 +698,19 @@ fn handle_glob_reexport(
             };
 
             if let Some(start_id) = start_id {
-                // Use a raw pointer to avoid the borrow conflict.
-                // SAFETY: We only append to source_models (never remove/reorder),
-                // and ci is a stable index. The pointer remains valid because
-                // walk_accessible only appends new entries at the end.
-                let model_ptr: *const CrateModel = &source_models[ci].0;
-                let sub_model = unsafe { &*model_ptr };
+                // SAFETY: source_models uses Box, so the heap-allocated data
+                // at index `ci` has a stable address even when the Vec
+                // reallocates on push. The raw pointer bypasses Rust's borrow
+                // checker — walk_accessible needs &mut Vec but we hold &model.
+                let box_ptr: *const (CrateModel, ReachableInfo) = &*source_models[ci];
+                let (sub_model, sub_reachable) = unsafe { &*box_ptr };
                 if let Some(start_mod) = sub_model.krate.index.get(&start_id) {
                     walk_accessible(
                         sub_model,
                         start_mod,
                         prefix,
                         Some(ci),
+                        sub_reachable,
                         depth + 1,
                         visited_crates,
                         source_models,
@@ -717,9 +732,10 @@ fn handle_named_reexport(
     crate_name: &str,
     prefix: &str,
     crate_idx: Option<usize>,
+    reachable: &ReachableInfo,
     depth: usize,
     visited_crates: &mut HashSet<String>,
-    source_models: &mut Vec<(CrateModel, ReachableInfo)>,
+    source_models: &mut Vec<Box<(CrateModel, ReachableInfo)>>,
     items: &mut Vec<AccessibleEntry>,
     ctx: &WalkParams,
 ) {
@@ -745,6 +761,7 @@ fn handle_named_reexport(
                     target,
                     &target_path,
                     crate_idx,
+                    reachable,
                     depth + 1,
                     visited_crates,
                     source_models,
@@ -788,14 +805,16 @@ fn handle_named_reexport(
                         item_kind: AccessibleItemKind::Module,
                     });
                     if let Some(mod_id) = mod_id {
-                        let model_ptr: *const CrateModel = &source_models[ci].0;
-                        let sub_model = unsafe { &*model_ptr };
+                        // SAFETY: Box provides stable heap address (see handle_glob_reexport)
+                        let box_ptr: *const (CrateModel, ReachableInfo) = &*source_models[ci];
+                        let (sub_model, sub_reachable) = unsafe { &*box_ptr };
                         if let Some(mod_item) = sub_model.krate.index.get(&mod_id) {
                             walk_accessible(
                                 sub_model,
                                 mod_item,
                                 &alias_path,
                                 Some(ci),
+                                sub_reachable,
                                 depth + 1,
                                 visited_crates,
                                 source_models,
@@ -805,7 +824,6 @@ fn handle_named_reexport(
                         }
                     }
                 } else {
-                    // Try to find a leaf item by name
                     let item_name = sp.rsplit("::").next().unwrap_or(sp);
                     find_and_register_item(&source_models[ci].0, item_name, &alias_path, ci, items);
                 }
@@ -818,14 +836,16 @@ fn handle_named_reexport(
                     item_id: root_id,
                     item_kind: AccessibleItemKind::Module,
                 });
-                let model_ptr: *const CrateModel = &source_models[ci].0;
-                let sub_model = unsafe { &*model_ptr };
+                // SAFETY: Box provides stable heap address (see handle_glob_reexport)
+                let box_ptr: *const (CrateModel, ReachableInfo) = &*source_models[ci];
+                let (sub_model, sub_reachable) = unsafe { &*box_ptr };
                 if let Some(root) = sub_model.krate.index.get(&root_id) {
                     walk_accessible(
                         sub_model,
                         root,
                         &alias_path,
                         Some(ci),
+                        sub_reachable,
                         depth + 1,
                         visited_crates,
                         source_models,
@@ -841,12 +861,13 @@ fn handle_named_reexport(
 /// Load a source crate model, or find its index if already loaded.
 fn load_or_find_source_crate(
     source_crate_name: &str,
-    source_models: &mut Vec<(CrateModel, ReachableInfo)>,
+    source_models: &mut Vec<Box<(CrateModel, ReachableInfo)>>,
     visited_crates: &mut HashSet<String>,
     ctx: &WalkParams,
 ) -> Option<usize> {
     // Check if already loaded
-    for (i, (model, _)) in source_models.iter().enumerate() {
+    for (i, entry) in source_models.iter().enumerate() {
+        let model = &entry.0;
         if model.crate_name() == source_crate_name {
             return Some(i);
         }
@@ -894,7 +915,7 @@ fn load_or_find_source_crate(
 
     let reachable = compute_reachable_set(&model);
     let ci = source_models.len();
-    source_models.push((model, reachable));
+    source_models.push(Box::new((model, reachable)));
 
     Some(ci)
 }
