@@ -1,6 +1,6 @@
 ---
 title: "Local pipeline caching — rustdoc JSON skip + bincode cache"
-status: idea
+status: dropped
 ---
 
 ## Summary
@@ -48,6 +48,10 @@ crates. `PipelineContext.workspace_members` (from `cargo metadata`) identifies
 mutable crates; anything outside that set is treated as immutable (locked via
 Cargo.lock). This eliminates redundant `cargo rustdoc` calls for external dep
 sub-crates during local facade traversal.
+
+**Update (46dc0f3):** Local context builders now set `use_cache` based on
+workspace membership. Non-member primary targets (e.g. `cargo brief search bevy`
+from a game project) also skip regeneration when JSON exists.
 
 Remaining: caching for the **target workspace member itself** and for
 **workspace-member cross-deps**. Both require source-change detection
