@@ -408,16 +408,28 @@ mod tests {
         assert!(content.contains("serde"));
     }
 
-    #[test]
-    fn cache_dir_env_override() {
+    /// Guard that serializes tests manipulating CARGO_BRIEF_CACHE_DIR.
+    /// Prevents parallel tests from stomping each other's env var.
+    static ENV_MUTEX: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+    /// Set CARGO_BRIEF_CACHE_DIR for the duration of a closure, restoring afterwards.
+    fn with_cache_dir<F: FnOnce()>(path: &std::path::Path, f: F) {
+        let _guard = ENV_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
         let original = std::env::var("CARGO_BRIEF_CACHE_DIR").ok();
-        // SAFETY: test-only env manipulation, tests run serially for this var
-        unsafe { std::env::set_var("CARGO_BRIEF_CACHE_DIR", "/tmp/test-cache") };
-        assert_eq!(cache_dir(), PathBuf::from("/tmp/test-cache"));
+        unsafe { std::env::set_var("CARGO_BRIEF_CACHE_DIR", path) };
+        f();
         match original {
             Some(v) => unsafe { std::env::set_var("CARGO_BRIEF_CACHE_DIR", v) },
             None => unsafe { std::env::remove_var("CARGO_BRIEF_CACHE_DIR") },
         }
+    }
+
+    #[test]
+    fn cache_dir_env_override() {
+        let tmp = PathBuf::from("/tmp/test-cache");
+        with_cache_dir(&tmp, || {
+            assert_eq!(cache_dir(), tmp);
+        });
     }
 
     #[test]
@@ -442,28 +454,21 @@ mod tests {
     #[test]
     fn resolve_workspace_cached() {
         let test_dir = tempfile::tempdir().unwrap();
-        let original = std::env::var("CARGO_BRIEF_CACHE_DIR").ok();
-        // SAFETY: test-only env manipulation, tests run serially for this var
-        unsafe { std::env::set_var("CARGO_BRIEF_CACHE_DIR", test_dir.path()) };
+        with_cache_dir(test_dir.path(), || {
+            let (ws, resolved) = resolve_workspace("serde@1.0.200", None, false).unwrap();
+            assert!(matches!(ws, WorkspaceDir::Cached(_)));
+            assert!(ws.path().join("Cargo.toml").exists());
+            assert!(ws.path().join("src/lib.rs").exists());
+            assert_eq!(resolved, Some("1.0.200".to_string()));
 
-        let (ws, resolved) = resolve_workspace("serde@1.0.200", None, false).unwrap();
-        assert!(matches!(ws, WorkspaceDir::Cached(_)));
-        assert!(ws.path().join("Cargo.toml").exists());
-        assert!(ws.path().join("src/lib.rs").exists());
-        assert_eq!(resolved, Some("1.0.200".to_string()));
+            // Verify dir name uses normalized format
+            let dir_name = ws.path().file_name().unwrap().to_string_lossy().to_string();
+            assert_eq!(dir_name, "serde[1.0.200]");
 
-        // Verify dir name uses normalized format
-        let dir_name = ws.path().file_name().unwrap().to_string_lossy().to_string();
-        assert_eq!(dir_name, "serde[1.0.200]");
-
-        // Second call reuses the same directory (idempotent)
-        let (ws2, _) = resolve_workspace("serde@1.0.200", None, false).unwrap();
-        assert_eq!(ws.path(), ws2.path());
-
-        match original {
-            Some(v) => unsafe { std::env::set_var("CARGO_BRIEF_CACHE_DIR", v) },
-            None => unsafe { std::env::remove_var("CARGO_BRIEF_CACHE_DIR") },
-        }
+            // Second call reuses the same directory (idempotent)
+            let (ws2, _) = resolve_workspace("serde@1.0.200", None, false).unwrap();
+            assert_eq!(ws.path(), ws2.path());
+        });
     }
 
     #[test]
@@ -561,59 +566,45 @@ mod tests {
     #[test]
     fn test_clean_cache_glob_matching() {
         let test_dir = tempfile::tempdir().unwrap();
-        let original = std::env::var("CARGO_BRIEF_CACHE_DIR").ok();
-        // SAFETY: test-only env manipulation, tests run serially for this var
-        unsafe { std::env::set_var("CARGO_BRIEF_CACHE_DIR", test_dir.path()) };
+        with_cache_dir(test_dir.path(), || {
+            // Seed fake cache dirs
+            std::fs::create_dir_all(test_dir.path().join("serde[1.0.200]")).unwrap();
+            std::fs::create_dir_all(test_dir.path().join("serde[1.0.228]")).unwrap();
+            std::fs::create_dir_all(test_dir.path().join("tokio[1.50.0]")).unwrap();
 
-        // Seed fake cache dirs
-        std::fs::create_dir_all(test_dir.path().join("serde[1.0.200]")).unwrap();
-        std::fs::create_dir_all(test_dir.path().join("serde[1.0.228]")).unwrap();
-        std::fs::create_dir_all(test_dir.path().join("tokio[1.50.0]")).unwrap();
+            // Seed version cache files
+            let versions_dir = test_dir.path().join("versions");
+            std::fs::create_dir_all(&versions_dir).unwrap();
+            std::fs::write(versions_dir.join("serde.json"), "{}").unwrap();
+            std::fs::write(versions_dir.join("tokio.json"), "{}").unwrap();
 
-        // Seed version cache files
-        let versions_dir = test_dir.path().join("versions");
-        std::fs::create_dir_all(&versions_dir).unwrap();
-        std::fs::write(versions_dir.join("serde.json"), "{}").unwrap();
-        std::fs::write(versions_dir.join("tokio.json"), "{}").unwrap();
+            clean_cache("serde").unwrap();
 
-        clean_cache("serde").unwrap();
+            // serde dirs and version cache removed
+            assert!(!test_dir.path().join("serde[1.0.200]").exists());
+            assert!(!test_dir.path().join("serde[1.0.228]").exists());
+            assert!(!versions_dir.join("serde.json").exists());
 
-        // serde dirs and version cache removed
-        assert!(!test_dir.path().join("serde[1.0.200]").exists());
-        assert!(!test_dir.path().join("serde[1.0.228]").exists());
-        assert!(!versions_dir.join("serde.json").exists());
-
-        // tokio untouched
-        assert!(test_dir.path().join("tokio[1.50.0]").exists());
-        assert!(versions_dir.join("tokio.json").exists());
-
-        match original {
-            Some(v) => unsafe { std::env::set_var("CARGO_BRIEF_CACHE_DIR", v) },
-            None => unsafe { std::env::remove_var("CARGO_BRIEF_CACHE_DIR") },
-        }
+            // tokio untouched
+            assert!(test_dir.path().join("tokio[1.50.0]").exists());
+            assert!(versions_dir.join("tokio.json").exists());
+        });
     }
 
     #[test]
     fn test_clean_cache_empty_spec_removes_all() {
         let test_dir = tempfile::tempdir().unwrap();
-        let original = std::env::var("CARGO_BRIEF_CACHE_DIR").ok();
-        // SAFETY: test-only env manipulation, tests run serially for this var
-        unsafe { std::env::set_var("CARGO_BRIEF_CACHE_DIR", test_dir.path()) };
+        with_cache_dir(test_dir.path(), || {
+            // Seed fake cache dirs
+            std::fs::create_dir_all(test_dir.path().join("serde[1.0.200]")).unwrap();
+            std::fs::create_dir_all(test_dir.path().join("tokio[1.50.0]")).unwrap();
+            std::fs::create_dir_all(test_dir.path().join("versions")).unwrap();
+            std::fs::write(test_dir.path().join("versions/serde.json"), "{}").unwrap();
 
-        // Seed fake cache dirs
-        std::fs::create_dir_all(test_dir.path().join("serde[1.0.200]")).unwrap();
-        std::fs::create_dir_all(test_dir.path().join("tokio[1.50.0]")).unwrap();
-        std::fs::create_dir_all(test_dir.path().join("versions")).unwrap();
-        std::fs::write(test_dir.path().join("versions/serde.json"), "{}").unwrap();
+            clean_cache("").unwrap();
 
-        clean_cache("").unwrap();
-
-        // Entire cache dir removed
-        assert!(!test_dir.path().exists());
-
-        match original {
-            Some(v) => unsafe { std::env::set_var("CARGO_BRIEF_CACHE_DIR", v) },
-            None => unsafe { std::env::remove_var("CARGO_BRIEF_CACHE_DIR") },
-        }
+            // Entire cache dir removed
+            assert!(!test_dir.path().exists());
+        });
     }
 }
