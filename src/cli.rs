@@ -27,11 +27,17 @@ pub struct BriefDirect {
     pub crates: bool,
 
     /// Comma-separated features to enable (requires -C)
-    #[arg(short = 'F', long, value_name = "FEATURES", global = true)]
+    #[arg(
+        short = 'F',
+        long,
+        value_name = "FEATURES",
+        global = true,
+        requires = "crates"
+    )]
     pub features: Option<String>,
 
     /// Skip cache and use a temporary workspace (requires -C)
-    #[arg(long, global = true)]
+    #[arg(long, global = true, requires = "crates")]
     pub no_cache: bool,
 
     #[command(subcommand)]
