@@ -159,6 +159,7 @@ fn hecs_search_no_pub_crate() {
         manifest_path: None,
         limit: None,
         methods_of: None,
+        search_kind: None,
     };
     let output = run_search_pipeline(&args).unwrap();
 

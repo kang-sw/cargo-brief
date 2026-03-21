@@ -298,14 +298,13 @@ pub struct ApiArgs {
 
 /// Arguments for the `search` subcommand.
 #[derive(Args, Debug, Clone)]
-#[command(trailing_var_arg = true)]
 pub struct SearchArgs {
     /// Target crate to search: crate name, "self", or crate::module
     #[arg(value_name = "TARGET", default_value = "self")]
     pub crate_name: String,
 
     /// Search patterns — multiple args are AND-matched (use -- for patterns starting with -)
-    #[arg(value_name = "PATTERN", trailing_var_arg = true)]
+    #[arg(value_name = "PATTERN", num_args = 0..)]
     pub patterns: Vec<String>,
 
     #[command(flatten)]
@@ -351,14 +350,13 @@ impl SearchArgs {
 
 /// Arguments for the `examples` subcommand.
 #[derive(Args, Debug, Clone)]
-#[command(trailing_var_arg = true)]
 pub struct ExamplesArgs {
     /// Target crate
     #[arg(value_name = "TARGET", default_value = "self")]
     pub crate_name: String,
 
     /// Grep patterns — multiple args are AND-matched (omit for list mode)
-    #[arg(value_name = "PATTERN", trailing_var_arg = true)]
+    #[arg(value_name = "PATTERN", num_args = 0..)]
     pub patterns: Vec<String>,
 
     #[command(flatten)]
