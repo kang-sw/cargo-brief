@@ -1,6 +1,7 @@
 ---
 title: "Search kind filter (--search-kind)"
-status: idea
+status: done
+completed: 2026-03-21
 ---
 
 # Idea: Search kind filter (`--search-kind`)
@@ -33,3 +34,9 @@ Examples:
 ## Complexity
 
 Low. Filter on `LeafKind` in `search.rs` before rendering.
+
+### Result (a47ef91) - 26-03-21
+
+Implemented as designed. `--search-kind` added to `SearchArgs`, post-filter
+on `LeafKind::matches_kind_str()` after pattern + methods-of filtering.
+`AssocType` maps to "type", `AssocConst` maps to "const". 5 integration tests.
