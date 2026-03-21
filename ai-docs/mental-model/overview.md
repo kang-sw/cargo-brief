@@ -7,7 +7,7 @@
 ## Module Contracts
 - `lib.rs` guarantees: four public pipeline functions. Both `run_api_pipeline` and `run_search_pipeline` follow the same two-phase structure: (1) build a `PipelineContext` via `build_local_context_*` or `build_remote_context_*`, then (2) call the shared `run_shared_api_pipeline` / `run_shared_search_pipeline`. Both local and remote paths get cross-crate discovery through the shared pipeline. `run_examples_pipeline` is disk-only — no rustdoc JSON, no model building; it reads `.rs` files directly from `examples/`, `tests/`, and `benches/` directories. `run_summary_pipeline` uses the same `PipelineContext` two-phase structure as api/search. No stage within a path may be reordered.
 - `resolve`, `rustdoc_json`, `remote`, and `cross_crate` are pure utilities with zero internal dependencies on each other. They can be tested in isolation.
-- `model` depends only on `rustdoc_types` (external). `render` depends on `model` + `cli`.
+- `model` depends only on `rustdoc_types` (external). `compute_reachable_set()` returns `ReachableInfo` (with `reachable`, `glob_private_modules`, `glob_inlined`). `render` depends on `model` + `cli`.
 - `examples` depends only on `cli` (for `ExamplesArgs`). It has no dependency on `model`, `render`, `rustdoc_json`, or `resolve`.
 - `lib.rs` is the sole orchestrator — all cross-module data flow passes through it.
 - `cross_crate` depends on `rustdoc_json` (for `generate_rustdoc_json(..., true)` / `parse_rustdoc_json_cached`) and `model`. It never calls `remote` or `resolve`.

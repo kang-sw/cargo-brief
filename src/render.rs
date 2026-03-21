@@ -7,7 +7,7 @@ use rustdoc_types::{
 };
 
 use crate::cli::{ApiArgs, FilterArgs};
-use crate::model::{CrateModel, is_visible_from};
+use crate::model::{CrateModel, ReachableInfo, is_visible_from};
 
 /// Render the API of a target module as pseudo-Rust.
 ///
@@ -18,7 +18,7 @@ pub fn render_module_api(
     args: &ApiArgs,
     observer_module_path: Option<&str>,
     same_crate: bool,
-    reachable: Option<&HashSet<Id>>,
+    reachable: Option<&ReachableInfo>,
 ) -> String {
     let mut output = String::new();
 
@@ -318,6 +318,123 @@ fn should_render_item(item: &Item, args: &FilterArgs) -> bool {
     }
 }
 
+/// Render children of a module at the given indent level, WITHOUT a `mod` wrapper.
+/// Used for inlining glob-reexported private modules into their parent.
+#[allow(clippy::too_many_arguments)]
+fn render_inline_children(
+    model: &CrateModel,
+    private_module: &Item,
+    args: &FilterArgs,
+    observer: &str,
+    same_crate: bool,
+    max_depth: u32,
+    current_depth: u32,
+    display_path: &str,
+    reachable: Option<&ReachableInfo>,
+    output: &mut String,
+) {
+    // Use a temporary wrapper that renders children at current_depth but
+    // without the mod header/footer. We save the output position, render at
+    // depth 0 (which suppresses the wrapper), then re-indent if needed.
+    //
+    // Simpler approach: render at current_depth by temporarily pretending
+    // it's a root-level render. We just don't emit the wrapper.
+    let indent = "    ".repeat(current_depth.saturating_sub(1) as usize);
+    let child_indent = if current_depth > 0 {
+        format!("{indent}    ")
+    } else {
+        String::new()
+    };
+
+    let children = model.module_children(private_module);
+
+    for (child_id, child) in &children {
+        if let Some(info) = reachable {
+            if !info.reachable.contains(child_id) {
+                continue;
+            }
+        } else if !matches!(child.visibility, Visibility::Default)
+            && !is_visible_from(model, child, child_id, observer, same_crate)
+        {
+            continue;
+        }
+
+        let name = child.name.as_deref().or_else(|| {
+            if let ItemEnum::Use(u) = &child.inner {
+                Some(u.name.as_str())
+            } else {
+                None
+            }
+        });
+        let Some(name) = name else { continue };
+
+        match &child.inner {
+            ItemEnum::Module(_) => {
+                if reachable.is_some_and(|info| info.glob_private_modules.contains(child_id)) {
+                    continue;
+                }
+                if current_depth < max_depth {
+                    let child_path = format!("{display_path}::{name}");
+                    render_module_contents(
+                        model,
+                        child,
+                        args,
+                        observer,
+                        same_crate,
+                        max_depth,
+                        current_depth + 1,
+                        &child_path,
+                        reachable,
+                        output,
+                    );
+                } else {
+                    render_attrs(child, &child_indent, args.verbose_metadata, output);
+                    output.push_str(&format!("{child_indent}mod {name} {{ /* ... */ }}\n"));
+                }
+            }
+            ItemEnum::Use(use_item) => {
+                if use_item.is_glob {
+                    let vis = format_visibility(&child.visibility);
+                    output.push_str(&format!("{child_indent}{vis}use {}::*;\n", use_item.source));
+                } else if let Some(target_id) = &use_item.id {
+                    if let Some(target_item) = model.krate.index.get(target_id) {
+                        render_use(child, use_item, target_item, &child_indent, output);
+                    } else {
+                        let vis = format_visibility(&child.visibility);
+                        output.push_str(&format!("{child_indent}{vis}use {};\n", use_item.source));
+                    }
+                }
+            }
+            _ => {
+                if should_render_item(child, args) {
+                    render_item(
+                        model,
+                        child,
+                        child_id,
+                        &child_indent,
+                        args,
+                        observer,
+                        same_crate,
+                        output,
+                    );
+                }
+            }
+        }
+    }
+
+    // Render impl blocks for types in the private module
+    render_impl_blocks(
+        model,
+        private_module,
+        args,
+        observer,
+        same_crate,
+        current_depth,
+        reachable,
+        output,
+    );
+}
+
 #[allow(clippy::too_many_arguments)]
 fn render_module_contents(
     model: &CrateModel,
@@ -328,7 +445,7 @@ fn render_module_contents(
     max_depth: u32,
     current_depth: u32,
     display_path: &str,
-    reachable: Option<&HashSet<Id>>,
+    reachable: Option<&ReachableInfo>,
     output: &mut String,
 ) {
     // Indent level: root (depth=0) has no wrapper, so children at depth=0 get no indent.
@@ -344,8 +461,8 @@ fn render_module_contents(
 
     for (child_id, child) in &children {
         // Check visibility (skip items that aren't visible from observer)
-        if let Some(reachable) = reachable {
-            if !reachable.contains(child_id) {
+        if let Some(info) = reachable {
+            if !info.reachable.contains(child_id) {
                 continue;
             }
         } else if !matches!(child.visibility, Visibility::Default)
@@ -372,6 +489,10 @@ fn render_module_contents(
 
         match &child.inner {
             ItemEnum::Module(_) => {
+                // Skip glob-private modules — their items are inlined via the glob Use arm
+                if reachable.is_some_and(|info| info.glob_private_modules.contains(child_id)) {
+                    continue;
+                }
                 if current_depth < max_depth {
                     let child_path = format!("{display_path}::{name}");
                     render_module_contents(
@@ -501,8 +622,30 @@ fn render_module_contents(
             }
             ItemEnum::Use(use_item) => {
                 if use_item.is_glob {
-                    // Glob re-exports: render as `pub use source::*;`
-                    // (run_pipeline may replace this with expanded individual items)
+                    // Inline private module contents instead of emitting `pub use source::*;`
+                    if let Some(info) = reachable
+                        && let Some(private_mod_id) = info.glob_inlined.get(child_id)
+                        && let Some(private_mod) = model.krate.index.get(private_mod_id)
+                    {
+                        // Render the private module's children at this level,
+                        // WITHOUT a mod wrapper. Use a temporary depth of 0 to
+                        // suppress the wrapper, then restore impl block rendering
+                        // via render_impl_blocks.
+                        render_inline_children(
+                            model,
+                            private_mod,
+                            args,
+                            observer,
+                            same_crate,
+                            max_depth,
+                            current_depth,
+                            display_path,
+                            reachable,
+                            output,
+                        );
+                        continue;
+                    }
+                    // Fall through: cross-crate globs still emit `pub use source::*;`
                     let vis = format_visibility(&child.visibility);
                     output.push_str(&format!("{child_indent}{vis}use {}::*;\n", use_item.source));
                 } else if let Some(target_id) = &use_item.id {
@@ -604,7 +747,7 @@ fn render_impl_blocks(
     observer: &str,
     same_crate: bool,
     current_depth: u32,
-    reachable: Option<&HashSet<Id>>,
+    reachable: Option<&ReachableInfo>,
     output: &mut String,
 ) {
     // Match the indent logic from render_module_contents
@@ -620,8 +763,8 @@ fn render_impl_blocks(
 
     for (child_id, child) in &children {
         // Only process impls for types visible from the observer
-        if let Some(reachable) = reachable {
-            if !reachable.contains(child_id) {
+        if let Some(info) = reachable {
+            if !info.reachable.contains(child_id) {
                 continue;
             }
         } else if !matches!(child.visibility, Visibility::Default)

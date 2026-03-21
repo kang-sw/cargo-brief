@@ -1887,6 +1887,11 @@ fn test_glob_reexport_search_finds_trait() {
         output.contains("GlobTrait"),
         "search should find GlobTrait via glob re-export:\n{output}"
     );
+    // Canonical path: should NOT include hidden_reexport:: prefix
+    assert!(
+        !output.contains("hidden_reexport::"),
+        "search path should NOT include private module hidden_reexport:\n{output}"
+    );
 }
 
 #[test]
@@ -1907,6 +1912,11 @@ fn test_glob_reexport_search_finds_struct() {
         output.contains("GlobStruct"),
         "search should find GlobStruct via glob re-export:\n{output}"
     );
+    // Canonical path: should NOT include hidden_reexport:: prefix
+    assert!(
+        !output.contains("hidden_reexport::"),
+        "search path should NOT include private module hidden_reexport:\n{output}"
+    );
 }
 
 #[test]
@@ -1922,6 +1932,11 @@ fn test_glob_reexport_api_renders_items() {
     assert!(
         output.contains("GlobStruct"),
         "API render should include GlobStruct via glob re-export:\n{output}"
+    );
+    // Items should be inlined at root, NOT wrapped in mod hidden_reexport
+    assert!(
+        !output.contains("mod hidden_reexport"),
+        "API should NOT show private module hidden_reexport:\n{output}"
     );
 }
 
@@ -1949,6 +1964,15 @@ fn test_nested_private_glob_reexport_search() {
         output.contains("NestedPrivateTrait"),
         "search should find NestedPrivateTrait via nested private glob re-export:\n{output}"
     );
+    // Canonical path: items should appear under outer::, NOT outer::nested_private::
+    assert!(
+        output.contains("outer::NestedPrivateStruct"),
+        "search path should be outer::NestedPrivateStruct (canonical):\n{output}"
+    );
+    assert!(
+        !output.contains("nested_private::"),
+        "search path should NOT include private module name nested_private:\n{output}"
+    );
 }
 
 #[test]
@@ -1964,6 +1988,39 @@ fn test_nested_private_glob_reexport_api() {
     assert!(
         output.contains("NestedPrivateTrait"),
         "API for outer module should include NestedPrivateTrait via nested private glob:\n{output}"
+    );
+    // Items should be inlined directly in outer, NOT wrapped in mod nested_private
+    assert!(
+        !output.contains("mod nested_private"),
+        "API should NOT show private module wrapper:\n{output}"
+    );
+}
+
+#[test]
+fn test_glob_private_modules_inlined_from_root_depth3() {
+    let model = fixture_model();
+    let mut args = default_args();
+    args.depth = 3;
+    let reachable = compute_reachable_set(&model);
+    let output = render_module_api(&model, None, &args, None, false, Some(&reachable));
+    // nested_private items should appear inside outer, NOT as a separate module
+    assert!(
+        !output.contains("mod nested_private"),
+        "depth 3 render should NOT show private module nested_private:\n{output}"
+    );
+    // hidden_reexport items should appear at root, NOT as a separate module
+    assert!(
+        !output.contains("mod hidden_reexport"),
+        "depth 3 render should NOT show private module hidden_reexport:\n{output}"
+    );
+    // Items should still be present
+    assert!(
+        output.contains("NestedPrivateStruct"),
+        "depth 3 render should contain NestedPrivateStruct:\n{output}"
+    );
+    assert!(
+        output.contains("GlobTrait"),
+        "depth 3 render should contain GlobTrait:\n{output}"
     );
 }
 

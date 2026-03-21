@@ -1,8 +1,8 @@
-use std::collections::{BTreeMap, HashSet};
+use std::collections::BTreeMap;
 
 use rustdoc_types::{Id, Item, ItemEnum, Visibility};
 
-use crate::model::{CrateModel, is_visible_from};
+use crate::model::{CrateModel, ReachableInfo, is_visible_from};
 
 /// Kind of item for summary counting.
 /// Ord derives display order: traits first, unions last.
@@ -91,11 +91,11 @@ fn is_item_visible(
     item_id: &Id,
     observer: Option<&str>,
     same_crate: bool,
-    reachable: Option<&HashSet<Id>>,
+    reachable: Option<&ReachableInfo>,
     model: &CrateModel,
 ) -> bool {
-    if let Some(reachable) = reachable {
-        reachable.contains(item_id)
+    if let Some(info) = reachable {
+        info.reachable.contains(item_id)
     } else if same_crate {
         let obs = observer.unwrap_or("");
         is_visible_from(model, item, item_id, obs, true)
@@ -112,7 +112,7 @@ fn count_module_items(
     root_path: &str,
     observer: Option<&str>,
     same_crate: bool,
-    reachable: Option<&HashSet<Id>>,
+    reachable: Option<&ReachableInfo>,
     root_summary: &mut ModuleSummary,
     module_summaries: &mut BTreeMap<String, ModuleSummary>,
 ) {
@@ -122,50 +122,71 @@ fn count_module_items(
         }
 
         if let ItemEnum::Module(_) = &child.inner {
-            // For modules, check actual visibility — being in the reachable set
-            // alone isn't enough (e.g., pub(crate) modules whose items are glob-reexported
-            // are reachable but shouldn't appear as named module lines in external view).
-            let module_visible = if !same_crate {
-                matches!(child.visibility, Visibility::Public)
+            let is_glob_private =
+                reachable.is_some_and(|info| info.glob_private_modules.contains(child_id));
+
+            if is_glob_private {
+                // Recurse but count items at PARENT level (same current_path)
+                count_module_items(
+                    model,
+                    child,
+                    current_path,
+                    root_path,
+                    observer,
+                    same_crate,
+                    reachable,
+                    root_summary,
+                    module_summaries,
+                );
             } else {
-                true // already passed is_item_visible above
-            };
-            if !module_visible {
-                continue;
+                // For modules, check actual visibility — being in the reachable set
+                // alone isn't enough (e.g., pub(crate) modules whose items are glob-reexported
+                // are reachable but shouldn't appear as named module lines in external view).
+                let module_visible = if !same_crate {
+                    matches!(child.visibility, Visibility::Public)
+                } else {
+                    true // already passed is_item_visible above
+                };
+                if !module_visible {
+                    continue;
+                }
+
+                let child_name = match &child.name {
+                    Some(n) => n.as_str(),
+                    None => continue,
+                };
+                let child_path = if current_path == root_path {
+                    child_name.to_string()
+                } else {
+                    // Strip root_path prefix to get relative module path
+                    let rel = current_path
+                        .strip_prefix(root_path)
+                        .and_then(|s| s.strip_prefix("::"))
+                        .unwrap_or(current_path);
+                    format!("{rel}::{child_name}")
+                };
+
+                // Ensure entry exists
+                module_summaries.entry(child_path.clone()).or_default();
+
+                // Build full path for recursive walk
+                let full_child_path = format!("{current_path}::{child_name}");
+                count_module_items(
+                    model,
+                    child,
+                    &full_child_path,
+                    root_path,
+                    observer,
+                    same_crate,
+                    reachable,
+                    root_summary,
+                    module_summaries,
+                );
             }
+            continue;
+        }
 
-            let child_name = match &child.name {
-                Some(n) => n.as_str(),
-                None => continue,
-            };
-            let child_path = if current_path == root_path {
-                child_name.to_string()
-            } else {
-                // Strip root_path prefix to get relative module path
-                let rel = current_path
-                    .strip_prefix(root_path)
-                    .and_then(|s| s.strip_prefix("::"))
-                    .unwrap_or(current_path);
-                format!("{rel}::{child_name}")
-            };
-
-            // Ensure entry exists
-            module_summaries.entry(child_path.clone()).or_default();
-
-            // Build full path for recursive walk
-            let full_child_path = format!("{current_path}::{child_name}");
-            count_module_items(
-                model,
-                child,
-                &full_child_path,
-                root_path,
-                observer,
-                same_crate,
-                reachable,
-                root_summary,
-                module_summaries,
-            );
-        } else if let Some(kind) = classify_item(child, model) {
+        if let Some(kind) = classify_item(child, model) {
             if current_path == root_path {
                 root_summary.increment(kind);
             } else {
@@ -189,7 +210,7 @@ pub fn render_summary(
     model: &CrateModel,
     module_path: Option<&str>,
     same_crate: bool,
-    reachable: Option<&HashSet<Id>>,
+    reachable: Option<&ReachableInfo>,
 ) -> String {
     let root_item = if let Some(path) = module_path {
         match model.find_module(path) {

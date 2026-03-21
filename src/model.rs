@@ -2,6 +2,18 @@ use std::collections::{HashMap, HashSet};
 
 use rustdoc_types::{Crate, Id, Item, ItemEnum, Visibility};
 
+/// Extended reachability information for external-crate API rendering.
+pub struct ReachableInfo {
+    /// All item IDs reachable through the public API.
+    pub reachable: HashSet<Id>,
+    /// Private module IDs reachable only via glob re-exports.
+    /// API render should NOT render these as `mod name { ... }`.
+    pub glob_private_modules: HashSet<Id>,
+    /// Maps glob Use item ID → source private module ID.
+    /// Render should inline these modules' items instead of `pub use source::*;`.
+    pub glob_inlined: HashMap<Id, Id>,
+}
+
 /// A processed view of a crate's items, organized by module hierarchy.
 pub struct CrateModel {
     pub krate: Crate,
@@ -190,25 +202,34 @@ pub fn is_visible_from(
 /// ancestor modules as reachable (so private modules containing reachable
 /// items are rendered). For reachable structs/enums/unions, marks their
 /// impl blocks as reachable.
-pub fn compute_reachable_set(model: &CrateModel) -> HashSet<Id> {
-    let mut reachable = HashSet::new();
+///
+/// Also tracks glob-private modules (private modules reached only via
+/// `pub use private::*`) and the Use items that inline them.
+pub fn compute_reachable_set(model: &CrateModel) -> ReachableInfo {
+    let mut info = ReachableInfo {
+        reachable: HashSet::new(),
+        glob_private_modules: HashSet::new(),
+        glob_inlined: HashMap::new(),
+    };
 
     let Some(root) = model.root_module() else {
-        return reachable;
+        return info;
     };
 
     // Root module is always reachable
-    reachable.insert(model.krate.root);
+    info.reachable.insert(model.krate.root);
 
-    walk_public(model, root, model.crate_name(), &mut reachable);
-    reachable
+    let crate_name = model.crate_name();
+    walk_public(model, root, crate_name, crate_name, &mut info);
+    info
 }
 
 fn walk_public(
     model: &CrateModel,
     module_item: &Item,
-    module_path: &str,
-    reachable: &mut HashSet<Id>,
+    resolution_path: &str,
+    canonical_path: &str,
+    info: &mut ReachableInfo,
 ) {
     let children = model.module_children(module_item);
 
@@ -219,21 +240,23 @@ fn walk_public(
 
         match &child.inner {
             ItemEnum::Module(_) => {
-                reachable.insert(**child_id);
-                let child_mod_path = match &child.name {
-                    Some(name) => format!("{module_path}::{name}"),
-                    None => module_path.to_string(),
+                info.reachable.insert(**child_id);
+                let name = match &child.name {
+                    Some(name) => name,
+                    None => continue,
                 };
-                walk_public(model, child, &child_mod_path, reachable);
+                let child_res = format!("{resolution_path}::{name}");
+                let child_can = format!("{canonical_path}::{name}");
+                walk_public(model, child, &child_res, &child_can, info);
             }
             ItemEnum::Use(use_item) if !use_item.is_glob => {
-                reachable.insert(**child_id);
+                info.reachable.insert(**child_id);
                 if let Some(target_id) = &use_item.id {
-                    mark_reachable_with_ancestors(model, target_id, reachable);
+                    mark_reachable_with_ancestors(model, target_id, &mut info.reachable);
                 }
             }
             ItemEnum::Use(use_item) => {
-                reachable.insert(**child_id);
+                info.reachable.insert(**child_id);
                 // Follow intra-crate glob re-exports: resolve the source module
                 // and walk its public items into the reachable set.
                 // Cross-crate sources won't be in module_index → harmlessly skipped.
@@ -243,21 +266,41 @@ fn walk_public(
                     .unwrap_or(&use_item.source);
                 // Try relative to current module first (handles nested private modules
                 // like bevy's `mod bind_group; pub use bind_group::*;` inside render_resource)
-                let relative = format!("{module_path}::{source}");
+                let relative = format!("{resolution_path}::{source}");
                 if let Some((mod_id, mod_item)) = model.find_module_entry(&relative) {
-                    if reachable.insert(*mod_id) {
-                        walk_public(model, mod_item, &relative, reachable);
+                    let is_private = !matches!(mod_item.visibility, Visibility::Public);
+                    if is_private {
+                        info.glob_private_modules.insert(*mod_id);
+                        info.glob_inlined.insert(**child_id, *mod_id);
+                    }
+                    if info.reachable.insert(*mod_id) {
+                        let child_can = if is_private {
+                            canonical_path.to_string()
+                        } else {
+                            format!("{canonical_path}::{source}")
+                        };
+                        walk_public(model, mod_item, &relative, &child_can, info);
                     }
                 } else if let Some((mod_id, mod_item)) = model.find_module_entry(source) {
-                    if reachable.insert(*mod_id) {
+                    let is_private = !matches!(mod_item.visibility, Visibility::Public);
+                    if is_private {
+                        info.glob_private_modules.insert(*mod_id);
+                        info.glob_inlined.insert(**child_id, *mod_id);
+                    }
+                    if info.reachable.insert(*mod_id) {
                         let full = format!("{}::{source}", model.crate_name());
-                        walk_public(model, mod_item, &full, reachable);
+                        let child_can = if is_private {
+                            canonical_path.to_string()
+                        } else {
+                            full.clone()
+                        };
+                        walk_public(model, mod_item, &full, &child_can, info);
                     }
                 }
             }
             _ => {
-                reachable.insert(**child_id);
-                mark_impls(model, child, reachable);
+                info.reachable.insert(**child_id);
+                mark_impls(model, child, &mut info.reachable);
             }
         }
     }

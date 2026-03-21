@@ -18,10 +18,10 @@ use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
-use rustdoc_types::{Id, ItemEnum, Visibility};
+use rustdoc_types::{ItemEnum, Visibility};
 
 use cli::{ApiArgs, ExamplesArgs, FilterArgs, SearchArgs, SummaryArgs};
-use model::{CrateModel, compute_reachable_set};
+use model::{CrateModel, ReachableInfo, compute_reachable_set};
 
 /// Result of glob re-export expansion. Contains both the item names (for Phase 1
 /// individual `pub use` lines) and the full source models (for Phase 2 inlining).
@@ -58,7 +58,7 @@ struct PipelineContext {
 /// Generate rustdoc JSON, parse it (bincode-cached), build CrateModel, compute visibility.
 fn generate_and_parse_model(
     ctx: &PipelineContext,
-) -> Result<(CrateModel, bool, Option<HashSet<Id>>)> {
+) -> Result<(CrateModel, bool, Option<ReachableInfo>)> {
     if ctx.verbose {
         eprintln!(
             "[cargo-brief] Running cargo rustdoc for '{}'...",
@@ -340,7 +340,7 @@ fn render_and_expand_globs(
     args: &ApiArgs,
     ctx: &PipelineContext,
     same_crate: bool,
-    reachable: Option<&HashSet<Id>>,
+    reachable: Option<&ReachableInfo>,
 ) -> Result<String> {
     let mut output = render::render_module_api(
         model,
@@ -489,7 +489,7 @@ fn run_shared_search_pipeline(ctx: &PipelineContext, args: &SearchArgs) -> Resul
     let search_fn = |model: &CrateModel,
                      observer: Option<&str>,
                      same_crate: bool,
-                     reachable: Option<&HashSet<Id>>| {
+                     reachable: Option<&ReachableInfo>| {
         search::render_search_filtered(
             model,
             &pattern,

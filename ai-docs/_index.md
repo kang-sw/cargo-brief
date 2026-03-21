@@ -128,14 +128,14 @@ Parsed via `rustdoc-types` 0.57. Post-macro-expansion output.
 
 ## Operational State (v0.5.1)
 
-- Core pipeline complete. All item types supported. 117 integration tests.
+- Core pipeline complete. All item types supported. 149 integration tests.
 - Flexible package name resolution: `self`, `crate::module`, file path→module. Bare names always resolve as package.
 - Remote crate support: `--crates <spec>` fetches any crate from crates.io. Workspaces cached at `~/.cache/cargo-brief/crates/` with version-normalized directory names (`name[version]`). Exact version resolved via crates.io API with 24h cache; bare specs auto-update.
 - **Unified pipeline**: Local and remote entry points produce a `PipelineContext`, then call shared `run_shared_api_pipeline()` / `run_shared_search_pipeline()`. Cross-crate discovery fires automatically for both local and remote crates.
 - **Cross-crate module following**: Facade crates (bevy, axum) that re-export from sub-crates now support module targeting (`bevy ecs`), `--search`, and `--recursive`. Re-export chains are followed automatically (max 5 hops). Works for both local and remote crates.
 - **rustdoc JSON + bincode caching**: Single `generate_rustdoc_json()` with `use_cache` parameter. Workspace members always regenerate; non-members skip if JSON exists. Bincode parse cache always used. `--clean [SPEC]` manages disk usage. **Batch pre-warming**: `pre_warm_cross_crate_json()` uses `cargo doc` + `RUSTDOCFLAGS` to batch-generate JSON for all cross-crate deps in one invocation (recursive BFS, max depth 8). Names validated against `Cargo.lock` via `load_lockfile_packages()`. Existing per-crate calls hit cache after pre-warming.
-- Visibility auto-detection: `same_crate` inferred from cwd package context. Cross-crate views use reachability-based filtering.
-- Glob re-export expansion: Phase 1 (individual `pub use` lines) + Phase 2 (`--expand-glob` inlines full definitions). **Recursive**: cross-crate glob chains followed up to depth 8 with cycle prevention. Underscore/hyphen package name fallback.
+- Visibility auto-detection: `same_crate` inferred from cwd package context. Cross-crate views use reachability-based filtering via `ReachableInfo` (replaces `HashSet<Id>`). `ReachableInfo` carries `glob_private_modules` and `glob_inlined` metadata — private modules reached via `pub use private::*` are skipped in render/summary and their items inlined at the parent level. Search paths flattened for glob-private modules.
+- Glob re-export expansion: Phase 1 (individual `pub use` lines) + Phase 2 (`--expand-glob` inlines full definitions). **Recursive**: cross-crate glob chains followed up to depth 8 with cycle prevention. Underscore/hyphen package name fallback. **Intra-crate globs**: handled at render level via `ReachableInfo.glob_inlined`; private module contents inlined directly, no string-based post-processing needed.
 - Search mode: `cargo brief search <pattern>` finds leaf items with smart-case matching (all-lowercase = insensitive, any uppercase = sensitive). Comma-separated = OR groups, space-separated = AND within group. Pattern DSL operators: glob wildcards (`*`/`?`, full-path anchored), exclusion (`-term`, global post-filter), exact name match (`=term`, final `::` segment). Operators are embedded in tokens — no new CLI flags.
 - `--methods-of <TYPE>`: exact parent-type matching (shows only methods/fields of the named type, not substring matches). Zero-result sub-crate headers suppressed in normal mode.
 - Crate-level docs: root module `//!` comments rendered after `// crate <name>` header. `--no-crate-docs` suppresses independently.
@@ -179,6 +179,10 @@ Domain-oriented operational knowledge in `ai-docs/mental-model/`:
 | File path as module | Heuristic: `/` or `.rs` → file path | 2-level fallback: cwd-relative, then package `src/`-relative |
 
 ---
+
+## In Progress
+
+1. **`tickets/wip/260321-feat-canonical-reexport-paths.md`** — Phase 1 done (intra-crate). Phase 2 (cross-crate) pending.
 
 ## Next Up (priority order)
 

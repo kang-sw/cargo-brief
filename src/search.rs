@@ -4,14 +4,12 @@
 //! multi-word AND on full path, comma-separated OR groups), and renders
 //! each match as a one-liner with a kind prefix and full path.
 
-use std::collections::HashSet;
-
 use rustdoc_types::{
     Attribute, Id, Item, ItemEnum, Struct, StructKind, Type, VariantKind, Visibility,
 };
 
 use crate::cli::FilterArgs;
-use crate::model::{CrateModel, is_visible_from};
+use crate::model::{CrateModel, ReachableInfo, is_visible_from};
 use crate::render;
 
 /// A leaf item discovered by the walker, with its full display path and kind.
@@ -258,7 +256,7 @@ pub fn render_search(
     limit: Option<&str>,
     observer_module_path: Option<&str>,
     same_crate: bool,
-    reachable: Option<&HashSet<Id>>,
+    reachable: Option<&ReachableInfo>,
 ) -> String {
     render_search_inner(
         model,
@@ -283,7 +281,7 @@ pub fn render_search_methods_of(
     limit: Option<&str>,
     observer_module_path: Option<&str>,
     same_crate: bool,
-    reachable: Option<&HashSet<Id>>,
+    reachable: Option<&ReachableInfo>,
     methods_of: &str,
 ) -> String {
     render_search_inner(
@@ -307,7 +305,7 @@ pub fn render_search_filtered(
     limit: Option<&str>,
     observer_module_path: Option<&str>,
     same_crate: bool,
-    reachable: Option<&HashSet<Id>>,
+    reachable: Option<&ReachableInfo>,
     methods_of: Option<&str>,
     search_kind: Option<&str>,
 ) -> String {
@@ -332,7 +330,7 @@ fn render_search_inner(
     limit: Option<&str>,
     observer_module_path: Option<&str>,
     same_crate: bool,
-    reachable: Option<&HashSet<Id>>,
+    reachable: Option<&ReachableInfo>,
     methods_of: Option<&str>,
     search_kind: Option<&str>,
 ) -> String {
@@ -463,15 +461,15 @@ fn walk_module<'a>(
     args: &FilterArgs,
     observer: &str,
     same_crate: bool,
-    reachable: Option<&HashSet<Id>>,
+    reachable: Option<&ReachableInfo>,
     leaves: &mut Vec<LeafItem<'a>>,
 ) {
     let children = model.module_children(module_item);
 
     for (child_id, child) in &children {
         // Visibility check
-        if let Some(reachable) = reachable {
-            if !reachable.contains(child_id) {
+        if let Some(info) = reachable {
+            if !info.reachable.contains(child_id) {
                 continue;
             }
         } else if !matches!(child.visibility, Visibility::Default)
@@ -498,15 +496,15 @@ fn walk_module<'a>(
 
         match &child.inner {
             ItemEnum::Module(_) => {
+                // Flatten path for glob-private modules: items get parent's path
+                let walk_path =
+                    if reachable.is_some_and(|info| info.glob_private_modules.contains(child_id)) {
+                        parent_path.to_string()
+                    } else {
+                        child_path.clone()
+                    };
                 walk_module(
-                    model,
-                    child,
-                    &child_path,
-                    args,
-                    observer,
-                    same_crate,
-                    reachable,
-                    leaves,
+                    model, child, &walk_path, args, observer, same_crate, reachable, leaves,
                 );
             }
             ItemEnum::Struct(s) => {
@@ -746,15 +744,15 @@ fn walk_impl_blocks<'a>(
     args: &FilterArgs,
     observer: &str,
     same_crate: bool,
-    reachable: Option<&HashSet<Id>>,
+    reachable: Option<&ReachableInfo>,
     leaves: &mut Vec<LeafItem<'a>>,
 ) {
     let children = model.module_children(module_item);
     let mut impl_ids: Vec<Id> = Vec::new();
 
     for (child_id, child) in &children {
-        if let Some(reachable) = reachable {
-            if !reachable.contains(child_id) {
+        if let Some(info) = reachable {
+            if !info.reachable.contains(child_id) {
                 continue;
             }
         } else if !matches!(child.visibility, Visibility::Default)

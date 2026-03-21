@@ -160,6 +160,7 @@ alternatives considered, and trade-offs — focus on _why_ this approach was cho
 
 ## Recent Work
 
+- v0.5.2+: Canonical reexport paths (Phase 1) — `ReachableInfo` struct in `model.rs` replaces `HashSet<Id>` from `compute_reachable_set()`. `walk_public` dual-path tracking: `resolution_path` (for glob source resolution) + `canonical_path` (public display path). Render/search/summary skip `glob_private_modules` and inline their items at parent level. `glob_inlined: HashMap<Id, Id>` maps glob Use → private module for render inlining. 148 integration tests.
 - v0.5.2+: Batch rustdoc JSON pre-warming — `pre_warm_cross_crate_json()` in `lib.rs` uses `cargo doc` + `RUSTDOCFLAGS` to batch-generate JSON for cross-crate deps. `load_lockfile_packages()` validates names against Cargo.lock. `collect_external_crate_names()` in `cross_crate.rs`. `PipelineContext.available_packages` field. Recursive BFS (max depth 8).
 - v0.5.1+: Search pattern DSL — glob wildcards (`*`/`?`), exclusion (`-term`), exact name match (`=term`). `parse_pattern()` + `glob_match()` + `token_matches()` in `src/search.rs`. No new CLI flags; operators embedded in tokens. 12 integration + 15 unit tests.
 - v0.5.1+: `summary` subcommand — compact module-level overview with item counts per kind. `src/summary.rs` with `render_summary()` + `merge_sub_crate_summary()`. Cross-crate facade support. 7 integration tests.
@@ -174,7 +175,7 @@ alternatives considered, and trade-offs — focus on _why_ this approach was cho
 - CLI types: `ApiArgs`, `SearchArgs`, `ExamplesArgs`, `SummaryArgs` + shared `TargetArgs`/`RemoteArgs`/`FilterArgs`/`GlobalArgs`
 - Modules: `cli`, `cross_crate`, `examples`, `remote`, `resolve`, `rustdoc_json`, `model`, `render`, `search`, `summary`
 - Test fixture: `test_fixture/` (workspace with `glob-source`/`glob-inner` sub-crates for cross-crate glob chain testing)
-- Integration tests: `tests/integration.rs` (146 tests)
+- Integration tests: `tests/integration.rs` (149 tests)
 
 ## Documented Dependencies
 
