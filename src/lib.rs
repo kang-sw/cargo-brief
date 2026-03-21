@@ -133,6 +133,8 @@ fn build_local_context_api(args: &ApiArgs) -> Result<PipelineContext> {
     let available_packages =
         rustdoc_json::load_lockfile_packages(args.target.manifest_path.as_deref());
 
+    let is_workspace_member = metadata.workspace_packages.contains(&resolved.package_name);
+
     Ok(PipelineContext {
         manifest_path: args.target.manifest_path.clone(),
         target_dir: metadata.target_dir,
@@ -141,7 +143,7 @@ fn build_local_context_api(args: &ApiArgs) -> Result<PipelineContext> {
         observer_package,
         toolchain: args.global.toolchain.clone(),
         verbose: args.global.verbose,
-        use_cache: false, // workspace member — always regenerate
+        use_cache: !is_workspace_member,
         workspace_members: metadata.workspace_packages.into_iter().collect(),
         available_packages,
         crate_header: None,
@@ -417,6 +419,7 @@ fn build_local_context_search(args: &SearchArgs) -> Result<PipelineContext> {
     let observer_package = args.at_package.clone().or(metadata.current_package.clone());
 
     let available_packages = rustdoc_json::load_lockfile_packages(args.manifest_path.as_deref());
+    let is_workspace_member = metadata.workspace_packages.contains(&resolved.package_name);
 
     Ok(PipelineContext {
         manifest_path: args.manifest_path.clone(),
@@ -426,7 +429,7 @@ fn build_local_context_search(args: &SearchArgs) -> Result<PipelineContext> {
         observer_package,
         toolchain: args.global.toolchain.clone(),
         verbose: args.global.verbose,
-        use_cache: false, // workspace member — always regenerate
+        use_cache: !is_workspace_member,
         workspace_members: metadata.workspace_packages.into_iter().collect(),
         available_packages,
         crate_header: None,
@@ -667,6 +670,7 @@ fn build_local_context_summary(args: &SummaryArgs) -> Result<PipelineContext> {
 
     let available_packages =
         rustdoc_json::load_lockfile_packages(args.target.manifest_path.as_deref());
+    let is_workspace_member = metadata.workspace_packages.contains(&resolved.package_name);
 
     Ok(PipelineContext {
         manifest_path: args.target.manifest_path.clone(),
@@ -676,7 +680,7 @@ fn build_local_context_summary(args: &SummaryArgs) -> Result<PipelineContext> {
         observer_package,
         toolchain: args.global.toolchain.clone(),
         verbose: args.global.verbose,
-        use_cache: false,
+        use_cache: !is_workspace_member,
         workspace_members: metadata.workspace_packages.into_iter().collect(),
         available_packages,
         crate_header: None,
