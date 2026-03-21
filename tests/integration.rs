@@ -2346,3 +2346,130 @@ fn test_summary_reexport_counted_as_target_kind() {
         "re-exported struct should be counted as struct at root:\n{output}"
     );
 }
+
+// === Search Kind Filter Tests ===
+
+#[test]
+fn test_search_kind_fn_only() {
+    let model = fixture_model();
+    let filter = default_filter();
+    let output = search::render_search_filtered(
+        &model,
+        "pub",
+        &filter,
+        None,
+        None,
+        true,
+        None,
+        None,
+        Some("fn"),
+    );
+    // Should include functions
+    assert!(
+        output.contains("fn "),
+        "search-kind fn should include functions:\n{output}"
+    );
+    // Should not include structs or enums
+    assert!(
+        !output.contains("struct "),
+        "search-kind fn should exclude structs:\n{output}"
+    );
+    assert!(
+        !output.contains("enum "),
+        "search-kind fn should exclude enums:\n{output}"
+    );
+}
+
+#[test]
+fn test_search_kind_struct_enum() {
+    let model = fixture_model();
+    let filter = default_filter();
+    let output = search::render_search_filtered(
+        &model,
+        "Pub",
+        &filter,
+        None,
+        None,
+        true,
+        None,
+        None,
+        Some("struct,enum"),
+    );
+    // Should include PubStruct
+    assert!(
+        output.contains("struct "),
+        "search-kind struct,enum should include structs:\n{output}"
+    );
+    // Should not include functions
+    assert!(
+        !output.contains("fn "),
+        "search-kind struct,enum should exclude functions:\n{output}"
+    );
+}
+
+#[test]
+fn test_search_kind_no_match() {
+    let model = fixture_model();
+    let filter = default_filter();
+    let output = search::render_search_filtered(
+        &model,
+        "PubStruct",
+        &filter,
+        None,
+        None,
+        true,
+        None,
+        None,
+        Some("macro"),
+    );
+    assert!(
+        output.contains("(0 results)"),
+        "search-kind macro for PubStruct should find 0 results:\n{output}"
+    );
+}
+
+#[test]
+fn test_search_kind_trait() {
+    let model = fixture_model();
+    let filter = default_filter();
+    let output = search::render_search_filtered(
+        &model,
+        "My",
+        &filter,
+        None,
+        None,
+        true,
+        None,
+        None,
+        Some("trait"),
+    );
+    assert!(
+        output.contains("trait "),
+        "search-kind trait should include traits:\n{output}"
+    );
+    assert!(
+        !output.contains("struct "),
+        "search-kind trait should not include structs:\n{output}"
+    );
+}
+
+#[test]
+fn test_search_kind_const() {
+    let model = fixture_model();
+    let filter = default_filter();
+    let output = search::render_search_filtered(
+        &model,
+        "MY_CONST",
+        &filter,
+        None,
+        None,
+        true,
+        None,
+        None,
+        Some("const"),
+    );
+    assert!(
+        output.contains("const "),
+        "search-kind const should include constants:\n{output}"
+    );
+}

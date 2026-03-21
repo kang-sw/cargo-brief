@@ -460,32 +460,22 @@ fn run_shared_search_pipeline(ctx: &PipelineContext, args: &SearchArgs) -> Resul
     let pattern = args.pattern();
     let methods_of = args.methods_of.as_deref();
 
+    let search_kind = args.search_kind.as_deref();
     let search_fn = |model: &CrateModel,
                      observer: Option<&str>,
                      same_crate: bool,
                      reachable: Option<&HashSet<Id>>| {
-        if let Some(type_name) = methods_of {
-            search::render_search_methods_of(
-                model,
-                &pattern,
-                &args.filter,
-                args.limit.as_deref(),
-                observer,
-                same_crate,
-                reachable,
-                type_name,
-            )
-        } else {
-            search::render_search(
-                model,
-                &pattern,
-                &args.filter,
-                args.limit.as_deref(),
-                observer,
-                same_crate,
-                reachable,
-            )
-        }
+        search::render_search_filtered(
+            model,
+            &pattern,
+            &args.filter,
+            args.limit.as_deref(),
+            observer,
+            same_crate,
+            reachable,
+            methods_of,
+            search_kind,
+        )
     };
 
     let mut output = search_fn(

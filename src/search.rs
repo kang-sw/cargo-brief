@@ -42,6 +42,27 @@ enum LeafKind {
 }
 
 impl LeafKind {
+    /// Match against a user-provided kind string (e.g. "fn", "struct").
+    fn matches_kind_str(&self, s: &str) -> bool {
+        matches!(
+            (self, s),
+            (LeafKind::Function, "fn")
+                | (LeafKind::Struct, "struct")
+                | (LeafKind::Enum, "enum")
+                | (LeafKind::Trait, "trait")
+                | (LeafKind::Union, "union")
+                | (LeafKind::Field, "field")
+                | (LeafKind::Variant, "variant")
+                | (LeafKind::Constant, "const")
+                | (LeafKind::Static, "static")
+                | (LeafKind::TypeAlias, "type")
+                | (LeafKind::Macro, "macro")
+                | (LeafKind::AssocType, "type")
+                | (LeafKind::AssocConst, "const")
+                | (LeafKind::Use, "use")
+        )
+    }
+
     /// Sort key: determines display order by kind.
     fn sort_key(&self) -> u8 {
         match self {
@@ -118,6 +139,7 @@ pub fn render_search(
         same_crate,
         reachable,
         None,
+        None,
     )
 }
 
@@ -143,9 +165,36 @@ pub fn render_search_methods_of(
         same_crate,
         reachable,
         Some(methods_of),
+        None,
     )
 }
 
+/// Full search with all options including kind filter.
+pub fn render_search_filtered(
+    model: &CrateModel,
+    pattern: &str,
+    filter: &FilterArgs,
+    limit: Option<&str>,
+    observer_module_path: Option<&str>,
+    same_crate: bool,
+    reachable: Option<&HashSet<Id>>,
+    methods_of: Option<&str>,
+    search_kind: Option<&str>,
+) -> String {
+    render_search_inner(
+        model,
+        pattern,
+        filter,
+        limit,
+        observer_module_path,
+        same_crate,
+        reachable,
+        methods_of,
+        search_kind,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
 fn render_search_inner(
     model: &CrateModel,
     pattern: &str,
@@ -155,6 +204,7 @@ fn render_search_inner(
     same_crate: bool,
     reachable: Option<&HashSet<Id>>,
     methods_of: Option<&str>,
+    search_kind: Option<&str>,
 ) -> String {
     let crate_name = model.crate_name();
     let observer = observer_module_path
@@ -224,6 +274,12 @@ fn render_search_inner(
         let suffix = format!("::{type_name}::");
         let prefix = format!("{type_name}::");
         matched.retain(|leaf| leaf.path.contains(&suffix) || leaf.path.starts_with(&prefix));
+    }
+
+    // --search-kind: include only matching kinds
+    if let Some(kind_spec) = search_kind {
+        let kinds: Vec<&str> = kind_spec.split(',').map(|s| s.trim()).collect();
+        matched.retain(|leaf| kinds.iter().any(|k| leaf.kind.matches_kind_str(k)));
     }
 
     // Sort: primary by kind, secondary by path alphabetically

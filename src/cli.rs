@@ -331,6 +331,10 @@ pub struct SearchArgs {
     /// Show methods/fields of a type (shorthand for pattern + exclusion flags)
     #[arg(long, value_name = "TYPE")]
     pub methods_of: Option<String>,
+
+    /// Filter results by item kind (comma-separated: fn, struct, enum, trait, union, field, variant, const, static, type, macro, use)
+    #[arg(long, value_name = "KINDS", help_heading = "Filtering")]
+    pub search_kind: Option<String>,
 }
 
 impl SearchArgs {
