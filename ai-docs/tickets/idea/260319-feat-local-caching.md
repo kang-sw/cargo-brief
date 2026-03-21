@@ -40,3 +40,15 @@ regeneration and use bincode — local doesn't.
 - Cache invalidation complexity may not justify the gain for small crates
 - `cargo rustdoc` itself does incremental compilation — it may already be fast
   on unchanged code (need to measure cold vs warm)
+
+## Partial Resolution (2026-03-21)
+
+Cross-crate glob expansion now uses `use_cache: true` for non-workspace-member
+crates. `PipelineContext.workspace_members` (from `cargo metadata`) identifies
+mutable crates; anything outside that set is treated as immutable (locked via
+Cargo.lock). This eliminates redundant `cargo rustdoc` calls for external dep
+sub-crates during local facade traversal.
+
+Remaining: caching for the **target workspace member itself** and for
+**workspace-member cross-deps**. Both require source-change detection
+(mtime or hash-based invalidation).

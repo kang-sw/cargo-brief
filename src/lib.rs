@@ -44,6 +44,9 @@ struct PipelineContext {
     verbose: bool,
     /// Skip cargo rustdoc if JSON exists. True for non-workspace-member crates.
     use_cache: bool,
+    /// Workspace member package names. Cross-crate expansion uses `use_cache: true`
+    /// for crates NOT in this set (they're external deps, effectively immutable).
+    workspace_members: HashSet<String>,
     /// Pre-computed crate header with version + features (remote api only).
     crate_header: Option<String>,
     /// Holds the remote workspace alive (TempDir drops on scope exit).
@@ -133,6 +136,7 @@ fn build_local_context_api(args: &ApiArgs) -> Result<PipelineContext> {
         toolchain: args.global.toolchain.clone(),
         verbose: args.global.verbose,
         use_cache: false, // workspace member — always regenerate
+        workspace_members: metadata.workspace_packages.into_iter().collect(),
         crate_header: None,
         _workspace: None,
     })
@@ -191,7 +195,8 @@ fn build_remote_context_api(args: &ApiArgs, spec: &str) -> Result<PipelineContex
         observer_package: None, // remote → always external view
         toolchain: args.global.toolchain.clone(),
         verbose: args.global.verbose,
-        use_cache: true, // remote — versions are locked
+        use_cache: true,                   // remote — versions are locked
+        workspace_members: HashSet::new(), // remote has no workspace
         crate_header,
         _workspace: Some(workspace),
     })
@@ -243,7 +248,7 @@ fn run_shared_api_pipeline(ctx: &PipelineContext, args: &ApiArgs) -> Result<Stri
                     ctx.manifest_path.as_deref(),
                     &ctx.target_dir,
                     ctx.verbose,
-                    ctx.use_cache,
+                    &ctx.workspace_members,
                 );
                 apply_glob_expansions(&mut output, &result, args.expand_glob, &args.filter);
                 output
@@ -344,7 +349,7 @@ fn render_and_expand_globs(
         ctx.manifest_path.as_deref(),
         &ctx.target_dir,
         ctx.verbose,
-        ctx.use_cache,
+        &ctx.workspace_members,
     );
     apply_glob_expansions(&mut output, &result, args.expand_glob, &args.filter);
     Ok(output)
@@ -418,6 +423,7 @@ fn build_local_context_search(args: &SearchArgs) -> Result<PipelineContext> {
         toolchain: args.global.toolchain.clone(),
         verbose: args.global.verbose,
         use_cache: false, // workspace member — always regenerate
+        workspace_members: metadata.workspace_packages.into_iter().collect(),
         crate_header: None,
         _workspace: None,
     })
@@ -450,6 +456,7 @@ fn build_remote_context_search(args: &SearchArgs, spec: &str) -> Result<Pipeline
         toolchain: args.global.toolchain.clone(),
         verbose: args.global.verbose,
         use_cache: true, // remote — versions are locked
+        workspace_members: HashSet::new(),
         crate_header: None,
         _workspace: Some(workspace),
     })
@@ -653,6 +660,7 @@ fn build_local_context_summary(args: &SummaryArgs) -> Result<PipelineContext> {
         toolchain: args.global.toolchain.clone(),
         verbose: args.global.verbose,
         use_cache: false,
+        workspace_members: metadata.workspace_packages.into_iter().collect(),
         crate_header: None,
         _workspace: None,
     })
@@ -709,6 +717,7 @@ fn build_remote_context_summary(args: &SummaryArgs, spec: &str) -> Result<Pipeli
         toolchain: args.global.toolchain.clone(),
         verbose: args.global.verbose,
         use_cache: true,
+        workspace_members: HashSet::new(),
         crate_header,
         _workspace: Some(workspace),
     })
@@ -911,7 +920,7 @@ fn expand_glob_reexports(
     manifest_path: Option<&str>,
     target_dir: &Path,
     verbose: bool,
-    use_cache: bool,
+    workspace_members: &HashSet<String>,
 ) -> GlobExpansionResult {
     let target_item = if let Some(path) = target_module_path {
         model.find_module(path)
@@ -939,6 +948,10 @@ fn expand_glob_reexports(
 
         let source = &use_item.source;
 
+        // Cache non-workspace deps (immutable once resolved via Cargo.lock)
+        let dep_use_cache = !workspace_members.contains(source.as_str())
+            && !workspace_members.contains(&source.replace('_', "-"));
+
         // Generate JSON for the source crate (pub items only, no private items)
         let Some(json_path) = try_generate_rustdoc_json(
             source,
@@ -946,7 +959,7 @@ fn expand_glob_reexports(
             manifest_path,
             target_dir,
             verbose,
-            use_cache,
+            dep_use_cache,
         ) else {
             continue;
         };
@@ -966,7 +979,7 @@ fn expand_glob_reexports(
             manifest_path,
             target_dir,
             verbose,
-            use_cache,
+            workspace_members,
             &mut visited,
             &mut all_items,
             &mut all_models,
@@ -1003,7 +1016,7 @@ fn collect_glob_items_recursive(
     manifest_path: Option<&str>,
     target_dir: &Path,
     verbose: bool,
-    use_cache: bool,
+    workspace_members: &HashSet<String>,
     visited: &mut HashSet<String>,
     all_items: &mut Vec<String>,
     all_models: &mut Vec<CrateModel>,
@@ -1039,13 +1052,15 @@ fn collect_glob_items_recursive(
                         depth + 1
                     );
                 }
+                let nested_use_cache = !workspace_members.contains(nested_source.as_str())
+                    && !workspace_members.contains(&nested_source.replace('_', "-"));
                 let Some(json_path) = try_generate_rustdoc_json(
                     nested_source,
                     toolchain,
                     manifest_path,
                     target_dir,
                     verbose,
-                    use_cache,
+                    nested_use_cache,
                 ) else {
                     continue; // intra-crate path or missing dep — skip
                 };
@@ -1059,7 +1074,7 @@ fn collect_glob_items_recursive(
                     manifest_path,
                     target_dir,
                     verbose,
-                    use_cache,
+                    workspace_members,
                     visited,
                     all_items,
                     all_models,

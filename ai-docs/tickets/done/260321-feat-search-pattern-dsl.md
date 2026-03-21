@@ -1,7 +1,8 @@
 ---
 title: "Search pattern DSL — glob wildcards, exclusion, exact match"
-status: wip
+status: done
 started: 2026-03-21
+completed: 2026-03-21
 ---
 
 # Search Pattern DSL
