@@ -18,9 +18,11 @@
 ## Extension Points & Change Recipes
 - **Add a new `Visibility` variant** (from `rustdoc_types`): Update `is_visible_from()` match arms. Rust exhaustive matching forces this. Defaulting new variants to `false` silently hides items.
 - **Change observer semantics**: Must update BOTH lib.rs (same_crate detection) AND render.rs (observer normalization). No single source of truth for "who is the observer."
+- **Modify glob source resolution in `walk_public`** (`model.rs`): The glob `Use` arm tries `"{module_path}::{source}"` (relative to parent) before falling back to bare `"{source}"`. This order is load-bearing — reversing it breaks nested private-module glob re-exports like `mod bind_group; pub use bind_group::*;` inside a deeper module (the bare source resolves to the wrong path or not at all). `module_path` is threaded through every `walk_public` recursive call for this reason.
 
 ## Common Mistakes
 - Calling `is_visible_from()` with a non-qualified observer path (e.g., `"utils"` instead of `"crate_name::utils"`) → `is_ancestor_or_equal()` fails, restricted items silently hidden.
+- Resolving a glob source name in `walk_public` using only the bare source (e.g., `find_module_entry("bind_group")`) without prefixing the current `module_path` → lookup misses modules that exist only as children of a private parent; glob silently skipped, all items inside unreachable.
 - Setting `same_crate=true` without generating JSON with `--document-private-items` → `pub(crate)` items absent from JSON, silently filtered.
 - Glob expansion hardcodes `same_crate=false` and observer=source crate name (render.rs:93, 137). Inlined items are always filtered as cross-crate, even when the facade crate is the same crate. This is correct for external crates but wrong if applied to same-workspace globs.
 
