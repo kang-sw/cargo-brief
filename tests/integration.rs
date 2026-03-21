@@ -2765,6 +2765,7 @@ fn build_test_fixture_index() -> cargo_brief::cross_crate::CrossCrateIndex {
     let model = CrateModel::from_crate(krate);
     let workspace_members: std::collections::HashSet<String> =
         metadata.workspace_packages.into_iter().collect();
+    let available_packages = rustdoc_json::load_lockfile_packages(Some("test_fixture/Cargo.toml"));
 
     cargo_brief::cross_crate::build_cross_crate_index(
         &model,
@@ -2773,6 +2774,7 @@ fn build_test_fixture_index() -> cargo_brief::cross_crate::CrossCrateIndex {
         &metadata.target_dir,
         false,
         &workspace_members,
+        &available_packages,
     )
 }
 

@@ -290,6 +290,7 @@ fn run_shared_api_pipeline(ctx: &PipelineContext, args: &ApiArgs) -> Result<Stri
             &ctx.target_dir,
             ctx.verbose,
             &ctx.workspace_members,
+            &ctx.available_packages,
         );
         let cross_output = render::render_cross_crate_api(&index, model.crate_name(), args);
         if !cross_output.is_empty() {
@@ -515,6 +516,7 @@ fn run_shared_search_pipeline(ctx: &PipelineContext, args: &SearchArgs) -> Resul
             &ctx.target_dir,
             ctx.verbose,
             &ctx.workspace_members,
+            &ctx.available_packages,
         );
         let cross_output = search::search_cross_crate_index(
             &index,
@@ -764,6 +766,7 @@ fn run_shared_summary_pipeline(ctx: &PipelineContext) -> Result<String> {
             &ctx.target_dir,
             ctx.verbose,
             &ctx.workspace_members,
+            &ctx.available_packages,
         );
         let cross_summary = summary::summarize_cross_crate_index(&index);
         if !cross_summary.is_empty() {

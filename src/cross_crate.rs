@@ -436,6 +436,7 @@ pub fn build_cross_crate_index(
     target_dir: &Path,
     verbose: bool,
     workspace_members: &HashSet<String>,
+    available_packages: &HashSet<String>,
 ) -> CrossCrateIndex {
     let mut source_models: Vec<Box<(CrateModel, ReachableInfo)>> = Vec::new();
     let mut items: Vec<AccessibleEntry> = Vec::new();
@@ -448,6 +449,7 @@ pub fn build_cross_crate_index(
         target_dir,
         verbose,
         workspace_members,
+        available_packages,
     };
 
     let Some(root) = primary_model.root_module() else {
@@ -490,6 +492,8 @@ struct WalkParams<'a> {
     target_dir: &'a Path,
     verbose: bool,
     workspace_members: &'a HashSet<String>,
+    /// Packages known from Cargo.lock — used to skip names that aren't real packages.
+    available_packages: &'a HashSet<String>,
 }
 
 /// Recursive walk collecting accessible items with prefix tracking.
@@ -647,36 +651,38 @@ fn handle_glob_reexport(
     items: &mut Vec<AccessibleEntry>,
     ctx: &WalkParams,
 ) {
-    if is_intra_crate_source(&use_item.source, crate_name) {
-        let source_path = use_item
-            .source
-            .strip_prefix("self::")
-            .or_else(|| use_item.source.strip_prefix(&format!("{crate_name}::")))
-            .unwrap_or(&use_item.source);
+    // Try to resolve the source as an intra-crate module first.
+    // Rustdoc may emit relative paths (e.g. "graph_map" instead of "bevy_ecs::graph_map").
+    let source_path = use_item
+        .source
+        .strip_prefix("self::")
+        .or_else(|| use_item.source.strip_prefix(&format!("{crate_name}::")))
+        .unwrap_or(&use_item.source);
 
-        if let Some(source_mod) = model.find_module(source_path) {
-            let is_private = !matches!(source_mod.visibility, Visibility::Public);
-            let walk_prefix = if is_private {
-                prefix.to_string()
-            } else {
-                join_path(
-                    prefix,
-                    source_path.rsplit("::").next().unwrap_or(source_path),
-                )
-            };
-            walk_accessible(
-                model,
-                source_mod,
-                &walk_prefix,
-                crate_idx,
-                reachable,
-                depth + 1,
-                visited_crates,
-                source_models,
-                items,
-                ctx,
-            );
-        }
+    if let Some(source_mod) = model.find_module(source_path) {
+        let is_private = !matches!(source_mod.visibility, Visibility::Public);
+        let walk_prefix = if is_private {
+            prefix.to_string()
+        } else {
+            join_path(
+                prefix,
+                source_path.rsplit("::").next().unwrap_or(source_path),
+            )
+        };
+        walk_accessible(
+            model,
+            source_mod,
+            &walk_prefix,
+            crate_idx,
+            reachable,
+            depth + 1,
+            visited_crates,
+            source_models,
+            items,
+            ctx,
+        );
+    } else if is_intra_crate_source(&use_item.source, crate_name) {
+        // Recognized as intra-crate but module not found — skip silently
     } else {
         // Cross-crate glob: load the source crate
         let source_crate = extract_crate_name(&use_item.source);
@@ -741,46 +747,47 @@ fn handle_named_reexport(
 ) {
     let alias = child.name.as_deref().unwrap_or(&use_item.name);
 
-    if is_intra_crate_source(&use_item.source, crate_name) {
-        // Intra-crate named re-export: follow the target
-        if let Some(target_id) = &use_item.id
-            && let Some(target) = model.krate.index.get(target_id)
-        {
-            let target_path = join_path(prefix, alias);
-            if matches!(target.inner, ItemEnum::Module(_)) {
-                if let Some(ci) = crate_idx {
-                    items.push(AccessibleEntry {
-                        accessible_path: target_path.clone(),
-                        crate_idx: ci,
-                        item_id: *target_id,
-                        item_kind: AccessibleItemKind::Module,
-                    });
-                }
-                walk_accessible(
-                    model,
-                    target,
-                    &target_path,
-                    crate_idx,
-                    reachable,
-                    depth + 1,
-                    visited_crates,
-                    source_models,
-                    items,
-                    ctx,
-                );
-            } else if let Some(ci) = crate_idx
-                && let Some(kind) = AccessibleItemKind::from_item(target)
-            {
+    // Intra-crate: use_item.id is Some and target exists in current model's index.
+    // (use_item.id is None for cross-crate targets — rustdoc can't resolve them.)
+    if let Some(target_id) = &use_item.id
+        && let Some(target) = model.krate.index.get(target_id)
+    {
+        let target_path = join_path(prefix, alias);
+        if matches!(target.inner, ItemEnum::Module(_)) {
+            if let Some(ci) = crate_idx {
                 items.push(AccessibleEntry {
-                    accessible_path: target_path,
+                    accessible_path: target_path.clone(),
                     crate_idx: ci,
                     item_id: *target_id,
-                    item_kind: kind,
+                    item_kind: AccessibleItemKind::Module,
                 });
             }
+            walk_accessible(
+                model,
+                target,
+                &target_path,
+                crate_idx,
+                reachable,
+                depth + 1,
+                visited_crates,
+                source_models,
+                items,
+                ctx,
+            );
+        } else if let Some(ci) = crate_idx
+            && let Some(kind) = AccessibleItemKind::from_item(target)
+        {
+            items.push(AccessibleEntry {
+                accessible_path: target_path,
+                crate_idx: ci,
+                item_id: *target_id,
+                item_kind: kind,
+            });
         }
+    } else if is_intra_crate_source(&use_item.source, crate_name) {
+        // Recognized as intra-crate but target not resolved — skip
     } else {
-        // Cross-crate named re-export
+        // Cross-crate named re-export (use_item.id is None)
         let source_crate = extract_crate_name(&use_item.source);
         let sub_path = use_item.source.split_once("::").map(|(_, p)| p.to_string());
 
@@ -870,6 +877,17 @@ fn load_or_find_source_crate(
         let model = &entry.0;
         if model.crate_name() == source_crate_name {
             return Some(i);
+        }
+    }
+
+    // Validate: skip if name isn't a known package (avoids trying to generate
+    // rustdoc JSON for intra-crate module names like "graph_map" or "crate")
+    if !ctx.available_packages.is_empty() {
+        let hyphenated = source_crate_name.replace('_', "-");
+        if !ctx.available_packages.contains(source_crate_name)
+            && !ctx.available_packages.contains(&hyphenated)
+        {
+            return None;
         }
     }
 
