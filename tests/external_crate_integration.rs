@@ -111,13 +111,12 @@ fn either_has_core_methods() {
         output.contains("pub fn flip(self) -> Either<R, L>;"),
         "flip"
     );
-    // where clause may vary across nightly versions — match signature prefix only
     assert!(
-        output.contains("pub fn unwrap_left(self) -> L"),
+        output.contains("pub fn unwrap_left(self) -> L;"),
         "unwrap_left"
     );
     assert!(
-        output.contains("pub fn unwrap_right(self) -> R"),
+        output.contains("pub fn unwrap_right(self) -> R;"),
         "unwrap_right"
     );
 }
@@ -127,13 +126,12 @@ fn either_has_map_methods() {
     let args = either_args();
     let output = run_api_pipeline(&args).unwrap();
 
-    // where clause may vary across nightly versions — match signature prefix only
     assert!(
-        output.contains("pub fn map_left<F, M>(self, f: F) -> Either<M, R>"),
+        output.contains("pub fn map_left<F, M>(self, f: F) -> Either<M, R>;"),
         "map_left"
     );
     assert!(
-        output.contains("pub fn map_right<F, S>(self, f: F) -> Either<L, S>"),
+        output.contains("pub fn map_right<F, S>(self, f: F) -> Either<L, S>;"),
         "map_right"
     );
 }
@@ -234,17 +232,15 @@ fn either_trait_impls() {
         "Iterator impl for Either"
     );
 
-    // Clone and From<Result> — may be collapsed into trait summary comment
-    // depending on nightly version; check presence in any form
+    // Clone impl
     assert!(
-        output.contains("Clone for Either<L, R>")
-            || (output.contains("Either<L, R>:") && output.contains("Clone")),
+        output.contains("Clone for Either<L, R>"),
         "Clone impl for Either"
     );
 
+    // From<Result> conversion
     assert!(
-        output.contains("impl<L, R> From<Result<R, L>> for Either<L, R>")
-            || output.contains("From<Result<R, L>>"),
+        output.contains("impl<L, R> From<Result<R, L>> for Either<L, R>"),
         "From<Result> impl"
     );
 }

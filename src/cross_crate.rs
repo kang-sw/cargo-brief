@@ -764,6 +764,12 @@ fn load_or_find_source_crate(
         }
     }
 
+    // Resolve to version-qualified spec if multi-version (e.g. "hashbrown@0.16.1")
+    let resolved_name = ctx
+        .available_packages
+        .resolve_spec(source_crate_name)
+        .unwrap_or_else(|| source_crate_name.to_string());
+
     // Not yet loaded — generate JSON and parse
     let use_cache = !ctx.workspace_members.contains(source_crate_name)
         && !ctx
@@ -771,7 +777,7 @@ fn load_or_find_source_crate(
             .contains(&source_crate_name.replace('_', "-"));
 
     let json_path = rustdoc_json::generate_rustdoc_json(
-        source_crate_name,
+        &resolved_name,
         ctx.toolchain,
         ctx.manifest_path,
         true, // document private items
@@ -781,22 +787,23 @@ fn load_or_find_source_crate(
     )
     .ok()
     .or_else(|| {
-        // Fallback: try hyphenated name
-        let hyphenated = source_crate_name.replace('_', "-");
-        if hyphenated != source_crate_name {
-            rustdoc_json::generate_rustdoc_json(
-                &hyphenated,
-                ctx.toolchain,
-                ctx.manifest_path,
-                true,
-                ctx.target_dir,
-                ctx.verbose,
-                use_cache,
-            )
-            .ok()
-        } else {
-            None
+        // Fallback: try hyphenated name (only if resolve_spec didn't already do this)
+        if !resolved_name.contains('-') {
+            let hyphenated = resolved_name.replace('_', "-");
+            if hyphenated != resolved_name {
+                return rustdoc_json::generate_rustdoc_json(
+                    &hyphenated,
+                    ctx.toolchain,
+                    ctx.manifest_path,
+                    true,
+                    ctx.target_dir,
+                    ctx.verbose,
+                    use_cache,
+                )
+                .ok();
+            }
         }
+        None
     })?;
 
     let krate = rustdoc_json::parse_rustdoc_json_cached(&json_path).ok()?;
