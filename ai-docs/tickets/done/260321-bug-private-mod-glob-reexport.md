@@ -53,3 +53,20 @@ fall back to bare source (preserving root-level behavior).
 - `tests/integration.rs`: 2 new tests (search + api) for nested private glob.
 
 All 148 integration tests pass (146 existing + 2 new).
+
+### Result (batch fix) - 26-03-21
+
+The initial fix only addressed the `walk_public` reachability path. The actual
+user-facing bug persisted because `batch_generate_rustdoc_json()` (added in
+v0.5.2 for cross-crate pre-warming) omitted `--document-private-items` from its
+`RUSTDOCFLAGS`. This caused all batch-generated JSON (used by `--crates` and
+cross-crate expansion) to exclude private module contents entirely.
+
+**Root cause:** `src/rustdoc_json.rs` line 266 — `RUSTDOCFLAGS` was
+`"--output-format json -Z unstable-options"`, missing `--document-private-items`.
+
+**Fix:** Added `--document-private-items` to `RUSTDOCFLAGS` in
+`batch_generate_rustdoc_json()`. One-line change.
+
+**Verified:** `cargo brief search --crates bevy "AsBindGroup"` now returns 24
+results from `bevy_render` (was 0 with stale cache).

@@ -263,7 +263,10 @@ pub fn batch_generate_rustdoc_json(
         cmd.args(["--manifest-path", manifest]);
     }
 
-    cmd.env("RUSTDOCFLAGS", "--output-format json -Z unstable-options");
+    cmd.env(
+        "RUSTDOCFLAGS",
+        "--output-format json -Z unstable-options --document-private-items",
+    );
 
     if verbose {
         cmd.stderr(Stdio::inherit());
