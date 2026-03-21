@@ -2,7 +2,7 @@
 //!
 //! Uses `clap` as a test case — it re-exports from `clap_builder` and `clap_derive`.
 
-use cargo_brief::cli::{ApiArgs, FilterArgs, GlobalArgs, RemoteArgs, TargetArgs};
+use cargo_brief::cli::{ApiArgs, FilterArgs, GlobalArgs, RemoteOpts, TargetArgs};
 use cargo_brief::run_api_pipeline;
 
 fn facade_args(crate_name: &str) -> ApiArgs {
@@ -13,12 +13,6 @@ fn facade_args(crate_name: &str) -> ApiArgs {
             at_package: None,
             at_mod: None,
             manifest_path: Some("test_workspace/Cargo.toml".to_string()),
-        },
-        remote: RemoteArgs {
-            crates: None,
-            features: None,
-            no_cache: false,
-            clean: None,
         },
         filter: FilterArgs {
             no_structs: false,
@@ -53,7 +47,7 @@ fn facade_args(crate_name: &str) -> ApiArgs {
 #[test]
 fn clap_facade_not_empty() {
     let args = facade_args("clap");
-    let output = run_api_pipeline(&args).unwrap();
+    let output = run_api_pipeline(&args, &RemoteOpts::default()).unwrap();
 
     // Must have more than just the crate header
     let lines: Vec<&str> = output.lines().collect();
@@ -66,7 +60,7 @@ fn clap_facade_not_empty() {
 #[test]
 fn clap_facade_has_crate_header() {
     let args = facade_args("clap");
-    let output = run_api_pipeline(&args).unwrap();
+    let output = run_api_pipeline(&args, &RemoteOpts::default()).unwrap();
 
     assert!(
         output.starts_with("// crate clap\n"),
@@ -82,7 +76,7 @@ fn clap_facade_has_crate_header() {
 #[test]
 fn clap_facade_expands_clap_builder_items() {
     let args = facade_args("clap");
-    let output = run_api_pipeline(&args).unwrap();
+    let output = run_api_pipeline(&args, &RemoteOpts::default()).unwrap();
 
     // Key types from clap_builder should appear as individual pub use
     assert!(
@@ -98,7 +92,7 @@ fn clap_facade_expands_clap_builder_items() {
 #[test]
 fn clap_facade_no_glob_star() {
     let args = facade_args("clap");
-    let output = run_api_pipeline(&args).unwrap();
+    let output = run_api_pipeline(&args, &RemoteOpts::default()).unwrap();
 
     // The glob `pub use clap_builder::*;` should be replaced with individual items
     for line in output.lines() {
@@ -115,7 +109,7 @@ fn clap_facade_no_glob_star() {
 #[test]
 fn clap_facade_no_module_reexports() {
     let args = facade_args("clap");
-    let output = run_api_pipeline(&args).unwrap();
+    let output = run_api_pipeline(&args, &RemoteOpts::default()).unwrap();
 
     // Submodules from clap_builder (like `builder`) should NOT appear as re-exports
     // (Rust's glob import doesn't re-export submodules)
@@ -132,7 +126,7 @@ fn clap_facade_no_module_reexports() {
 #[test]
 fn either_unaffected_by_glob_expansion() {
     let args = facade_args("either");
-    let output = run_api_pipeline(&args).unwrap();
+    let output = run_api_pipeline(&args, &RemoteOpts::default()).unwrap();
 
     // either is not a facade crate — should render normally
     assert!(
@@ -160,7 +154,7 @@ fn expand_glob_args(crate_name: &str) -> ApiArgs {
 #[test]
 fn clap_expand_glob_has_full_definitions() {
     let args = expand_glob_args("clap");
-    let output = run_api_pipeline(&args).unwrap();
+    let output = run_api_pipeline(&args, &RemoteOpts::default()).unwrap();
 
     // Full struct definitions should appear instead of `pub use` lines
     assert!(
@@ -176,7 +170,7 @@ fn clap_expand_glob_has_full_definitions() {
 #[test]
 fn clap_expand_glob_no_pub_use_lines() {
     let args = expand_glob_args("clap");
-    let output = run_api_pipeline(&args).unwrap();
+    let output = run_api_pipeline(&args, &RemoteOpts::default()).unwrap();
 
     // No `pub use clap_builder::*;` lines should remain
     for line in output.lines() {
@@ -194,7 +188,7 @@ fn clap_expand_glob_no_pub_use_lines() {
 #[test]
 fn clap_expand_glob_has_impl_blocks() {
     let args = expand_glob_args("clap");
-    let output = run_api_pipeline(&args).unwrap();
+    let output = run_api_pipeline(&args, &RemoteOpts::default()).unwrap();
 
     // impl blocks from source crate should be included
     assert!(
@@ -206,7 +200,7 @@ fn clap_expand_glob_has_impl_blocks() {
 #[test]
 fn clap_expand_glob_dedup() {
     let args = expand_glob_args("clap");
-    let output = run_api_pipeline(&args).unwrap();
+    let output = run_api_pipeline(&args, &RemoteOpts::default()).unwrap();
 
     // Items appearing in multiple glob sources should be rendered only once.
     // Count occurrences of "pub struct Command" — should be exactly 1.
@@ -220,7 +214,7 @@ fn clap_expand_glob_dedup() {
 #[test]
 fn either_expand_glob_no_effect() {
     let args = expand_glob_args("either");
-    let output = run_api_pipeline(&args).unwrap();
+    let output = run_api_pipeline(&args, &RemoteOpts::default()).unwrap();
 
     // either is not a facade crate — --expand-glob should not change output
     assert!(

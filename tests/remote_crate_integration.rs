@@ -1,25 +1,19 @@
-//! Integration tests for remote crate support via `--crates`.
+//! Integration tests for remote crate support via `-C`.
 //!
 //! All tests are `#[ignore]` because they require network access and
 //! download/compile crates from crates.io. Run with: `cargo test -- --ignored`
 
-use cargo_brief::cli::{ApiArgs, FilterArgs, GlobalArgs, RemoteArgs, TargetArgs};
+use cargo_brief::cli::{ApiArgs, FilterArgs, GlobalArgs, RemoteOpts, TargetArgs};
 use cargo_brief::run_api_pipeline;
 
-fn remote_args(spec: &str) -> ApiArgs {
-    ApiArgs {
+fn remote_args(spec: &str) -> (ApiArgs, RemoteOpts) {
+    let args = ApiArgs {
         target: TargetArgs {
-            crate_name: "self".to_string(),
+            crate_name: spec.to_string(),
             module_path: None,
             at_package: None,
             at_mod: None,
             manifest_path: None,
-        },
-        remote: RemoteArgs {
-            crates: Some(spec.to_string()),
-            features: None,
-            no_cache: false,
-            clean: None,
         },
         filter: FilterArgs {
             no_structs: false,
@@ -44,13 +38,20 @@ fn remote_args(spec: &str) -> ApiArgs {
         depth: 1,
         recursive: true,
         expand_glob: false,
-    }
+    };
+    let remote = RemoteOpts {
+        crates: true,
+        features: None,
+        no_cache: false,
+    };
+    (args, remote)
 }
 
 #[test]
 #[ignore = "network: fetches from crates.io"]
 fn remote_serde_latest() {
-    let output = run_api_pipeline(&remote_args("serde")).expect("serde should resolve");
+    let (args, remote) = remote_args("serde");
+    let output = run_api_pipeline(&args, &remote).expect("serde should resolve");
     assert!(
         output.contains("Serialize"),
         "expected Serialize in serde output\nActual output:\n{output}"
@@ -60,8 +61,8 @@ fn remote_serde_latest() {
 #[test]
 #[ignore = "network: fetches from crates.io"]
 fn remote_serde_pinned() {
-    let output =
-        run_api_pipeline(&remote_args("serde@1.0.200")).expect("serde@1.0.200 should resolve");
+    let (args, remote) = remote_args("serde@1.0.200");
+    let output = run_api_pipeline(&args, &remote).expect("serde@1.0.200 should resolve");
     assert!(output.contains("serde"), "expected crate header for serde");
     assert!(
         output.contains("pub trait Serialize"),
@@ -72,16 +73,18 @@ fn remote_serde_pinned() {
 #[test]
 #[ignore = "network: fetches from crates.io"]
 fn remote_nonexistent() {
-    let result = run_api_pipeline(&remote_args("this-crate-does-not-exist-xyzzy"));
+    let (args, remote) = remote_args("this-crate-does-not-exist-xyzzy");
+    let result = run_api_pipeline(&args, &remote);
     assert!(result.is_err(), "nonexistent crate should produce an error");
 }
 
 #[test]
 #[ignore = "network: fetches from crates.io"]
 fn remote_with_module_path() {
-    let mut args = remote_args("either");
+    let (mut args, remote) = remote_args("either");
     args.target.module_path = Some("nonexistent".to_string());
-    let output = run_api_pipeline(&args).expect("either with invalid module should still return");
+    let output =
+        run_api_pipeline(&args, &remote).expect("either with invalid module should still return");
     assert!(
         output.contains("module 'nonexistent' not found"),
         "expected module-not-found error\nActual output:\n{output}"

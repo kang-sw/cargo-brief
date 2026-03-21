@@ -4,46 +4,34 @@ use clap::Parser;
 use cargo_brief::cli::{BriefCommand, BriefDirect, Cargo, CargoCommand};
 
 fn main() -> Result<()> {
-    let cmd = parse_command();
+    let direct = parse_command();
+    let remote = direct.remote_opts();
 
-    match &cmd {
+    match &direct.command {
         BriefCommand::Api(args) => {
-            if let Some(spec) = &args.remote.clean {
-                cargo_brief::clean_cache(spec)?;
-                return Ok(());
-            }
-            let output = cargo_brief::run_api_pipeline(args)?;
+            let output = cargo_brief::run_api_pipeline(args, &remote)?;
             print!("{output}");
         }
         BriefCommand::Search(args) => {
-            if let Some(spec) = &args.remote.clean {
-                cargo_brief::clean_cache(spec)?;
-                return Ok(());
-            }
-            let output = cargo_brief::run_search_pipeline(args)?;
+            let output = cargo_brief::run_search_pipeline(args, &remote)?;
             print!("{output}");
         }
         BriefCommand::Examples(args) => {
-            if let Some(spec) = &args.remote.clean {
-                cargo_brief::clean_cache(spec)?;
-                return Ok(());
-            }
-            let output = cargo_brief::run_examples_pipeline(args)?;
+            let output = cargo_brief::run_examples_pipeline(args, &remote)?;
             print!("{output}");
         }
         BriefCommand::Summary(args) => {
-            if let Some(spec) = &args.remote.clean {
-                cargo_brief::clean_cache(spec)?;
-                return Ok(());
-            }
-            let output = cargo_brief::run_summary_pipeline(args)?;
+            let output = cargo_brief::run_summary_pipeline(args, &remote)?;
             print!("{output}");
+        }
+        BriefCommand::Clean(args) => {
+            cargo_brief::clean_cache(args.spec.as_deref().unwrap_or(""))?;
         }
     }
     Ok(())
 }
 
-fn parse_command() -> BriefCommand {
+fn parse_command() -> BriefDirect {
     // Handle both `cargo brief <args>` and `cargo-brief <args>` invocations
     let raw_args: Vec<String> = std::env::args().collect();
 
@@ -51,10 +39,9 @@ fn parse_command() -> BriefCommand {
         // Invoked as `cargo brief` — parse as cargo subcommand
         let cargo = Cargo::parse();
         let CargoCommand::Brief(direct) = cargo.command;
-        direct.command
+        direct
     } else {
         // Direct invocation — parse BriefDirect directly
-        let direct = BriefDirect::parse();
-        direct.command
+        BriefDirect::parse()
     }
 }

@@ -22,8 +22,39 @@ pub enum CargoCommand {
     after_help = "Run `cargo brief <subcommand> --help` for subcommand-specific options."
 )]
 pub struct BriefDirect {
+    /// Interpret TARGET as a crates.io package spec (e.g., serde@1, tokio@1.0)
+    #[arg(short = 'C', long, global = true)]
+    pub crates: bool,
+
+    /// Comma-separated features to enable (requires -C)
+    #[arg(short = 'F', long, value_name = "FEATURES", global = true)]
+    pub features: Option<String>,
+
+    /// Skip cache and use a temporary workspace (requires -C)
+    #[arg(long, global = true)]
+    pub no_cache: bool,
+
     #[command(subcommand)]
     pub command: BriefCommand,
+}
+
+impl BriefDirect {
+    /// Extract remote-mode options from the top-level flags.
+    pub fn remote_opts(&self) -> RemoteOpts {
+        RemoteOpts {
+            crates: self.crates,
+            features: self.features.clone(),
+            no_cache: self.no_cache,
+        }
+    }
+}
+
+/// Remote crate mode options (extracted from BriefDirect global flags).
+#[derive(Debug, Clone, Default)]
+pub struct RemoteOpts {
+    pub crates: bool,
+    pub features: Option<String>,
+    pub no_cache: bool,
 }
 
 #[derive(Subcommand, Debug, Clone)]
@@ -38,15 +69,16 @@ EXAMPLES:
   cargo brief api self::net::tcp
 
   # Inspect a crates.io dependency (cached after first run)
-  cargo brief api --crates serde@1 --compact
-  cargo brief api --crates tokio@1 --features rt,net,io-util
+  cargo brief -C api serde@1 --compact
+  cargo brief -C -F rt,net,io-util api tokio@1
 
   # Browse a specific module of a remote crate
-  cargo brief api --crates tokio@1 --features net tokio::net
+  cargo brief -C api tokio@1::net
+  cargo brief -C -F net api tokio@1 net
 
   # Reduce output verbosity for large crates
-  cargo brief api --crates tokio@1 --features full --compact
-  cargo brief api --crates tokio@1 --features full --doc-lines 1
+  cargo brief -C api tokio@1 --compact
+  cargo brief -C api tokio@1 --doc-lines 1
 
 RESOLUTION RULES:
   The <TARGET> argument is resolved as follows:
@@ -57,6 +89,8 @@ RESOLUTION RULES:
     5. \"crate_name\"     → workspace package (hyphen/underscore normalized)
     6. \"unknown_name\"   → treated as package name (use \"self::mod\" for modules)
 
+  With -C, TARGET is the crate spec (e.g., serde@1, tokio@1.0).
+
   The [MODULE_PATH] argument also accepts file paths (e.g., src/foo.rs).")]
     Api(ApiArgs),
 
@@ -64,12 +98,12 @@ RESOLUTION RULES:
     #[command(after_help = "\
 EXAMPLES:
   # Substring search (smart-case: all-lowercase = insensitive)
-  cargo brief search --crates axum@0.8 Router route
-  cargo brief search --crates bevy ShaderRef Material
+  cargo brief -C search axum@0.8 Router route
+  cargo brief -C search bevy ShaderRef Material
 
   # OR-match with comma, methods-of
   cargo brief search self \"EventReader,EventWriter\"
-  cargo brief search --crates bytes@1 --methods-of Bytes
+  cargo brief -C search bytes@1 --methods-of Bytes
 
   # Glob, exact match, exclusion
   cargo brief search bevy \"Shader*Ref\"               # * = 0+ chars, ? = 1 char
@@ -95,17 +129,17 @@ PATTERN SYNTAX:
 EXAMPLES:
   # List example files with their module docs
   cargo brief examples self
-  cargo brief examples --crates tokio@1
+  cargo brief -C examples tokio@1
 
   # Grep for a pattern in example files
   cargo brief examples self spawn
-  cargo brief examples --crates hecs spawn_at --context 3
+  cargo brief -C examples hecs spawn_at --context 3
 
   # Multiple patterns are AND-matched (no quotes needed)
   cargo brief examples self spawn async
 
   # Include tests and benches directories
-  cargo brief examples --crates serde --tests --benches derive
+  cargo brief -C examples serde --tests --benches derive
 
 MATCHING:
   Multiple pattern arguments are joined with spaces (AND-matched).
@@ -120,11 +154,21 @@ EXAMPLES:
   cargo brief summary self
 
   # Summarize a remote crate
-  cargo brief summary --crates tokio@1 --features full
+  cargo brief -C -F full summary tokio@1
 
   # Summarize a specific module
-  cargo brief summary --crates bevy bevy::ecs")]
+  cargo brief -C summary bevy bevy::ecs")]
     Summary(SummaryArgs),
+
+    /// Clear cached remote crate workspaces
+    #[command(after_help = "\
+EXAMPLES:
+  # Clear all cached workspaces
+  cargo brief clean
+
+  # Clear caches for a specific crate
+  cargo brief clean serde")]
+    Clean(CleanArgs),
 }
 
 // === Shared Args Groups ===
@@ -150,36 +194,6 @@ pub struct TargetArgs {
     /// Path to Cargo.toml
     #[arg(long, help_heading = "Local Workspace")]
     pub manifest_path: Option<String>,
-}
-
-/// Remote crate (crates.io) arguments.
-#[derive(Args, Debug, Clone)]
-pub struct RemoteArgs {
-    /// Fetch a crate from crates.io (e.g., serde, tokio@1, quinn@0.11.0)
-    #[arg(long, value_name = "SPEC", help_heading = "Remote Crate (crates.io)")]
-    pub crates: Option<String>,
-
-    /// Comma-separated features to enable (e.g., rt,net,macros)
-    #[arg(
-        long,
-        value_name = "FEATURES",
-        help_heading = "Remote Crate (crates.io)"
-    )]
-    pub features: Option<String>,
-
-    /// Skip cache and use a temporary workspace
-    #[arg(long, help_heading = "Remote Crate (crates.io)")]
-    pub no_cache: bool,
-
-    /// Clear cached remote crate workspaces. Use alone or with a crate spec.
-    #[arg(
-        long,
-        value_name = "SPEC",
-        num_args = 0..=1,
-        default_missing_value = "",
-        help_heading = "Remote Crate (crates.io)"
-    )]
-    pub clean: Option<String>,
 }
 
 /// Output filtering and density flags.
@@ -263,9 +277,6 @@ pub struct ApiArgs {
     pub target: TargetArgs,
 
     #[command(flatten)]
-    pub remote: RemoteArgs,
-
-    #[command(flatten)]
     pub filter: FilterArgs,
 
     #[command(flatten)]
@@ -294,9 +305,6 @@ pub struct SearchArgs {
     /// Search patterns — multiple args are AND-matched (use -- for patterns starting with -)
     #[arg(value_name = "PATTERN", num_args = 0..)]
     pub patterns: Vec<String>,
-
-    #[command(flatten)]
-    pub remote: RemoteArgs,
 
     #[command(flatten)]
     pub filter: FilterArgs,
@@ -348,9 +356,6 @@ pub struct ExamplesArgs {
     pub patterns: Vec<String>,
 
     #[command(flatten)]
-    pub remote: RemoteArgs,
-
-    #[command(flatten)]
     pub global: GlobalArgs,
 
     /// Path to Cargo.toml
@@ -377,10 +382,15 @@ pub struct SummaryArgs {
     pub target: TargetArgs,
 
     #[command(flatten)]
-    pub remote: RemoteArgs,
-
-    #[command(flatten)]
     pub global: GlobalArgs,
+}
+
+/// Arguments for the `clean` subcommand.
+#[derive(Args, Debug, Clone)]
+pub struct CleanArgs {
+    /// Crate spec to clean (omit to clean all)
+    #[arg(value_name = "SPEC")]
+    pub spec: Option<String>,
 }
 
 impl ExamplesArgs {

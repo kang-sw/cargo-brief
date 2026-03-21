@@ -2,6 +2,20 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.6.0] - 2026-03-22
+
+### Breaking Changes
+
+- **`--crates <SPEC>` replaced by `-C` / `--crates` boolean flag**: The crate spec now goes into the TARGET positional argument. `-C` is a global flag that can appear before or after the subcommand name.
+  - Before: `cargo brief api --crates serde@1 --compact`
+  - After: `cargo brief -C api serde@1 --compact`
+- **`--features` replaced by `-F` / `--features` global flag**: Features flag moved from per-subcommand to top-level. `-F` shorthand added.
+  - Before: `cargo brief api --crates tokio@1 --features rt,net`
+  - After: `cargo brief -C -F rt,net api tokio@1`
+- **`--no-cache` moved to global flag**: Now requires `-C` context.
+- **`--clean [SPEC]` replaced by `clean` subcommand**: `cargo brief clean [SPEC]` replaces the per-subcommand `--clean` flag.
+- **`RemoteArgs` struct removed**: Tests and programmatic callers must use `RemoteOpts` (non-clap struct) passed separately to pipeline functions.
+
 ## [0.5.3] - 2026-03-21
 
 ### Fixed

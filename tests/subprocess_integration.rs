@@ -375,23 +375,23 @@ fn bare_cargo_brief_api_from_virtual_root() {
 }
 
 // ===========================================================================
-// L. Remote crate via --crates (network required)
+// L. Remote crate via -C (network required)
 // ===========================================================================
 
 #[test]
 #[ignore = "network: fetches from crates.io"]
 fn cli_crates_serde() {
-    let out = run_ok(&test_workspace(), &["api", "--crates", "serde"]);
-    assert!(!out.is_empty(), "--crates serde should produce output");
+    let out = run_ok(&test_workspace(), &["-C", "api", "serde"]);
+    assert!(!out.is_empty(), "-C api serde should produce output");
     assert!(
         out.contains("Serialize"),
-        "--crates serde should contain Serialize"
+        "-C api serde should contain Serialize"
     );
 }
 
 #[test]
 #[ignore = "network: fetches from crates.io"]
 fn cli_crates_version() {
-    let out = run_ok(&test_workspace(), &["api", "--crates", "serde@1"]);
-    assert!(!out.is_empty(), "--crates serde@1 should produce output");
+    let out = run_ok(&test_workspace(), &["-C", "api", "serde@1"]);
+    assert!(!out.is_empty(), "-C api serde@1 should produce output");
 }

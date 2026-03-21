@@ -6,7 +6,7 @@
 - `src/cross_crate.rs` — `resolve_cross_crate_module()`, `build_cross_crate_index()`, `root_has_cross_crate_reexports()`.
 
 ## Module Contracts
-- `build_remote_context_api()` / `build_remote_context_search()` guarantee: `WorkspaceDir` is stored in `PipelineContext._workspace` to keep it alive for the entire pipeline. Manifest path is an owned `String` — no borrow chain. `PipelineContext.use_cache = true` for all remote contexts. `PipelineContext.available_packages` is populated from Cargo.lock at context-build time via `rustdoc_json::load_lockfile_packages()` — empty if Cargo.lock is absent.
+- `build_remote_context_api()` / `build_remote_context_search()` guarantee: `WorkspaceDir` is stored in `PipelineContext._workspace` to keep it alive for the entire pipeline. Manifest path is an owned `String` — no borrow chain. `PipelineContext.use_cache = true` for all remote contexts. `PipelineContext.available_packages` is populated from Cargo.lock at context-build time via `rustdoc_json::load_lockfile_packages()` — empty if Cargo.lock is absent. The crate spec comes from `args.target.crate_name` (the TARGET positional), not from a dedicated `--crates SPEC` flag — `RemoteOpts.crates` is a boolean mode switch, not a value.
 - `pre_warm_cross_crate_json()` runs before `build_cross_crate_index()` / `expand_glob_reexports()` in all three shared pipelines (api/search/summary) when `root_has_cross_crate_reexports` is true. It performs a recursive BFS (max 8 levels) using `batch_generate_rustdoc_json()`, which issues a single `cargo doc -p a -p b ...` invocation per batch level instead of sequential `cargo rustdoc` calls. Failures are silently suppressed; individual generation in `cross_crate.rs` remains as fallback.
 - Both remote and local pipelines go through the same `run_shared_api_pipeline()` with three mutually exclusive sub-paths evaluated in order: (1) module-target+cross-crate, (2) recursive+cross-crate, (3) normal. Cross-crate discovery now also runs for local crates that have cross-crate re-exports.
 - `generate_rustdoc_json(..., use_cache=true)` skips `cargo rustdoc` if the `.json` file already exists in `target/doc/`. Remote pipelines always set `use_cache=true`. Local pipelines set `use_cache` based on workspace membership: true for non-member deps (e.g. `bevy` from a game project), false for workspace members (source may have changed).
@@ -22,10 +22,10 @@
 - `build_remote_crate_header()` uses `resolved_version` (from `resolve_workspace`) first, then falls back to reading Cargo.lock via `resolve_crate_version()`. This means the header can show the version before `cargo rustdoc` runs.
 - Cache location priority: `$CARGO_BRIEF_CACHE_DIR` > `$XDG_CACHE_HOME/cargo-brief/crates` > `$HOME/.cache/cargo-brief/crates`.
 - `cross_crate` resolution uses the same `manifest_path` and `target_dir` as the primary crate. Sub-crate JSON files land in the same `target/doc/` directory — they persist across invocations and are reused when `use_cache=true`.
-- `--clean` is handled in `main.rs` before `run_pipeline()` is called — it is an early exit, not a pipeline stage.
+- `clean` is a first-class `BriefCommand::Clean` subcommand variant dispatched in `main.rs`. It calls `cargo_brief::clean_cache(spec)` directly — it is not a pipeline stage and never builds a `PipelineContext`.
 
 ## Extension Points & Change Recipes
-- **Add feature flag support**: Modify `write_workspace_files()` in `remote.rs` to include `features = [...]` in the generated Cargo.toml. Add `--features` flag to `BriefArgs` (already present — wire it through if not already).
+- **Add feature flag support for sub-crates**: `-F`/`--features` on `BriefDirect` is already wired into `RemoteOpts.features` and passed to `resolve_workspace`. To propagate features to cross-crate deps, modify `write_workspace_files()` in `remote.rs` to accept per-dep feature lists.
 - **Add cache invalidation**: The normalized cache dir (`name[version]`) is already version-pinned — changing the spec produces a new directory. Feature flag changes also produce a new directory (features are encoded in the dir name). No content comparison is needed.
 - **Increase cross-crate hop depth**: Change the `for _ in 0..5` loop limit in `follow_use_chain()` in `cross_crate.rs`.
 
@@ -39,6 +39,6 @@
 
 ## Technical Debt
 - No progress indication for downloads/builds of remote crates or sub-crates during cross-crate discovery.
-- Version cache (`versions/{name}.json`) is TTL-based (24h), not event-based. A new release during the TTL window will not be picked up until the cache expires or `--clean` is used.
+- Version cache (`versions/{name}.json`) is TTL-based (24h), not event-based. A new release during the TTL window will not be picked up until the cache expires or `cargo brief clean` is used.
 - No feature flag support for sub-crates during cross-crate resolution — only the primary crate's features are applied.
-- `.bin` sidecar files in `target/doc/` are never cleaned up by `--clean` (which removes the workspace dir, not the target dir). Stale bincode caches can accumulate indefinitely.
+- `.bin` sidecar files in `target/doc/` are never cleaned up by `cargo brief clean` (which removes the workspace dir, not the target dir). Stale bincode caches can accumulate indefinitely.

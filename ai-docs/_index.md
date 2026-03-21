@@ -30,9 +30,11 @@ visibility is always `pub`-only). This makes external dep support architecturall
 ## CLI Interface
 
 ```
-cargo brief api [target] [module_path] [OPTIONS]
-cargo brief search [target] <pattern> [OPTIONS]
-cargo brief examples [target] [pattern] [OPTIONS]
+cargo brief [-C] api [target] [module_path] [OPTIONS]
+cargo brief [-C] search [target] <pattern> [OPTIONS]
+cargo brief [-C] examples [target] [pattern] [OPTIONS]
+cargo brief [-C] summary [target] [module_path] [OPTIONS]
+cargo brief clean [SPEC]
 ```
 
 ### Subcommands
@@ -49,6 +51,10 @@ Comma-separated = OR groups, space-separated = AND within group.
 List mode (no pattern) shows files with `//!` doc comments; grep mode shows matching
 lines with context and `*` markers. `--tests [DEPTH]` / `--benches [DEPTH]` extend scope.
 
+**`summary`** — Compact module-level overview with item counts per kind.
+
+**`clean`** — Clear cached remote crate workspaces. Optional `SPEC` argument for specific crate.
+
 ### Target Resolution (api subcommand)
 | Syntax              | Resolves to                                     |
 |---------------------|-------------------------------------------------|
@@ -58,15 +64,20 @@ lines with context and `*` markers. `--tests [DEPTH]` / `--benches [DEPTH]` exte
 | `crate::module`     | Named crate, specific module (single-arg)       |
 | `src/cli.rs`        | File path → auto-converted to module path       |
 
-### Shared Options (all subcommands)
-| Flag                    | Description                                                    |
-|-------------------------|----------------------------------------------------------------|
-| `--crates <spec>`       | Fetch crate from crates.io (e.g., `serde`, `tokio@1`)          |
-| `--features <FEATURES>` | Comma-separated features to enable for --crates                |
-| `--no-cache`            | Skip cache for `--crates` (use temp workspace)                 |
-| `--clean [SPEC]`        | Clear cached remote crate workspaces                           |
-| `--toolchain <name>`    | Nightly toolchain name (default: `nightly`)                    |
-| `-v` / `--verbose`      | Show progress messages on stderr                               |
+With `-C`, TARGET is the crate spec (e.g., `serde@1`, `tokio@1::net`).
+
+### Global Flags (on BriefDirect, `global = true`)
+| Flag                         | Description                                                    |
+|------------------------------|----------------------------------------------------------------|
+| `-C` / `--crates`           | Interpret TARGET as a crates.io package spec                   |
+| `-F` / `--features <FEATS>` | Comma-separated features to enable (requires -C)               |
+| `--no-cache`                 | Skip cache, use temp workspace (requires -C)                   |
+| `--toolchain <name>`        | Nightly toolchain name (default: `nightly`)                    |
+| `-v` / `--verbose`          | Show progress messages on stderr                               |
+
+### Subcommand Options (all subcommands)
+| Flag                                                          | Description              |
+|---------------------------------------------------------------|--------------------------|
 | `--no-structs` .. `--no-macros` | Exclude item kinds (FilterArgs)                       |
 | `--no-docs` / `--doc-lines` / `--compact` / `--verbose-metadata` | Output density       |
 | `--all`                 | Show blanket/auto-trait impls                                  |
@@ -90,8 +101,8 @@ lines with context and `*` markers. `--tests [DEPTH]` / `--benches [DEPTH]` exte
 src/
   lib.rs           — re-exports all modules, pipeline orchestration via PipelineContext → shared api/search functions
   examples.rs      — example/test/bench file scanning, list mode and grep mode rendering
-  main.rs          — CLI arg parsing, subcommand dispatch
-  cli.rs           — Subcommand types: ApiArgs, SearchArgs, ExamplesArgs + shared TargetArgs/RemoteArgs/FilterArgs/GlobalArgs
+  main.rs          — CLI arg parsing, subcommand dispatch, RemoteOpts extraction from BriefDirect
+  cli.rs           — Subcommand types: ApiArgs, SearchArgs, ExamplesArgs, SummaryArgs, CleanArgs + shared TargetArgs/FilterArgs/GlobalArgs + RemoteOpts (plain struct)
   cross_crate.rs   — cross-crate module following for facade crates
   remote.rs        — temp workspace creation for --crates (crates.io fetch) + cache management
   resolve.rs       — flexible target resolution (self, crate::module, fallback) + cargo metadata
@@ -126,14 +137,14 @@ Parsed via `rustdoc-types` 0.57. Post-macro-expansion output.
 
 ---
 
-## Operational State (v0.5.1)
+## Operational State (v0.6.0)
 
 - Core pipeline complete. All item types supported. 156 integration tests.
 - Flexible package name resolution: `self`, `crate::module`, file path→module. Bare names always resolve as package.
-- Remote crate support: `--crates <spec>` fetches any crate from crates.io. Workspaces cached at `~/.cache/cargo-brief/crates/` with version-normalized directory names (`name[version]`). Exact version resolved via crates.io API with 24h cache; bare specs auto-update.
+- Remote crate support: `-C` boolean flag + TARGET positional as crate spec (e.g., `cargo brief -C api serde@1`). Workspaces cached at `~/.cache/cargo-brief/crates/` with version-normalized directory names (`name[version]`). Exact version resolved via crates.io API with 24h cache; bare specs auto-update. `cargo brief clean [SPEC]` clears cached workspaces.
 - **Unified pipeline**: Local and remote entry points produce a `PipelineContext`, then call shared `run_shared_api_pipeline()` / `run_shared_search_pipeline()`. Cross-crate discovery fires automatically for both local and remote crates.
 - **Cross-crate accessible paths**: Facade crates (bevy, axum) show items with user-facing paths via `CrossCrateIndex`. `build_cross_crate_index()` walks the facade root top-down, tracking accessible paths through glob/named re-exports. All three pipelines (search, api, summary) use the unified index — items appear as `render::render_resource::AsBindGroup` not `bevy_render::render_resource::bind_group::AsBindGroup`. Dedup keeps shortest non-prelude path per (crate_idx, item_id). Module targeting (`bevy ecs`) still uses the original `resolve_cross_crate_module()`.
-- **rustdoc JSON + bincode caching**: Single `generate_rustdoc_json()` with `use_cache` parameter. Primary package: `use_cache` is true for non-workspace-member targets (external deps like `bevy`), false for workspace members. Bincode parse cache always used. `--clean [SPEC]` manages disk usage. **Batch pre-warming**: `pre_warm_cross_crate_json()` uses `cargo doc` + `RUSTDOCFLAGS` to batch-generate JSON for all cross-crate deps in one invocation (recursive BFS, max depth 8). Names validated against `Cargo.lock` via `load_lockfile_packages()` → `LockfilePackages` (tracks multi-version crates, resolves to `name@latest_version` via `resolve_spec()`). `load_or_find_source_crate` also resolves specs upfront. Auto-retry on "specification is ambiguous" errors picks highest semver version. Existing per-crate calls hit cache after pre-warming.
+- **rustdoc JSON + bincode caching**: Single `generate_rustdoc_json()` with `use_cache` parameter. Primary package: `use_cache` is true for non-workspace-member targets (external deps like `bevy`), false for workspace members. Bincode parse cache always used. `cargo brief clean [SPEC]` manages disk usage. **Batch pre-warming**: `pre_warm_cross_crate_json()` uses `cargo doc` + `RUSTDOCFLAGS` to batch-generate JSON for all cross-crate deps in one invocation (recursive BFS, max depth 8). Names validated against `Cargo.lock` via `load_lockfile_packages()` → `LockfilePackages` (tracks multi-version crates, resolves to `name@latest_version` via `resolve_spec()`). `load_or_find_source_crate` also resolves specs upfront. Auto-retry on "specification is ambiguous" errors picks highest semver version. Existing per-crate calls hit cache after pre-warming.
 - Visibility auto-detection: `same_crate` inferred from cwd package context. Cross-crate views use reachability-based filtering via `ReachableInfo` (replaces `HashSet<Id>`). `ReachableInfo` carries `glob_private_modules` and `glob_inlined` metadata — private modules reached via `pub use private::*` are skipped in render/summary and their items inlined at the parent level. Search paths flattened for glob-private modules.
 - Glob re-export expansion: Phase 1 (individual `pub use` lines) + Phase 2 (`--expand-glob` inlines full definitions). **Recursive**: cross-crate glob chains followed up to depth 8 with cycle prevention. Underscore/hyphen package name fallback. **Intra-crate globs**: handled at render level via `ReachableInfo.glob_inlined`; private module contents inlined directly, no string-based post-processing needed.
 - Search mode: `cargo brief search <pattern>` finds leaf items with smart-case matching (all-lowercase = insensitive, any uppercase = sensitive). Comma-separated = OR groups, space-separated = AND within group. Pattern DSL operators: glob wildcards (`*`/`?`, full-path anchored), exclusion (`-term`, global post-filter), exact name match (`=term`, final `::` segment). Operators are embedded in tokens — no new CLI flags.
@@ -183,6 +194,7 @@ Domain-oriented operational knowledge in `ai-docs/mental-model/`:
 ## In Progress
 
 1. **`tickets/wip/260321-feat-canonical-reexport-paths.md`** — Phase 1 done (intra-crate). Phase 2 (cross-crate) pending.
+2. **`tickets/wip/260322-feat-crates-boolean-flag.md`** — CLI restructure: `-C` boolean flag, `clean` subcommand, `RemoteOpts`. v0.6.0 breaking.
 
 ## Next Up (priority order)
 

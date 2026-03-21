@@ -21,7 +21,7 @@ use std::path::{Path, PathBuf};
 use anyhow::{Context, Result};
 use rustdoc_types::{ItemEnum, Visibility};
 
-use cli::{ApiArgs, ExamplesArgs, FilterArgs, SearchArgs, SummaryArgs};
+use cli::{ApiArgs, ExamplesArgs, FilterArgs, RemoteOpts, SearchArgs, SummaryArgs};
 use model::{CrateModel, ReachableInfo, compute_reachable_set};
 
 /// Result of glob re-export expansion. Contains both the item names (for Phase 1
@@ -98,9 +98,10 @@ fn generate_and_parse_model(
 }
 
 /// Run the API extraction pipeline and return the rendered output string.
-pub fn run_api_pipeline(args: &ApiArgs) -> Result<String> {
-    let ctx = if let Some(spec) = &args.remote.crates {
-        build_remote_context_api(args, spec)?
+pub fn run_api_pipeline(args: &ApiArgs, remote: &RemoteOpts) -> Result<String> {
+    let ctx = if remote.crates {
+        let spec = &args.target.crate_name;
+        build_remote_context_api(args, spec, remote)?
     } else {
         build_local_context_api(args)?
     };
@@ -151,33 +152,32 @@ fn build_local_context_api(args: &ApiArgs) -> Result<PipelineContext> {
     })
 }
 
-fn build_remote_context_api(args: &ApiArgs, spec: &str) -> Result<PipelineContext> {
-    // When --crates is used, the first positional arg (crate_name) may actually be
-    // a module path (e.g., `cargo brief api --crates bevy ecs` → crate_name="ecs",
-    // or `cargo brief api --crates bevy bevy::ecs` → crate_name="bevy::ecs").
-    // Parse "::" to extract module path, consistent with resolve_target Case 2.
-    let module_path = if args.target.crate_name != "self" && args.target.module_path.is_none() {
-        let name = &args.target.crate_name;
-        if let Some(idx) = name.find("::") {
-            let rest = &name[idx + 2..];
-            if rest.is_empty() {
-                None
-            } else {
-                Some(rest.to_string())
-            }
+fn build_remote_context_api(
+    args: &ApiArgs,
+    spec: &str,
+    remote: &RemoteOpts,
+) -> Result<PipelineContext> {
+    // With -C, crate_name IS the spec. If it contains "::", split into spec + module.
+    // e.g., `bevy::ecs` → spec="bevy", module="ecs"
+    //        `tokio@1::net` → spec="tokio@1", module="net"
+    let (actual_spec, module_path) = if let Some(idx) = spec.find("::") {
+        let rest = &spec[idx + 2..];
+        let module = if rest.is_empty() {
+            None
         } else {
-            Some(name.clone())
-        }
+            Some(rest.to_string())
+        };
+        (&spec[..idx], module)
     } else {
-        args.target.module_path.clone()
+        (spec, args.target.module_path.clone())
     };
 
-    let (name, _) = remote::parse_crate_spec(spec);
+    let (name, _) = remote::parse_crate_spec(actual_spec);
     if args.global.verbose {
         eprintln!("[cargo-brief] Resolving workspace for '{name}'...");
     }
     let (workspace, resolved_version) =
-        remote::resolve_workspace(spec, args.remote.features.as_deref(), args.remote.no_cache)
+        remote::resolve_workspace(actual_spec, remote.features.as_deref(), remote.no_cache)
             .with_context(|| format!("Failed to create workspace for '{name}'"))?;
 
     let manifest_path = workspace
@@ -193,7 +193,7 @@ fn build_remote_context_api(args: &ApiArgs, spec: &str) -> Result<PipelineContex
         &name,
         resolved_version.as_deref(),
         workspace.path(),
-        args.remote.features.as_deref(),
+        remote.features.as_deref(),
     );
 
     let available_packages = rustdoc_json::load_lockfile_packages(Some(&manifest_path));
@@ -360,21 +360,7 @@ fn render_and_expand_globs(
 }
 
 /// Run the search pipeline and return the rendered output string.
-pub fn run_search_pipeline(args: &SearchArgs) -> Result<String> {
-    // When --crates is used, the first positional (crate_name) is redundant since
-    // the crate is specified by --crates. If patterns are empty and crate_name is not
-    // "self", treat crate_name as the pattern (mirrors api subcommand behavior).
-    let args =
-        if args.remote.crates.is_some() && args.patterns.is_empty() && args.crate_name != "self" {
-            let mut args = args.clone();
-            args.patterns = vec![std::mem::take(&mut args.crate_name)];
-            args.crate_name = "self".to_string();
-            std::borrow::Cow::Owned(args)
-        } else {
-            std::borrow::Cow::Borrowed(args)
-        };
-    let args = args.as_ref();
-
+pub fn run_search_pipeline(args: &SearchArgs, remote: &RemoteOpts) -> Result<String> {
     // Validate: need either a pattern or --methods-of
     if args.patterns.is_empty() && args.methods_of.is_none() {
         anyhow::bail!("search requires a pattern or --methods-of <TYPE>");
@@ -395,11 +381,11 @@ pub fn run_search_pipeline(args: &SearchArgs) -> Result<String> {
         args.filter.no_aliases = true;
         // Leave methods_of set — run_shared_search_pipeline uses it for exact matching
         // Leave no_functions = false (methods are functions)
-        return run_search_pipeline(&args);
+        return run_search_pipeline(&args, remote);
     }
 
-    let ctx = if let Some(spec) = &args.remote.crates {
-        build_remote_context_search(args, spec)?
+    let ctx = if remote.crates {
+        build_remote_context_search(args, &args.crate_name, remote)?
     } else {
         build_local_context_search(args)?
     };
@@ -437,13 +423,17 @@ fn build_local_context_search(args: &SearchArgs) -> Result<PipelineContext> {
     })
 }
 
-fn build_remote_context_search(args: &SearchArgs, spec: &str) -> Result<PipelineContext> {
+fn build_remote_context_search(
+    args: &SearchArgs,
+    spec: &str,
+    remote: &RemoteOpts,
+) -> Result<PipelineContext> {
     let (name, _) = remote::parse_crate_spec(spec);
     if args.global.verbose {
         eprintln!("[cargo-brief] Resolving workspace for '{name}'...");
     }
     let (workspace, _resolved_version) =
-        remote::resolve_workspace(spec, args.remote.features.as_deref(), args.remote.no_cache)
+        remote::resolve_workspace(spec, remote.features.as_deref(), remote.no_cache)
             .with_context(|| format!("Failed to create workspace for '{name}'"))?;
 
     let manifest_path = workspace
@@ -540,28 +530,16 @@ fn run_shared_search_pipeline(ctx: &PipelineContext, args: &SearchArgs) -> Resul
 }
 
 /// Run the examples pipeline and return the rendered output string.
-pub fn run_examples_pipeline(args: &ExamplesArgs) -> Result<String> {
-    // When --crates is used and crate_name is not "self" and no patterns,
-    // treat crate_name as pattern (mirrors search subcommand behavior).
-    let args =
-        if args.remote.crates.is_some() && args.patterns.is_empty() && args.crate_name != "self" {
-            let mut args = args.clone();
-            args.patterns = vec![std::mem::take(&mut args.crate_name)];
-            args.crate_name = "self".to_string();
-            std::borrow::Cow::Owned(args)
-        } else {
-            std::borrow::Cow::Borrowed(args)
-        };
-    let args = args.as_ref();
-
-    if let Some(spec) = &args.remote.crates {
-        // Remote path
+pub fn run_examples_pipeline(args: &ExamplesArgs, remote: &RemoteOpts) -> Result<String> {
+    if remote.crates {
+        // Remote path — crate_name IS the spec
+        let spec = &args.crate_name;
         let (name, _) = remote::parse_crate_spec(spec);
         if args.global.verbose {
             eprintln!("[cargo-brief] Resolving workspace for '{name}'...");
         }
         let (workspace, resolved_version) =
-            remote::resolve_workspace(spec, None, args.remote.no_cache)
+            remote::resolve_workspace(spec, remote.features.as_deref(), remote.no_cache)
                 .with_context(|| format!("Failed to create workspace for '{name}'"))?;
 
         let manifest_path = workspace
@@ -636,9 +614,10 @@ pub fn run_examples_pipeline(args: &ExamplesArgs) -> Result<String> {
 }
 
 /// Run the summary pipeline and return the rendered output string.
-pub fn run_summary_pipeline(args: &SummaryArgs) -> Result<String> {
-    let ctx = if let Some(spec) = &args.remote.crates {
-        build_remote_context_summary(args, spec)?
+pub fn run_summary_pipeline(args: &SummaryArgs, remote: &RemoteOpts) -> Result<String> {
+    let ctx = if remote.crates {
+        let spec = &args.target.crate_name;
+        build_remote_context_summary(args, spec, remote)?
     } else {
         build_local_context_summary(args)?
     };
@@ -688,30 +667,30 @@ fn build_local_context_summary(args: &SummaryArgs) -> Result<PipelineContext> {
     })
 }
 
-fn build_remote_context_summary(args: &SummaryArgs, spec: &str) -> Result<PipelineContext> {
-    // Same module-path extraction logic as api subcommand
-    let module_path = if args.target.crate_name != "self" && args.target.module_path.is_none() {
-        let name = &args.target.crate_name;
-        if let Some(idx) = name.find("::") {
-            let rest = &name[idx + 2..];
-            if rest.is_empty() {
-                None
-            } else {
-                Some(rest.to_string())
-            }
+fn build_remote_context_summary(
+    args: &SummaryArgs,
+    spec: &str,
+    remote: &RemoteOpts,
+) -> Result<PipelineContext> {
+    // With -C, crate_name IS the spec. If it contains "::", split into spec + module.
+    let (actual_spec, module_path) = if let Some(idx) = spec.find("::") {
+        let rest = &spec[idx + 2..];
+        let module = if rest.is_empty() {
+            None
         } else {
-            Some(name.clone())
-        }
+            Some(rest.to_string())
+        };
+        (&spec[..idx], module)
     } else {
-        args.target.module_path.clone()
+        (spec, args.target.module_path.clone())
     };
 
-    let (name, _) = remote::parse_crate_spec(spec);
+    let (name, _) = remote::parse_crate_spec(actual_spec);
     if args.global.verbose {
         eprintln!("[cargo-brief] Resolving workspace for '{name}'...");
     }
     let (workspace, resolved_version) =
-        remote::resolve_workspace(spec, args.remote.features.as_deref(), args.remote.no_cache)
+        remote::resolve_workspace(actual_spec, remote.features.as_deref(), remote.no_cache)
             .with_context(|| format!("Failed to create workspace for '{name}'"))?;
 
     let manifest_path = workspace
@@ -727,7 +706,7 @@ fn build_remote_context_summary(args: &SummaryArgs, spec: &str) -> Result<Pipeli
         &name,
         resolved_version.as_deref(),
         workspace.path(),
-        args.remote.features.as_deref(),
+        remote.features.as_deref(),
     );
 
     let available_packages = rustdoc_json::load_lockfile_packages(Some(&manifest_path));

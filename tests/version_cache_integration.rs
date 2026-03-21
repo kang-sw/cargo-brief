@@ -3,24 +3,18 @@
 //! All tests are `#[ignore]` because they require network access to crates.io.
 //! Run with: `cargo test --test version_cache_integration -- --ignored`
 
-use cargo_brief::cli::{ApiArgs, FilterArgs, GlobalArgs, RemoteArgs, TargetArgs};
+use cargo_brief::cli::{ApiArgs, FilterArgs, GlobalArgs, RemoteOpts, TargetArgs};
 use cargo_brief::remote::{clean_cache, fetch_resolved_version, resolve_workspace};
 use cargo_brief::run_api_pipeline;
 
-fn remote_args(spec: &str) -> ApiArgs {
-    ApiArgs {
+fn remote_args(spec: &str) -> (ApiArgs, RemoteOpts) {
+    let args = ApiArgs {
         target: TargetArgs {
-            crate_name: "self".to_string(),
+            crate_name: spec.to_string(),
             module_path: None,
             at_package: None,
             at_mod: None,
             manifest_path: None,
-        },
-        remote: RemoteArgs {
-            crates: Some(spec.to_string()),
-            features: None,
-            no_cache: false,
-            clean: None,
         },
         filter: FilterArgs {
             no_structs: false,
@@ -45,7 +39,13 @@ fn remote_args(spec: &str) -> ApiArgs {
         depth: 1,
         recursive: true,
         expand_glob: false,
-    }
+    };
+    let remote = RemoteOpts {
+        crates: true,
+        features: None,
+        no_cache: false,
+    };
+    (args, remote)
 }
 
 /// Save and restore CARGO_BRIEF_CACHE_DIR around a closure that receives the temp path.
@@ -185,9 +185,9 @@ fn clean_cache_removes_matching_dirs() {
 #[ignore = "network: requires crates.io API access + nightly toolchain"]
 fn full_pipeline_header_shows_version() {
     with_temp_cache(|_cache_path| {
-        let mut args = remote_args("serde");
+        let (mut args, remote) = remote_args("serde");
         args.filter.compact = true;
-        let output = run_api_pipeline(&args).expect("serde pipeline should succeed");
+        let output = run_api_pipeline(&args, &remote).expect("serde pipeline should succeed");
         // Header should contain version: "// crate serde[1.0.xxx]"
         assert!(
             output.starts_with("// crate serde[1.0."),

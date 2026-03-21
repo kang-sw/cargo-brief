@@ -160,19 +160,15 @@ alternatives considered, and trade-offs — focus on _why_ this approach was cho
 
 ## Recent Work
 
-- v0.5.2+: Canonical reexport paths (Phase 1+2) — Phase 1: `ReachableInfo` struct, `walk_public` dual-path tracking, glob-private module inlining. Phase 2: `CrossCrateIndex` in `cross_crate.rs` with `AccessibleEntry` items. `build_cross_crate_index()` walks facade root top-down tracking accessible paths through glob/named re-exports. Dedup keeps shortest non-prelude path. All three pipelines use the index. `search_cross_crate_index()` in search.rs, `render_cross_crate_api()` with `VirtualNode` tree in render.rs, `summarize_cross_crate_index()` in summary.rs. 156 integration tests.
-- v0.5.2+: Batch rustdoc JSON pre-warming — `pre_warm_cross_crate_json()` in `lib.rs` uses `cargo doc` + `RUSTDOCFLAGS` to batch-generate JSON for cross-crate deps. `LockfilePackages` struct (replaces `HashSet<String>`) tracks multi-version crates, `resolve_spec()` returns `name@latest_version` for disambiguation. `collect_external_crate_names()` in `cross_crate.rs`. `PipelineContext.available_packages: LockfilePackages`. `load_or_find_source_crate` resolves specs upfront. Auto-retry on "is ambiguous" errors picks highest semver. Recursive BFS (max depth 8). Local `use_cache` now based on workspace membership (non-member deps cached).
-- v0.5.1+: Search pattern DSL — glob wildcards (`*`/`?`), exclusion (`-term`), exact name match (`=term`). `parse_pattern()` + `glob_match()` + `token_matches()` in `src/search.rs`. No new CLI flags; operators embedded in tokens. 12 integration + 15 unit tests.
-- v0.5.1+: `summary` subcommand — compact module-level overview with item counts per kind. `src/summary.rs` with `render_summary()` + `merge_sub_crate_summary()`. Cross-crate facade support. 7 integration tests.
-- v0.5.1+: Recursive cross-crate glob expansion — `expand_glob_reexports()` follows nested `pub use crate::*` chains (max depth 8, cycle-safe). `try_generate_rustdoc_json()` handles underscore↔hyphen package name fallback. `source_models` is `Vec<CrateModel>` per source.
-- v0.5.1+: Unified local/remote pipelines — `PipelineContext` → shared `run_shared_api_pipeline()` / `run_shared_search_pipeline()` / `run_shared_summary_pipeline()`. Cross-crate discovery now automatic for local crates too.
+- v0.6.0: **CLI restructure (breaking)** — `--crates <SPEC>` replaced by `-C`/`--crates` boolean flag on `BriefDirect` (global). Crate spec moves to TARGET positional. `-F`/`--features` and `--no-cache` also global. `--clean [SPEC]` replaced by `clean` subcommand. `RemoteArgs` removed → `RemoteOpts` (plain struct, not clap-derived). All 4 pipeline functions take `remote: &RemoteOpts` as separate param. Search/examples `Cow` workarounds removed.
+- v0.5.2+: Canonical reexport paths, batch rustdoc pre-warming, search pattern DSL, summary subcommand, recursive cross-crate glob expansion, unified local/remote pipelines.
 
 ## Workspace Reference
 
 - Crate name: `cargo-brief` (binary: `cargo-brief`, lib: `cargo_brief`)
-- Entry: `src/lib.rs` → `run_api_pipeline()` + `run_search_pipeline()` + `run_examples_pipeline()` + `run_summary_pipeline()`, `src/main.rs` → subcommand dispatch
-- Pipeline: Both api/search build `PipelineContext` (local or remote), then call `run_shared_api_pipeline()` / `run_shared_search_pipeline()`
-- CLI types: `ApiArgs`, `SearchArgs`, `ExamplesArgs`, `SummaryArgs` + shared `TargetArgs`/`RemoteArgs`/`FilterArgs`/`GlobalArgs`
+- Entry: `src/lib.rs` → `run_api_pipeline(args, remote)` + `run_search_pipeline(args, remote)` + `run_examples_pipeline(args, remote)` + `run_summary_pipeline(args, remote)`, `src/main.rs` → `BriefDirect` parsing, `RemoteOpts` extraction, subcommand dispatch
+- Pipeline: All pipelines take `(args, &RemoteOpts)`. Build `PipelineContext` (local or remote), then call shared pipeline. Remote branching: `if remote.crates { ... spec from args.target.crate_name ... }`
+- CLI types: `ApiArgs`, `SearchArgs`, `ExamplesArgs`, `SummaryArgs`, `CleanArgs` + shared `TargetArgs`/`FilterArgs`/`GlobalArgs` + `RemoteOpts` (plain struct, not clap). `BriefDirect` has `-C`, `-F`, `--no-cache` as `global = true` flags.
 - Modules: `cli`, `cross_crate`, `examples`, `remote`, `resolve`, `rustdoc_json`, `model`, `render`, `search`, `summary`
 - Test fixture: `test_fixture/` (workspace with `glob-source`/`glob-inner` sub-crates for cross-crate glob chain testing)
 - Integration tests: `tests/integration.rs` (156 tests)

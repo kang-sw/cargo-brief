@@ -1,4 +1,4 @@
-use cargo_brief::cli::{ApiArgs, FilterArgs, GlobalArgs, RemoteArgs, TargetArgs};
+use cargo_brief::cli::{ApiArgs, FilterArgs, GlobalArgs, RemoteOpts, TargetArgs};
 use cargo_brief::run_api_pipeline;
 
 fn workspace_args(crate_name: &str) -> ApiArgs {
@@ -9,12 +9,6 @@ fn workspace_args(crate_name: &str) -> ApiArgs {
             at_package: None,
             at_mod: None,
             manifest_path: Some("test_workspace/Cargo.toml".to_string()),
-        },
-        remote: RemoteArgs {
-            crates: None,
-            features: None,
-            no_cache: false,
-            clean: None,
         },
         filter: FilterArgs {
             no_structs: false,
@@ -49,7 +43,7 @@ fn workspace_args(crate_name: &str) -> ApiArgs {
 #[test]
 fn core_lib_same_crate_shows_pub_items() {
     let args = workspace_args("core-lib");
-    let output = run_api_pipeline(&args).unwrap();
+    let output = run_api_pipeline(&args, &RemoteOpts::default()).unwrap();
 
     assert!(output.contains("pub struct Config"), "Config visible");
     assert!(output.contains("pub name: String"), "pub field visible");
@@ -68,7 +62,7 @@ fn core_lib_same_crate_shows_pub_items() {
 fn core_lib_same_crate_shows_pub_crate_items() {
     let mut args = workspace_args("core-lib");
     args.target.at_package = Some("core-lib".to_string());
-    let output = run_api_pipeline(&args).unwrap();
+    let output = run_api_pipeline(&args, &RemoteOpts::default()).unwrap();
 
     assert!(
         output.contains("pub(crate)") && output.contains("internal_id"),
@@ -96,7 +90,7 @@ fn core_lib_same_crate_shows_pub_crate_items() {
 fn core_lib_external_view_shows_pub_items() {
     let mut args = workspace_args("core-lib");
     args.target.at_package = Some("app".to_string());
-    let output = run_api_pipeline(&args).unwrap();
+    let output = run_api_pipeline(&args, &RemoteOpts::default()).unwrap();
 
     assert!(
         output.contains("pub struct Config"),
@@ -125,7 +119,7 @@ fn core_lib_external_view_shows_pub_items() {
 fn core_lib_external_view_hides_pub_crate_items() {
     let mut args = workspace_args("core-lib");
     args.target.at_package = Some("app".to_string());
-    let output = run_api_pipeline(&args).unwrap();
+    let output = run_api_pipeline(&args, &RemoteOpts::default()).unwrap();
 
     assert!(
         !output.contains("internal_id"),
@@ -150,7 +144,7 @@ fn core_lib_external_view_hides_pub_crate_items() {
 fn core_lib_external_view_hides_crate_method() {
     let mut args = workspace_args("core-lib");
     args.target.at_package = Some("app".to_string());
-    let output = run_api_pipeline(&args).unwrap();
+    let output = run_api_pipeline(&args, &RemoteOpts::default()).unwrap();
 
     assert!(
         !output.contains("get_internal_id"),
@@ -171,7 +165,7 @@ fn core_lib_external_view_hides_crate_method() {
 fn core_lib_external_view_struct_has_hidden_field_indicator() {
     let mut args = workspace_args("core-lib");
     args.target.at_package = Some("app".to_string());
-    let output = run_api_pipeline(&args).unwrap();
+    let output = run_api_pipeline(&args, &RemoteOpts::default()).unwrap();
 
     // Config has pub name, but internal_id (pub(crate)) and secret (private) are hidden
     // Should show { .. } or "private fields" indicator
@@ -199,7 +193,7 @@ fn core_lib_utils_same_crate_shows_all_visible() {
     let mut args = workspace_args("core-lib");
     args.target.module_path = Some("utils".to_string());
     args.target.at_package = Some("core-lib".to_string());
-    let output = run_api_pipeline(&args).unwrap();
+    let output = run_api_pipeline(&args, &RemoteOpts::default()).unwrap();
 
     assert!(
         output.contains("pub fn format_name("),
@@ -221,7 +215,7 @@ fn core_lib_utils_external_hides_crate_items() {
     let mut args = workspace_args("core-lib");
     args.target.module_path = Some("utils".to_string());
     args.target.at_package = Some("app".to_string());
-    let output = run_api_pipeline(&args).unwrap();
+    let output = run_api_pipeline(&args, &RemoteOpts::default()).unwrap();
 
     assert!(
         output.contains("pub fn format_name("),
@@ -252,7 +246,7 @@ fn core_lib_utils_external_hides_crate_items() {
 #[test]
 fn core_lib_reexport_visible_at_root() {
     let args = workspace_args("core-lib");
-    let output = run_api_pipeline(&args).unwrap();
+    let output = run_api_pipeline(&args, &RemoteOpts::default()).unwrap();
 
     assert!(
         output.contains("pub use") && output.contains("format_name"),
@@ -268,7 +262,7 @@ fn core_lib_reexport_visible_at_root() {
 fn app_same_crate_view() {
     let mut args = workspace_args("app");
     args.target.at_package = Some("app".to_string());
-    let output = run_api_pipeline(&args).unwrap();
+    let output = run_api_pipeline(&args, &RemoteOpts::default()).unwrap();
 
     assert!(output.contains("pub struct App"), "App struct visible");
     assert!(output.contains("pub fn new()"), "pub method visible");
@@ -285,7 +279,7 @@ fn app_same_crate_view() {
 fn app_external_view() {
     let mut args = workspace_args("app");
     args.target.at_package = Some("core-lib".to_string());
-    let output = run_api_pipeline(&args).unwrap();
+    let output = run_api_pipeline(&args, &RemoteOpts::default()).unwrap();
 
     assert!(
         output.contains("pub struct App"),
@@ -309,7 +303,7 @@ fn app_external_view() {
 fn core_lib_target_utils_module_directly() {
     let mut args = workspace_args("core-lib");
     args.target.module_path = Some("utils".to_string());
-    let output = run_api_pipeline(&args).unwrap();
+    let output = run_api_pipeline(&args, &RemoteOpts::default()).unwrap();
 
     // Should show utils module contents
     assert!(
@@ -333,7 +327,7 @@ fn core_lib_depth_zero_collapses_modules() {
     let mut args = workspace_args("core-lib");
     args.recursive = false;
     args.depth = 0;
-    let output = run_api_pipeline(&args).unwrap();
+    let output = run_api_pipeline(&args, &RemoteOpts::default()).unwrap();
 
     // utils module should be collapsed
     assert!(
@@ -357,7 +351,7 @@ fn core_lib_depth_one_shows_utils_contents() {
     let mut args = workspace_args("core-lib");
     args.recursive = false;
     args.depth = 1;
-    let output = run_api_pipeline(&args).unwrap();
+    let output = run_api_pipeline(&args, &RemoteOpts::default()).unwrap();
 
     // Root items visible
     assert!(output.contains("pub struct Config"), "Config at depth 1");
@@ -375,7 +369,7 @@ fn core_lib_depth_one_shows_utils_contents() {
 #[test]
 fn core_lib_has_correct_crate_header() {
     let args = workspace_args("core-lib");
-    let output = run_api_pipeline(&args).unwrap();
+    let output = run_api_pipeline(&args, &RemoteOpts::default()).unwrap();
 
     assert!(
         output.starts_with("// crate core_lib\n"),
@@ -387,7 +381,7 @@ fn core_lib_has_correct_crate_header() {
 #[test]
 fn app_has_correct_crate_header() {
     let args = workspace_args("app");
-    let output = run_api_pipeline(&args).unwrap();
+    let output = run_api_pipeline(&args, &RemoteOpts::default()).unwrap();
 
     assert!(
         output.starts_with("// crate app\n"),
@@ -403,7 +397,7 @@ fn app_has_correct_crate_header() {
 #[test]
 fn core_lib_versioned_specifier() {
     let args = workspace_args("core-lib@0.1.0");
-    let output = run_api_pipeline(&args).unwrap();
+    let output = run_api_pipeline(&args, &RemoteOpts::default()).unwrap();
 
     assert!(
         output.starts_with("// crate core_lib\n"),
@@ -423,7 +417,7 @@ fn core_lib_versioned_specifier() {
 #[test]
 fn core_lib_trait_impl_rendered() {
     let args = workspace_args("core-lib");
-    let output = run_api_pipeline(&args).unwrap();
+    let output = run_api_pipeline(&args, &RemoteOpts::default()).unwrap();
 
     assert!(
         output.contains("impl Processor for Config"),
@@ -439,7 +433,7 @@ fn core_lib_trait_impl_rendered() {
 fn core_lib_enum_in_utils() {
     let mut args = workspace_args("core-lib");
     args.target.module_path = Some("utils".to_string());
-    let output = run_api_pipeline(&args).unwrap();
+    let output = run_api_pipeline(&args, &RemoteOpts::default()).unwrap();
 
     assert!(output.contains("pub enum LogLevel"), "LogLevel enum");
     assert!(output.contains("Debug,"), "Debug variant");
@@ -455,7 +449,7 @@ fn core_lib_enum_in_utils() {
 #[test]
 fn core_lib_doc_comments_preserved() {
     let args = workspace_args("core-lib");
-    let output = run_api_pipeline(&args).unwrap();
+    let output = run_api_pipeline(&args, &RemoteOpts::default()).unwrap();
 
     assert!(
         output.contains("/// Configuration for the system."),

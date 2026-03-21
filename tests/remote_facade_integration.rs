@@ -1,27 +1,21 @@
-//! Regression tests for facade crate rendering via `--crates`.
+//! Regression tests for facade crate rendering via `-C`.
 //!
 //! Uses `hecs@0.11.0` as a pinned facade crate fixture. hecs defines types in
 //! private modules and re-exports them at root via `pub use`.
 //!
 //! All tests require network access. Run with: `cargo test -- --ignored`
 
-use cargo_brief::cli::{ApiArgs, FilterArgs, GlobalArgs, RemoteArgs, SearchArgs, TargetArgs};
+use cargo_brief::cli::{ApiArgs, FilterArgs, GlobalArgs, RemoteOpts, SearchArgs, TargetArgs};
 use cargo_brief::{run_api_pipeline, run_search_pipeline};
 
-fn hecs_args() -> ApiArgs {
-    ApiArgs {
+fn hecs_args() -> (ApiArgs, RemoteOpts) {
+    let args = ApiArgs {
         target: TargetArgs {
-            crate_name: "self".to_string(),
+            crate_name: "hecs@0.11.0".to_string(),
             module_path: None,
             at_package: None,
             at_mod: None,
             manifest_path: None,
-        },
-        remote: RemoteArgs {
-            crates: Some("hecs@0.11.0".to_string()),
-            features: None,
-            no_cache: false,
-            clean: None,
         },
         filter: FilterArgs {
             no_structs: false,
@@ -46,13 +40,20 @@ fn hecs_args() -> ApiArgs {
         depth: 1,
         recursive: true,
         expand_glob: false,
-    }
+    };
+    let remote = RemoteOpts {
+        crates: true,
+        features: None,
+        no_cache: false,
+    };
+    (args, remote)
 }
 
 #[test]
 #[ignore = "network"]
 fn hecs_private_modules_with_reachable_items() {
-    let output = run_api_pipeline(&hecs_args()).unwrap();
+    let (args, remote) = hecs_args();
+    let output = run_api_pipeline(&args, &remote).unwrap();
 
     // Private modules are rendered because they contain reachable items
     assert!(
@@ -72,7 +73,8 @@ fn hecs_private_modules_with_reachable_items() {
 #[test]
 #[ignore = "network"]
 fn hecs_reachable_types_inside_modules() {
-    let output = run_api_pipeline(&hecs_args()).unwrap();
+    let (args, remote) = hecs_args();
+    let output = run_api_pipeline(&args, &remote).unwrap();
 
     assert!(
         output.contains("pub struct Archetype"),
@@ -91,7 +93,8 @@ fn hecs_reachable_types_inside_modules() {
 #[test]
 #[ignore = "network"]
 fn hecs_no_pub_crate_items() {
-    let output = run_api_pipeline(&hecs_args()).unwrap();
+    let (args, remote) = hecs_args();
+    let output = run_api_pipeline(&args, &remote).unwrap();
 
     assert!(
         !output.contains("pub(crate)"),
@@ -102,7 +105,8 @@ fn hecs_no_pub_crate_items() {
 #[test]
 #[ignore = "network"]
 fn hecs_pub_use_at_root() {
-    let output = run_api_pipeline(&hecs_args()).unwrap();
+    let (args, remote) = hecs_args();
+    let output = run_api_pipeline(&args, &remote).unwrap();
 
     assert!(
         output.contains("pub use"),
@@ -113,7 +117,8 @@ fn hecs_pub_use_at_root() {
 #[test]
 #[ignore = "network"]
 fn hecs_nontrivial_output() {
-    let output = run_api_pipeline(&hecs_args()).unwrap();
+    let (args, remote) = hecs_args();
+    let output = run_api_pipeline(&args, &remote).unwrap();
 
     let line_count = output.lines().count();
     assert!(
@@ -126,14 +131,8 @@ fn hecs_nontrivial_output() {
 #[ignore = "network"]
 fn hecs_search_no_pub_crate() {
     let args = SearchArgs {
-        crate_name: "self".to_string(),
+        crate_name: "hecs@0.11.0".to_string(),
         patterns: vec!["Archetype".to_string()],
-        remote: RemoteArgs {
-            crates: Some("hecs@0.11.0".to_string()),
-            features: None,
-            no_cache: false,
-            clean: None,
-        },
         filter: FilterArgs {
             no_structs: false,
             no_enums: false,
@@ -161,7 +160,12 @@ fn hecs_search_no_pub_crate() {
         methods_of: None,
         search_kind: None,
     };
-    let output = run_search_pipeline(&args).unwrap();
+    let remote = RemoteOpts {
+        crates: true,
+        features: None,
+        no_cache: false,
+    };
+    let output = run_search_pipeline(&args, &remote).unwrap();
 
     assert!(output.contains("Archetype"), "search should find Archetype");
     assert!(

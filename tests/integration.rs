@@ -1,5 +1,5 @@
 use cargo_brief::cli::{
-    ApiArgs, ExamplesArgs, FilterArgs, GlobalArgs, RemoteArgs, SummaryArgs, TargetArgs,
+    ApiArgs, ExamplesArgs, FilterArgs, GlobalArgs, RemoteOpts, SummaryArgs, TargetArgs,
 };
 use cargo_brief::model::{CrateModel, compute_reachable_set};
 use cargo_brief::render::render_module_api;
@@ -57,12 +57,6 @@ fn default_args() -> ApiArgs {
             at_package: None,
             at_mod: None,
             manifest_path: Some("test_fixture/Cargo.toml".to_string()),
-        },
-        remote: RemoteArgs {
-            crates: None,
-            features: None,
-            no_cache: false,
-            clean: None,
         },
         filter: default_filter(),
         global: GlobalArgs {
@@ -2030,12 +2024,6 @@ fn default_examples_args() -> ExamplesArgs {
     ExamplesArgs {
         crate_name: "test-fixture".to_string(),
         patterns: vec![],
-        remote: RemoteArgs {
-            crates: None,
-            features: None,
-            no_cache: false,
-            clean: None,
-        },
         global: GlobalArgs {
             toolchain: "nightly".to_string(),
             verbose: false,
@@ -2050,7 +2038,7 @@ fn default_examples_args() -> ExamplesArgs {
 #[test]
 fn test_examples_list_mode() {
     let args = default_examples_args();
-    let output = cargo_brief::run_examples_pipeline(&args).unwrap();
+    let output = cargo_brief::run_examples_pipeline(&args, &RemoteOpts::default()).unwrap();
     assert!(
         output.contains("@examples/example_usage.rs"),
         "Should list the example file:\n{output}"
@@ -2073,7 +2061,7 @@ fn test_examples_list_mode() {
 fn test_examples_grep_mode() {
     let mut args = default_examples_args();
     args.patterns = vec!["PubStruct".to_string()];
-    let output = cargo_brief::run_examples_pipeline(&args).unwrap();
+    let output = cargo_brief::run_examples_pipeline(&args, &RemoteOpts::default()).unwrap();
     assert!(
         output.contains("@examples/example_usage.rs"),
         "Should show file with matches:\n{output}"
@@ -2092,7 +2080,7 @@ fn test_examples_grep_mode() {
 fn test_examples_grep_no_match() {
     let mut args = default_examples_args();
     args.patterns = vec!["nonexistent_xyzzy_pattern".to_string()];
-    let output = cargo_brief::run_examples_pipeline(&args).unwrap();
+    let output = cargo_brief::run_examples_pipeline(&args, &RemoteOpts::default()).unwrap();
     assert!(
         output.contains("no matches"),
         "Should indicate no matches:\n{output}"
@@ -2104,7 +2092,7 @@ fn test_examples_grep_context_format() {
     let mut args = default_examples_args();
     args.patterns = vec!["pub_method".to_string()];
     args.context = "1:1".to_string();
-    let output = cargo_brief::run_examples_pipeline(&args).unwrap();
+    let output = cargo_brief::run_examples_pipeline(&args, &RemoteOpts::default()).unwrap();
     // Should have the match line with * and context lines with space
     assert!(
         output.contains('*'),
@@ -2122,7 +2110,7 @@ fn test_examples_smart_case() {
     let mut args = default_examples_args();
     // Lowercase pattern → case-insensitive
     args.patterns = vec!["pubstruct".to_string()];
-    let output = cargo_brief::run_examples_pipeline(&args).unwrap();
+    let output = cargo_brief::run_examples_pipeline(&args, &RemoteOpts::default()).unwrap();
     assert!(
         output.contains("PubStruct"),
         "Lowercase pattern should match case-insensitively:\n{output}"
@@ -2130,7 +2118,7 @@ fn test_examples_smart_case() {
 
     // Uppercase pattern → case-sensitive
     args.patterns = vec!["PUBSTRUCT".to_string()];
-    let output = cargo_brief::run_examples_pipeline(&args).unwrap();
+    let output = cargo_brief::run_examples_pipeline(&args, &RemoteOpts::default()).unwrap();
     assert!(
         output.contains("no matches"),
         "Uppercase pattern should not match:\n{output}"
@@ -2145,7 +2133,7 @@ fn test_examples_smart_case() {
 fn test_cross_crate_glob_phase1() {
     let mut args = default_args();
     args.expand_glob = false;
-    let output = cargo_brief::run_api_pipeline(&args).unwrap();
+    let output = cargo_brief::run_api_pipeline(&args, &RemoteOpts::default()).unwrap();
 
     // GlobSourceItem is a direct item in glob-source
     assert!(
@@ -2170,7 +2158,7 @@ fn test_cross_crate_glob_phase1() {
 fn test_cross_crate_glob_phase2() {
     let mut args = default_args();
     args.expand_glob = true;
-    let output = cargo_brief::run_api_pipeline(&args).unwrap();
+    let output = cargo_brief::run_api_pipeline(&args, &RemoteOpts::default()).unwrap();
 
     // Full struct definition from glob-inner (2 levels deep)
     assert!(
@@ -2386,18 +2374,12 @@ fn test_summary_pipeline() {
             at_mod: None,
             manifest_path: Some("test_fixture/Cargo.toml".to_string()),
         },
-        remote: RemoteArgs {
-            crates: None,
-            features: None,
-            no_cache: false,
-            clean: None,
-        },
         global: GlobalArgs {
             toolchain: "nightly".to_string(),
             verbose: false,
         },
     };
-    let output = cargo_brief::run_summary_pipeline(&args).unwrap();
+    let output = cargo_brief::run_summary_pipeline(&args, &RemoteOpts::default()).unwrap();
     assert!(
         output.contains("// crate test_fixture"),
         "pipeline should produce summary with crate header:\n{output}"
@@ -2902,7 +2884,7 @@ fn test_cross_crate_search_accessible_paths() {
 fn test_cross_crate_api_virtual_tree() {
     let mut args = default_args();
     args.recursive = true;
-    let output = cargo_brief::run_api_pipeline(&args).unwrap();
+    let output = cargo_brief::run_api_pipeline(&args, &RemoteOpts::default()).unwrap();
 
     // Should have the inner_alias module as a virtual tree
     assert!(
