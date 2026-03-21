@@ -2,6 +2,14 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.5.3] - 2026-03-21
+
+### Fixed
+
+- **Multi-version crate disambiguation**: Workspaces with multiple versions of the same crate (e.g., bevy pulling in `hashbrown` 0.15+0.16, `foldhash` 0.1+0.2) no longer fail with "specification is ambiguous" during batch pre-warming or cross-crate index building. `LockfilePackages` tracks all versions from `Cargo.lock` and resolves to `name@latest_version` when multiple exist.
+- **Cross-crate index version resolution**: `load_or_find_source_crate` now resolves version-qualified specs upfront via `LockfilePackages::resolve_spec()`, preventing ambiguity errors for crates discovered during deep module walks (not found by pre-warming BFS).
+- **Non-workspace dependency caching**: Local context builders (`cargo brief search bevy` from a game project) now cache rustdoc JSON for non-workspace-member targets instead of re-running `cargo rustdoc` on every invocation. Only workspace members (whose source may change) are always regenerated.
+
 ## [0.5.2] - 2026-03-21
 
 ### Added
