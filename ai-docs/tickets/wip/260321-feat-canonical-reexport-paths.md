@@ -178,8 +178,9 @@ Deviations from plan:
   existing indices remain stable.
 - `AccessibleItemKind::Use` variant dropped — not needed since Use items are
   either resolved to their target kind or represent module-level structure.
-- Existing `discover_all_reexported_crates()` and `SubCrate` retained for targeted
-  module resolution (`cargo brief api bevy ecs`).
+- `discover_all_reexported_crates()`, `SubCrate`, and `resolve_single_reexport()`
+  removed as dead code (no callers after Phase 2). Targeted module resolution
+  uses `resolve_cross_crate_module()` + `CrossCrateResolution` (kept).
 
 Test fixture: Added `pub use glob_inner as inner_alias;` to glob-source for rename
 testing. 7 new integration tests, 156 total (was 149).

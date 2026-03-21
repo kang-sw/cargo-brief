@@ -3,11 +3,11 @@
 ## Entry Points
 - `src/lib.rs` — `build_remote_context_api()` / `build_remote_context_search()` produce a `PipelineContext`; `run_shared_api_pipeline()` / `run_shared_search_pipeline()` consume it and are shared with the local path.
 - `src/remote.rs` — `parse_crate_spec()`, `resolve_workspace()`, `clean_cache()`, `WorkspaceDir`.
-- `src/cross_crate.rs` — `resolve_cross_crate_module()`, `discover_all_reexported_crates()`, `root_has_cross_crate_reexports()`.
+- `src/cross_crate.rs` — `resolve_cross_crate_module()`, `build_cross_crate_index()`, `root_has_cross_crate_reexports()`.
 
 ## Module Contracts
 - `build_remote_context_api()` / `build_remote_context_search()` guarantee: `WorkspaceDir` is stored in `PipelineContext._workspace` to keep it alive for the entire pipeline. Manifest path is an owned `String` — no borrow chain. `PipelineContext.use_cache = true` for all remote contexts. `PipelineContext.available_packages` is populated from Cargo.lock at context-build time via `rustdoc_json::load_lockfile_packages()` — empty if Cargo.lock is absent.
-- `pre_warm_cross_crate_json()` runs before `discover_all_reexported_crates()` / `expand_glob_reexports()` in all three shared pipelines (api/search/summary) when `root_has_cross_crate_reexports` is true. It performs a recursive BFS (max 8 levels) using `batch_generate_rustdoc_json()`, which issues a single `cargo doc -p a -p b ...` invocation per batch level instead of sequential `cargo rustdoc` calls. Failures are silently suppressed; individual generation in `cross_crate.rs` remains as fallback.
+- `pre_warm_cross_crate_json()` runs before `build_cross_crate_index()` / `expand_glob_reexports()` in all three shared pipelines (api/search/summary) when `root_has_cross_crate_reexports` is true. It performs a recursive BFS (max 8 levels) using `batch_generate_rustdoc_json()`, which issues a single `cargo doc -p a -p b ...` invocation per batch level instead of sequential `cargo rustdoc` calls. Failures are silently suppressed; individual generation in `cross_crate.rs` remains as fallback.
 - Both remote and local pipelines go through the same `run_shared_api_pipeline()` with three mutually exclusive sub-paths evaluated in order: (1) module-target+cross-crate, (2) recursive+cross-crate, (3) normal. Cross-crate discovery now also runs for local crates that have cross-crate re-exports.
 - `generate_rustdoc_json(..., use_cache=true)` skips `cargo rustdoc` if the `.json` file already exists in `target/doc/`. Only pass `use_cache=true` for remote pipelines where versions are locked — passing it for local workspace members skips regeneration after source changes.
 - `run_examples_pipeline` remote path does not call `generate_rustdoc_json` at all — it uses `resolve::find_dep_source_root` to locate the crate source dir on disk, then reads `.rs` files directly. No model is built.
@@ -27,7 +27,7 @@
 ## Extension Points & Change Recipes
 - **Add feature flag support**: Modify `write_workspace_files()` in `remote.rs` to include `features = [...]` in the generated Cargo.toml. Add `--features` flag to `BriefArgs` (already present — wire it through if not already).
 - **Add cache invalidation**: The normalized cache dir (`name[version]`) is already version-pinned — changing the spec produces a new directory. Feature flag changes also produce a new directory (features are encoded in the dir name). No content comparison is needed.
-- **Increase cross-crate hop depth**: Change the `for _ in 0..5` loop limit in `follow_use_chain()` and `resolve_single_reexport()` in `cross_crate.rs`.
+- **Increase cross-crate hop depth**: Change the `for _ in 0..5` loop limit in `follow_use_chain()` in `cross_crate.rs`.
 
 ## Common Mistakes
 - No timeout on `cargo rustdoc` subprocess. Large crates (e.g., `bevy`) can hang for minutes on first build. User must Ctrl-C manually.
