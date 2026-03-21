@@ -1,8 +1,57 @@
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
 use anyhow::{Context, Result, bail};
+
+/// Package names and versions from Cargo.lock.
+///
+/// Tracks all package names for validation, plus version lists for
+/// disambiguating multi-version crates.
+pub struct LockfilePackages {
+    names: HashSet<String>,
+    /// name -> sorted versions (ascending semver). Only populated when 2+ versions exist.
+    multi_versions: HashMap<String, Vec<String>>,
+}
+
+impl LockfilePackages {
+    pub fn contains(&self, name: &str) -> bool {
+        self.names.contains(name)
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.names.is_empty()
+    }
+
+    /// Resolve a crate name to its cargo spec.
+    ///
+    /// Returns `Some("name@latest")` if multiple versions exist,
+    /// `Some("name")` if single version, `None` if not found.
+    /// Tries underscore->hyphen fallback internally.
+    pub fn resolve_spec(&self, name: &str) -> Option<String> {
+        if let Some(spec) = self.resolve_spec_exact(name) {
+            return Some(spec);
+        }
+        let hyphenated = name.replace('_', "-");
+        if hyphenated != name {
+            return self.resolve_spec_exact(&hyphenated);
+        }
+        None
+    }
+
+    fn resolve_spec_exact(&self, name: &str) -> Option<String> {
+        if !self.names.contains(name) {
+            return None;
+        }
+        if let Some(versions) = self.multi_versions.get(name) {
+            // versions are pre-sorted ascending by semver — last is highest
+            let highest = versions.last().unwrap();
+            Some(format!("{name}@{highest}"))
+        } else {
+            Some(name.to_string())
+        }
+    }
+}
 
 /// Invoke `cargo +nightly rustdoc` and return the path to the generated JSON file.
 ///
@@ -73,34 +122,38 @@ pub fn generate_rustdoc_json(
                 );
             }
             if stderr.contains("is ambiguous") {
-                let specs: Vec<&str> = stderr
-                    .lines()
-                    .filter_map(|l| {
-                        let trimmed = l.trim();
-                        if trimmed.contains('@') && !trimmed.contains(' ') {
-                            Some(trimmed)
-                        } else {
-                            None
-                        }
-                    })
-                    .collect();
+                // Auto-retry: parse candidate specs, pick highest version
+                if !crate_name.contains('@') {
+                    let specs: Vec<&str> = stderr
+                        .lines()
+                        .filter_map(|l| {
+                            let trimmed = l.trim();
+                            if trimmed.contains('@') && !trimmed.contains(' ') {
+                                Some(trimmed)
+                            } else {
+                                None
+                            }
+                        })
+                        .collect();
 
-                let suggestion = if specs.is_empty() {
-                    format!(
-                        "Multiple versions of '{crate_name}' exist. \
-                         Use `<name>@<version>` to disambiguate (e.g. `{crate_name}@1.0.0`)."
-                    )
-                } else {
-                    format!(
-                        "Multiple versions of '{crate_name}' exist. \
-                         Specify one of:\n  {}\n\
-                         Example: cargo brief {}",
-                        specs.join("\n  "),
-                        specs[0],
-                    )
-                };
+                    if let Some(best) = pick_highest_version_spec(&specs) {
+                        return generate_rustdoc_json(
+                            best,
+                            toolchain,
+                            manifest_path,
+                            document_private_items,
+                            target_dir,
+                            verbose,
+                            use_cache,
+                        );
+                    }
+                }
 
-                bail!("{suggestion}");
+                // Fallback: bail with user-facing message
+                bail!(
+                    "Multiple versions of '{crate_name}' exist and auto-resolution failed. \
+                     Use `<name>@<version>` to disambiguate (e.g. `{crate_name}@1.0.0`)."
+                );
             }
             if stderr.contains("did not match any packages")
                 || stderr.contains("package(s) `")
@@ -171,11 +224,12 @@ pub fn parse_rustdoc_json(path: &Path) -> Result<rustdoc_types::Crate> {
     Ok(krate)
 }
 
-/// Parse Cargo.lock to extract all resolved package names.
+/// Parse Cargo.lock to extract all resolved package names and versions.
 ///
-/// Returns a set of hyphenated package names (as they appear in Cargo.lock).
-/// Returns an empty set on any error (missing file, malformed content).
-pub fn load_lockfile_packages(manifest_path: Option<&str>) -> HashSet<String> {
+/// Returns a `LockfilePackages` with hyphenated package names (as they appear
+/// in Cargo.lock) and multi-version tracking for disambiguation.
+/// Returns an empty struct on any error (missing file, malformed content).
+pub fn load_lockfile_packages(manifest_path: Option<&str>) -> LockfilePackages {
     let lockfile_path = if let Some(manifest) = manifest_path {
         Path::new(manifest)
             .parent()
@@ -187,32 +241,67 @@ pub fn load_lockfile_packages(manifest_path: Option<&str>) -> HashSet<String> {
 
     let content = match std::fs::read_to_string(&lockfile_path) {
         Ok(c) => c,
-        Err(_) => return HashSet::new(),
+        Err(_) => {
+            return LockfilePackages {
+                names: HashSet::new(),
+                multi_versions: HashMap::new(),
+            };
+        }
     };
 
-    let mut packages = HashSet::new();
-    let mut in_package = false;
+    let mut names = HashSet::new();
+    let mut all_versions: HashMap<String, Vec<String>> = HashMap::new();
+    let mut current_name: Option<String> = None;
 
     for line in content.lines() {
         let trimmed = line.trim();
         if trimmed == "[[package]]" {
-            in_package = true;
+            current_name = None;
             continue;
         }
-        if in_package && trimmed.starts_with("name = \"") {
-            if let Some(name) = trimmed
+        if trimmed.starts_with("name = \"") {
+            current_name = trimmed
                 .strip_prefix("name = \"")
                 .and_then(|s| s.strip_suffix('"'))
-            {
-                packages.insert(name.to_string());
+                .map(|s| s.to_string());
+            if let Some(ref name) = current_name {
+                names.insert(name.clone());
             }
-            in_package = false;
+        } else if trimmed.starts_with("version = \"")
+            && let Some(ref name) = current_name
+            && let Some(ver) = trimmed
+                .strip_prefix("version = \"")
+                .and_then(|s| s.strip_suffix('"'))
+        {
+            all_versions
+                .entry(name.clone())
+                .or_default()
+                .push(ver.to_string());
         } else if trimmed.starts_with('[') {
-            in_package = false;
+            current_name = None;
         }
     }
 
-    packages
+    // Only retain entries with 2+ versions
+    let multi_versions: HashMap<String, Vec<String>> = all_versions
+        .into_iter()
+        .filter(|(_, v)| v.len() > 1)
+        .map(|(name, mut versions)| {
+            // Sort by semver ascending; fall back to string sort
+            versions.sort_by(
+                |a, b| match (semver::Version::parse(a), semver::Version::parse(b)) {
+                    (Ok(va), Ok(vb)) => va.cmp(&vb),
+                    _ => a.cmp(b),
+                },
+            );
+            (name, versions)
+        })
+        .collect();
+
+    LockfilePackages {
+        names,
+        multi_versions,
+    }
 }
 
 /// Batch-generate rustdoc JSON for multiple crates via single `cargo doc`.
@@ -230,7 +319,8 @@ pub fn batch_generate_rustdoc_json(
     let mut to_generate = Vec::new();
 
     for &name in crate_names {
-        let json_name = name.replace('-', "_");
+        let base = name.split('@').next().unwrap_or(name);
+        let json_name = base.replace('-', "_");
         let json_path = target_dir.join("doc").join(format!("{json_name}.json"));
         if json_path.exists() {
             succeeded.push(name.to_string());
@@ -292,7 +382,8 @@ pub fn batch_generate_rustdoc_json(
 
     // Check which JSONs got created
     for name in &to_generate {
-        let json_name = name.replace('-', "_");
+        let base = name.split('@').next().unwrap_or(name);
+        let json_name = base.replace('-', "_");
         let json_path = target_dir.join("doc").join(format!("{json_name}.json"));
         if json_path.exists() {
             succeeded.push(name.to_string());
@@ -302,4 +393,17 @@ pub fn batch_generate_rustdoc_json(
     }
 
     succeeded
+}
+
+/// Pick the spec with the highest semver version from a list like `["foo@1.0.0", "foo@2.0.0"]`.
+fn pick_highest_version_spec<'a>(specs: &[&'a str]) -> Option<&'a str> {
+    specs
+        .iter()
+        .filter_map(|&s| {
+            let ver_str = s.split_once('@')?.1;
+            let ver = semver::Version::parse(ver_str).ok()?;
+            Some((ver, s))
+        })
+        .max_by(|a, b| a.0.cmp(&b.0))
+        .map(|(_, s)| s)
 }

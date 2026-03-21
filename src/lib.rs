@@ -14,6 +14,7 @@ pub fn clean_cache(spec: &str) -> anyhow::Result<()> {
     remote::clean_cache(spec)
 }
 
+use rustdoc_json::LockfilePackages;
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
@@ -47,8 +48,8 @@ struct PipelineContext {
     /// Workspace member package names. Cross-crate expansion uses `use_cache: true`
     /// for crates NOT in this set (they're external deps, effectively immutable).
     workspace_members: HashSet<String>,
-    /// All resolved package names from Cargo.lock (for batch validation).
-    available_packages: HashSet<String>,
+    /// All resolved package names/versions from Cargo.lock (for batch validation + disambiguation).
+    available_packages: LockfilePackages,
     /// Pre-computed crate header with version + features (remote api only).
     crate_header: Option<String>,
     /// Holds the remote workspace alive (TempDir drops on scope exit).
@@ -822,7 +823,8 @@ fn pre_warm_cross_crate_json(model: &CrateModel, ctx: &PipelineContext) {
         // Parse this batch's crates to discover the next level
         let mut next_batch = Vec::new();
         for name in &batch {
-            let json_name = name.replace('-', "_");
+            let base = name.split('@').next().unwrap_or(name);
+            let json_name = base.replace('-', "_");
             let json_path = ctx.target_dir.join("doc").join(format!("{json_name}.json"));
             if !json_path.exists() {
                 continue;
@@ -848,20 +850,14 @@ fn pre_warm_cross_crate_json(model: &CrateModel, ctx: &PipelineContext) {
     }
 }
 
-/// Normalize a rustdoc crate name (underscores) to the Cargo.lock package name.
+/// Normalize a rustdoc crate name (underscores) to the Cargo.lock package spec.
 ///
 /// Rustdoc `use_item.source` gives Rust identifiers (e.g. `bevy_ecs`), but
 /// `cargo doc -p` expects Cargo package names (e.g. `bevy-ecs`). Returns the
-/// form that exists in Cargo.lock, or None if not found.
-fn normalize_to_lockfile_name(name: &str, available: &HashSet<String>) -> Option<String> {
-    if available.contains(name) {
-        return Some(name.to_string());
-    }
-    let hyphenated = name.replace('_', "-");
-    if available.contains(&hyphenated) {
-        return Some(hyphenated);
-    }
-    None
+/// spec that can be passed to cargo, with `@version` suffix when multiple
+/// versions exist. Returns None if not found.
+fn normalize_to_lockfile_name(name: &str, packages: &LockfilePackages) -> Option<String> {
+    packages.resolve_spec(name)
 }
 
 /// Build an enriched `// crate name[version] features = [...]` header for remote crates.

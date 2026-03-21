@@ -21,7 +21,7 @@ use std::path::Path;
 use rustdoc_types::{Id, Item, ItemEnum, Visibility};
 
 use crate::model::{CrateModel, ReachableInfo, compute_reachable_set};
-use crate::rustdoc_json;
+use crate::rustdoc_json::{self, LockfilePackages};
 
 /// An item accessible from the facade crate's public API, with its
 /// resolved accessible path and a pointer to its definition.
@@ -309,7 +309,7 @@ pub fn build_cross_crate_index(
     target_dir: &Path,
     verbose: bool,
     workspace_members: &HashSet<String>,
-    available_packages: &HashSet<String>,
+    available_packages: &LockfilePackages,
 ) -> CrossCrateIndex {
     let mut source_models: Vec<Box<(CrateModel, ReachableInfo)>> = Vec::new();
     let mut items: Vec<AccessibleEntry> = Vec::new();
@@ -366,7 +366,7 @@ struct WalkParams<'a> {
     verbose: bool,
     workspace_members: &'a HashSet<String>,
     /// Packages known from Cargo.lock — used to skip names that aren't real packages.
-    available_packages: &'a HashSet<String>,
+    available_packages: &'a LockfilePackages,
 }
 
 /// Recursive walk collecting accessible items with prefix tracking.
