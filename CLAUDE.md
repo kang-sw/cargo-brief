@@ -176,7 +176,7 @@ alternatives considered, and trade-offs — focus on _why_ this approach was cho
 - CLI types: `ApiArgs`, `SearchArgs`, `ExamplesArgs` + shared `TargetArgs`/`RemoteArgs`/`FilterArgs`/`GlobalArgs`
 - Modules: `cli`, `cross_crate`, `examples`, `remote`, `resolve`, `rustdoc_json`, `model`, `render`, `search`
 - Test fixture: `test_fixture/` (workspace with `glob-source`/`glob-inner` sub-crates for cross-crate glob chain testing)
-- Integration tests: `tests/integration.rs` (120 tests)
+- Integration tests: `tests/integration.rs` (122 tests)
 
 ## Documented Dependencies
 

@@ -109,6 +109,53 @@ pub fn render_search(
     same_crate: bool,
     reachable: Option<&HashSet<Id>>,
 ) -> String {
+    render_search_inner(
+        model,
+        pattern,
+        filter,
+        limit,
+        observer_module_path,
+        same_crate,
+        reachable,
+        None,
+    )
+}
+
+/// Like `render_search`, but with optional exact-parent filtering for `--methods-of`.
+/// When `methods_of` is Some, only items whose parent path segment exactly matches
+/// the type name are included.
+pub fn render_search_methods_of(
+    model: &CrateModel,
+    pattern: &str,
+    filter: &FilterArgs,
+    limit: Option<&str>,
+    observer_module_path: Option<&str>,
+    same_crate: bool,
+    reachable: Option<&HashSet<Id>>,
+    methods_of: &str,
+) -> String {
+    render_search_inner(
+        model,
+        pattern,
+        filter,
+        limit,
+        observer_module_path,
+        same_crate,
+        reachable,
+        Some(methods_of),
+    )
+}
+
+fn render_search_inner(
+    model: &CrateModel,
+    pattern: &str,
+    filter: &FilterArgs,
+    limit: Option<&str>,
+    observer_module_path: Option<&str>,
+    same_crate: bool,
+    reachable: Option<&HashSet<Id>>,
+    methods_of: Option<&str>,
+) -> String {
     let crate_name = model.crate_name();
     let observer = observer_module_path
         .map(|p| {
@@ -171,6 +218,13 @@ pub fn render_search(
                 .any(|group| group.iter().all(|tok| path.contains(tok.as_str())))
         })
         .collect();
+
+    // --methods-of: exact parent-type segment matching
+    if let Some(type_name) = methods_of {
+        let suffix = format!("::{type_name}::");
+        let prefix = format!("{type_name}::");
+        matched.retain(|leaf| leaf.path.contains(&suffix) || leaf.path.starts_with(&prefix));
+    }
 
     // Sort: primary by kind, secondary by path alphabetically
     matched.sort_by(|a, b| {

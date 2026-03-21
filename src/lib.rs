@@ -359,10 +359,12 @@ pub fn run_search_pipeline(args: &SearchArgs) -> Result<String> {
         anyhow::bail!("search requires a pattern or --methods-of <TYPE>");
     }
 
-    // --methods-of: translate into pattern + exclusion flags
-    if let Some(type_name) = &args.methods_of {
+    // --methods-of: translate into exclusion flags, keep methods_of for exact parent matching
+    if args.methods_of.is_some() {
         let mut args = args.clone();
-        args.patterns = vec![type_name.clone()];
+        if args.patterns.is_empty() {
+            args.patterns = vec![args.methods_of.as_ref().unwrap().clone()];
+        }
         args.filter.no_structs = true;
         args.filter.no_enums = true;
         args.filter.no_traits = true;
@@ -370,7 +372,7 @@ pub fn run_search_pipeline(args: &SearchArgs) -> Result<String> {
         args.filter.no_constants = true;
         args.filter.no_macros = true;
         args.filter.no_aliases = true;
-        args.methods_of = None;
+        // Leave methods_of set — run_shared_search_pipeline uses it for exact matching
         // Leave no_functions = false (methods are functions)
         return run_search_pipeline(&args);
     }
@@ -444,12 +446,38 @@ fn build_remote_context_search(args: &SearchArgs, spec: &str) -> Result<Pipeline
 fn run_shared_search_pipeline(ctx: &PipelineContext, args: &SearchArgs) -> Result<String> {
     let (model, same_crate, reachable) = generate_and_parse_model(ctx)?;
     let pattern = args.pattern();
+    let methods_of = args.methods_of.as_deref();
 
-    let mut output = search::render_search(
+    let search_fn = |model: &CrateModel,
+                     observer: Option<&str>,
+                     same_crate: bool,
+                     reachable: Option<&HashSet<Id>>| {
+        if let Some(type_name) = methods_of {
+            search::render_search_methods_of(
+                model,
+                &pattern,
+                &args.filter,
+                args.limit.as_deref(),
+                observer,
+                same_crate,
+                reachable,
+                type_name,
+            )
+        } else {
+            search::render_search(
+                model,
+                &pattern,
+                &args.filter,
+                args.limit.as_deref(),
+                observer,
+                same_crate,
+                reachable,
+            )
+        }
+    };
+
+    let mut output = search_fn(
         &model,
-        &pattern,
-        &args.filter,
-        args.limit.as_deref(),
         if same_crate {
             args.at_mod.as_deref()
         } else {
@@ -473,15 +501,11 @@ fn run_shared_search_pipeline(ctx: &PipelineContext, args: &SearchArgs) -> Resul
         );
         for sub in &sub_crates {
             let sub_reachable = Some(compute_reachable_set(&sub.model));
-            let sub_output = search::render_search(
-                &sub.model,
-                &pattern,
-                &args.filter,
-                args.limit.as_deref(),
-                None,
-                false,
-                sub_reachable.as_ref(),
-            );
+            let sub_output = search_fn(&sub.model, None, false, sub_reachable.as_ref());
+            // Suppress zero-result sub-crate headers unless verbose
+            if !ctx.verbose && sub_output.contains("(0 results)") {
+                continue;
+            }
             output.push_str(&sub_output);
         }
     }

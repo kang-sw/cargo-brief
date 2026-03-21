@@ -2117,3 +2117,60 @@ fn test_cross_crate_glob_search() {
         "search should find GlobSourceItem via cross-crate glob:\n{output}"
     );
 }
+
+// === --methods-of Exact Match Tests ===
+
+#[test]
+fn methods_of_exact_match_excludes_similar_names() {
+    let model = fixture_model();
+    let mut filter = default_filter();
+    filter.no_structs = true;
+    filter.no_enums = true;
+    filter.no_traits = true;
+    filter.no_unions = true;
+    filter.no_constants = true;
+    filter.no_macros = true;
+    filter.no_aliases = true;
+    // "Struct" would substring-match PubStruct, DerivedStruct, WhereStruct, etc.
+    // With exact parent matching, only items whose parent is exactly "Struct" should match.
+    // Since no type is named exactly "Struct", expect 0 results.
+    let output = search::render_search_methods_of(
+        &model, "Struct", &filter, None, None, true, None, "Struct",
+    );
+    assert!(
+        output.contains("(0 results)"),
+        "--methods-of Struct should not match PubStruct or DerivedStruct:\n{output}"
+    );
+}
+
+#[test]
+fn methods_of_exact_match_finds_correct_type() {
+    let model = fixture_model();
+    let mut filter = default_filter();
+    filter.no_structs = true;
+    filter.no_enums = true;
+    filter.no_traits = true;
+    filter.no_unions = true;
+    filter.no_constants = true;
+    filter.no_macros = true;
+    filter.no_aliases = true;
+    let output = search::render_search_methods_of(
+        &model,
+        "PubStruct",
+        &filter,
+        None,
+        None,
+        true,
+        None,
+        "PubStruct",
+    );
+    assert!(
+        output.contains("PubStruct::pub_method"),
+        "--methods-of PubStruct should find pub_method:\n{output}"
+    );
+    // Should NOT include DerivedStruct methods (DerivedStruct also contains "Struct")
+    assert!(
+        !output.contains("DerivedStruct"),
+        "--methods-of PubStruct should not include DerivedStruct items:\n{output}"
+    );
+}
