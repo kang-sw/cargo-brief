@@ -206,4 +206,5 @@ that can be fixed separately.
 **Deviation from plan:** Added `try_generate_rustdoc_json()` — not in original plan
 but required because `use_item.source` uses underscores while cargo needs hyphens.
 
-**Remaining:** Root Cause A (#1–#3), #6, #8 still open.
+**Remaining:** #6, #8 still open. Root Cause A (#1–#3) was already
+resolved by pipeline unification (260320-refactor-unify-local-remote-pipeline).
