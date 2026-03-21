@@ -1,3 +1,4 @@
+use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
@@ -168,4 +169,134 @@ pub fn parse_rustdoc_json(path: &Path) -> Result<rustdoc_types::Crate> {
     let krate: rustdoc_types::Crate =
         serde_json::from_str(&content).context("Failed to parse rustdoc JSON")?;
     Ok(krate)
+}
+
+/// Parse Cargo.lock to extract all resolved package names.
+///
+/// Returns a set of hyphenated package names (as they appear in Cargo.lock).
+/// Returns an empty set on any error (missing file, malformed content).
+pub fn load_lockfile_packages(manifest_path: Option<&str>) -> HashSet<String> {
+    let lockfile_path = if let Some(manifest) = manifest_path {
+        Path::new(manifest)
+            .parent()
+            .map(|p| p.join("Cargo.lock"))
+            .unwrap_or_else(|| PathBuf::from("Cargo.lock"))
+    } else {
+        PathBuf::from("Cargo.lock")
+    };
+
+    let content = match std::fs::read_to_string(&lockfile_path) {
+        Ok(c) => c,
+        Err(_) => return HashSet::new(),
+    };
+
+    let mut packages = HashSet::new();
+    let mut in_package = false;
+
+    for line in content.lines() {
+        let trimmed = line.trim();
+        if trimmed == "[[package]]" {
+            in_package = true;
+            continue;
+        }
+        if in_package && trimmed.starts_with("name = \"") {
+            if let Some(name) = trimmed
+                .strip_prefix("name = \"")
+                .and_then(|s| s.strip_suffix('"'))
+            {
+                packages.insert(name.to_string());
+            }
+            in_package = false;
+        } else if trimmed.starts_with('[') {
+            in_package = false;
+        }
+    }
+
+    packages
+}
+
+/// Batch-generate rustdoc JSON for multiple crates via single `cargo doc`.
+///
+/// Returns names that succeeded (cached or newly generated). Crates whose
+/// JSON already exists are counted as cached successes without invoking cargo.
+pub fn batch_generate_rustdoc_json(
+    crate_names: &[&str],
+    toolchain: &str,
+    manifest_path: Option<&str>,
+    target_dir: &Path,
+    verbose: bool,
+) -> Vec<String> {
+    let mut succeeded = Vec::new();
+    let mut to_generate = Vec::new();
+
+    for &name in crate_names {
+        let json_name = name.replace('-', "_");
+        let json_path = target_dir.join("doc").join(format!("{json_name}.json"));
+        if json_path.exists() {
+            succeeded.push(name.to_string());
+        } else {
+            to_generate.push(name);
+        }
+    }
+
+    if to_generate.is_empty() {
+        return succeeded;
+    }
+
+    if verbose {
+        eprintln!(
+            "[cargo-brief] Batch generating rustdoc JSON for {} crate(s): {}",
+            to_generate.len(),
+            to_generate.join(", ")
+        );
+    }
+
+    let mut cmd = Command::new("cargo");
+    cmd.arg(format!("+{toolchain}"));
+    cmd.args(["doc", "--no-deps", "--lib"]);
+
+    for name in &to_generate {
+        cmd.args(["-p", name]);
+    }
+
+    if let Some(manifest) = manifest_path {
+        cmd.args(["--manifest-path", manifest]);
+    }
+
+    cmd.env("RUSTDOCFLAGS", "--output-format json -Z unstable-options");
+
+    if verbose {
+        cmd.stderr(Stdio::inherit());
+        let status = cmd.status();
+        if let Err(e) = &status {
+            eprintln!("warning: batch cargo doc failed to execute: {e}");
+            return succeeded;
+        }
+        // Even on non-zero exit, some crates may have succeeded — check below
+    } else {
+        let output = cmd.output();
+        match output {
+            Err(e) => {
+                eprintln!("warning: batch cargo doc failed to execute: {e}");
+                return succeeded;
+            }
+            Ok(o) if !o.status.success() => {
+                // Non-fatal: some crates may still have generated JSON
+            }
+            Ok(_) => {}
+        }
+    }
+
+    // Check which JSONs got created
+    for name in &to_generate {
+        let json_name = name.replace('-', "_");
+        let json_path = target_dir.join("doc").join(format!("{json_name}.json"));
+        if json_path.exists() {
+            succeeded.push(name.to_string());
+        } else if verbose {
+            eprintln!("warning: batch cargo doc did not produce JSON for '{name}'");
+        }
+    }
+
+    succeeded
 }

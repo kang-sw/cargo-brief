@@ -1,7 +1,8 @@
 ---
 title: "Batch rustdoc JSON generation via cargo doc + RUSTDOCFLAGS"
-status: wip
+status: done
 started: 2026-03-21
+completed: 2026-03-21
 ---
 
 ## Problem
@@ -80,3 +81,31 @@ to collect-then-batch.
 - Changing the primary crate's generation path
 - Parallel `cargo rustdoc` processes (target dir lock prevents this)
 - Changing cache/bincode logic
+
+### Result (24a374c) - 26-03-21
+
+Implemented batch rustdoc JSON pre-warming via `cargo doc` + `RUSTDOCFLAGS`.
+
+**Changes:**
+- `rustdoc_json.rs`: Added `load_lockfile_packages()` (Cargo.lock parser) and
+  `batch_generate_rustdoc_json()` (batch cargo doc invocation).
+- `cross_crate.rs`: Added `collect_external_crate_names()`. Made `extract_crate_name`
+  and `is_intra_crate_source` `pub(crate)`.
+- `lib.rs`: Added `available_packages` field to `PipelineContext` (populated in all 6
+  build context functions). Added `pre_warm_cross_crate_json()` (recursive BFS, max
+  depth 8) and `normalize_to_lockfile_name()`. Wired pre-warming in all 3 shared
+  pipeline functions.
+
+**Deviations from plan:**
+- API simplified: `batch_generate_rustdoc_json` omits `document_private_items` param
+  (always pub-only for cross-crate). Return type is `Vec<String>` (succeeded names)
+  instead of `Vec<(String, Result<PathBuf>)>`.
+- Added `normalize_to_lockfile_name()` instead of `is_valid_package()` — converts
+  rustdoc underscore names to Cargo.lock hyphenated form before passing to `cargo doc -p`.
+  This was caught in code review: without normalization, hyphenated packages would fail
+  in batch but succeed in per-crate fallback, defeating the optimization.
+
+**Key findings:**
+- Existing per-crate `generate_rustdoc_json()` calls hit cache after pre-warming —
+  zero behavior change for downstream code.
+- All 146 integration tests pass unchanged.

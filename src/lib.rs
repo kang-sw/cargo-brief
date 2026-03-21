@@ -47,6 +47,8 @@ struct PipelineContext {
     /// Workspace member package names. Cross-crate expansion uses `use_cache: true`
     /// for crates NOT in this set (they're external deps, effectively immutable).
     workspace_members: HashSet<String>,
+    /// All resolved package names from Cargo.lock (for batch validation).
+    available_packages: HashSet<String>,
     /// Pre-computed crate header with version + features (remote api only).
     crate_header: Option<String>,
     /// Holds the remote workspace alive (TempDir drops on scope exit).
@@ -127,6 +129,9 @@ fn build_local_context_api(args: &ApiArgs) -> Result<PipelineContext> {
         .clone()
         .or(metadata.current_package.clone());
 
+    let available_packages =
+        rustdoc_json::load_lockfile_packages(args.target.manifest_path.as_deref());
+
     Ok(PipelineContext {
         manifest_path: args.target.manifest_path.clone(),
         target_dir: metadata.target_dir,
@@ -137,6 +142,7 @@ fn build_local_context_api(args: &ApiArgs) -> Result<PipelineContext> {
         verbose: args.global.verbose,
         use_cache: false, // workspace member — always regenerate
         workspace_members: metadata.workspace_packages.into_iter().collect(),
+        available_packages,
         crate_header: None,
         _workspace: None,
     })
@@ -187,6 +193,8 @@ fn build_remote_context_api(args: &ApiArgs, spec: &str) -> Result<PipelineContex
         args.remote.features.as_deref(),
     );
 
+    let available_packages = rustdoc_json::load_lockfile_packages(Some(&manifest_path));
+
     Ok(PipelineContext {
         manifest_path: Some(manifest_path),
         target_dir: metadata.target_dir,
@@ -197,6 +205,7 @@ fn build_remote_context_api(args: &ApiArgs, spec: &str) -> Result<PipelineContex
         verbose: args.global.verbose,
         use_cache: true,                   // remote — versions are locked
         workspace_members: HashSet::new(), // remote has no workspace
+        available_packages,
         crate_header,
         _workspace: Some(workspace),
     })
@@ -205,6 +214,9 @@ fn build_remote_context_api(args: &ApiArgs, spec: &str) -> Result<PipelineContex
 fn run_shared_api_pipeline(ctx: &PipelineContext, args: &ApiArgs) -> Result<String> {
     let (model, same_crate, reachable) = generate_and_parse_model(ctx)?;
     let has_cross_crate = cross_crate::root_has_cross_crate_reexports(&model);
+    if has_cross_crate {
+        pre_warm_cross_crate_json(&model, ctx);
+    }
 
     let mut output = if let Some(ref module_path) = ctx.module_path {
         // Module targeting — try local first, then cross-crate resolution
@@ -414,6 +426,8 @@ fn build_local_context_search(args: &SearchArgs) -> Result<PipelineContext> {
 
     let observer_package = args.at_package.clone().or(metadata.current_package.clone());
 
+    let available_packages = rustdoc_json::load_lockfile_packages(args.manifest_path.as_deref());
+
     Ok(PipelineContext {
         manifest_path: args.manifest_path.clone(),
         target_dir: metadata.target_dir,
@@ -424,6 +438,7 @@ fn build_local_context_search(args: &SearchArgs) -> Result<PipelineContext> {
         verbose: args.global.verbose,
         use_cache: false, // workspace member — always regenerate
         workspace_members: metadata.workspace_packages.into_iter().collect(),
+        available_packages,
         crate_header: None,
         _workspace: None,
     })
@@ -447,6 +462,8 @@ fn build_remote_context_search(args: &SearchArgs, spec: &str) -> Result<Pipeline
     let metadata = resolve::load_cargo_metadata(Some(&manifest_path))
         .context("Failed to load cargo metadata for remote crate")?;
 
+    let available_packages = rustdoc_json::load_lockfile_packages(Some(&manifest_path));
+
     Ok(PipelineContext {
         manifest_path: Some(manifest_path),
         target_dir: metadata.target_dir,
@@ -457,6 +474,7 @@ fn build_remote_context_search(args: &SearchArgs, spec: &str) -> Result<Pipeline
         verbose: args.global.verbose,
         use_cache: true, // remote — versions are locked
         workspace_members: HashSet::new(),
+        available_packages,
         crate_header: None,
         _workspace: Some(workspace),
     })
@@ -498,6 +516,7 @@ fn run_shared_search_pipeline(ctx: &PipelineContext, args: &SearchArgs) -> Resul
 
     // Cross-crate search: discover sub-crates, search each
     if cross_crate::root_has_cross_crate_reexports(&model) {
+        pre_warm_cross_crate_json(&model, ctx);
         if ctx.verbose {
             eprintln!("[cargo-brief] Discovering cross-crate re-exports...");
         }
@@ -651,6 +670,9 @@ fn build_local_context_summary(args: &SummaryArgs) -> Result<PipelineContext> {
         .clone()
         .or(metadata.current_package.clone());
 
+    let available_packages =
+        rustdoc_json::load_lockfile_packages(args.target.manifest_path.as_deref());
+
     Ok(PipelineContext {
         manifest_path: args.target.manifest_path.clone(),
         target_dir: metadata.target_dir,
@@ -661,6 +683,7 @@ fn build_local_context_summary(args: &SummaryArgs) -> Result<PipelineContext> {
         verbose: args.global.verbose,
         use_cache: false,
         workspace_members: metadata.workspace_packages.into_iter().collect(),
+        available_packages,
         crate_header: None,
         _workspace: None,
     })
@@ -708,6 +731,8 @@ fn build_remote_context_summary(args: &SummaryArgs, spec: &str) -> Result<Pipeli
         args.remote.features.as_deref(),
     );
 
+    let available_packages = rustdoc_json::load_lockfile_packages(Some(&manifest_path));
+
     Ok(PipelineContext {
         manifest_path: Some(manifest_path),
         target_dir: metadata.target_dir,
@@ -718,6 +743,7 @@ fn build_remote_context_summary(args: &SummaryArgs, spec: &str) -> Result<Pipeli
         verbose: args.global.verbose,
         use_cache: true,
         workspace_members: HashSet::new(),
+        available_packages,
         crate_header,
         _workspace: Some(workspace),
     })
@@ -735,6 +761,7 @@ fn run_shared_summary_pipeline(ctx: &PipelineContext) -> Result<String> {
 
     // Cross-crate: if facade and no module scoping, discover sub-crates
     if ctx.module_path.is_none() && cross_crate::root_has_cross_crate_reexports(&model) {
+        pre_warm_cross_crate_json(&model, ctx);
         if ctx.verbose {
             eprintln!("[cargo-brief] Discovering cross-crate re-exports...");
         }
@@ -764,6 +791,83 @@ fn run_shared_summary_pipeline(ctx: &PipelineContext) -> Result<String> {
     }
 
     Ok(output)
+}
+
+/// Pre-warm rustdoc JSON cache for cross-crate dependencies via batch generation.
+///
+/// Recursive BFS: each iteration discovers new crate names from the previous batch,
+/// generates them, and repeats until no new crates are found or MAX_DEPTH is reached.
+fn pre_warm_cross_crate_json(model: &CrateModel, ctx: &PipelineContext) {
+    let mut seen = HashSet::new();
+
+    // Seed: collect external crate names from the primary model.
+    // Names from rustdoc use underscores; normalize to Cargo.lock form (may be hyphenated).
+    let mut batch: Vec<String> = cross_crate::collect_external_crate_names(model)
+        .into_iter()
+        .filter_map(|n| normalize_to_lockfile_name(&n, &ctx.available_packages))
+        .collect();
+    batch.sort();
+    batch.dedup();
+    seen.extend(batch.iter().cloned());
+
+    const MAX_DEPTH: usize = 8;
+    for _ in 0..MAX_DEPTH {
+        if batch.is_empty() {
+            break;
+        }
+
+        let refs: Vec<&str> = batch.iter().map(|s| s.as_str()).collect();
+        rustdoc_json::batch_generate_rustdoc_json(
+            &refs,
+            &ctx.toolchain,
+            ctx.manifest_path.as_deref(),
+            &ctx.target_dir,
+            ctx.verbose,
+        );
+
+        // Parse this batch's crates to discover the next level
+        let mut next_batch = Vec::new();
+        for name in &batch {
+            let json_name = name.replace('-', "_");
+            let json_path = ctx.target_dir.join("doc").join(format!("{json_name}.json"));
+            if !json_path.exists() {
+                continue;
+            }
+            let Ok(krate) = rustdoc_json::parse_rustdoc_json_cached(&json_path) else {
+                continue;
+            };
+            let sub_model = CrateModel::from_crate(krate);
+            for sub_name in cross_crate::collect_external_crate_names(&sub_model) {
+                if let Some(pkg_name) =
+                    normalize_to_lockfile_name(&sub_name, &ctx.available_packages)
+                {
+                    if !seen.contains(&pkg_name) {
+                        seen.insert(pkg_name.clone());
+                        next_batch.push(pkg_name);
+                    }
+                }
+            }
+        }
+        next_batch.sort();
+        next_batch.dedup();
+        batch = next_batch;
+    }
+}
+
+/// Normalize a rustdoc crate name (underscores) to the Cargo.lock package name.
+///
+/// Rustdoc `use_item.source` gives Rust identifiers (e.g. `bevy_ecs`), but
+/// `cargo doc -p` expects Cargo package names (e.g. `bevy-ecs`). Returns the
+/// form that exists in Cargo.lock, or None if not found.
+fn normalize_to_lockfile_name(name: &str, available: &HashSet<String>) -> Option<String> {
+    if available.contains(name) {
+        return Some(name.to_string());
+    }
+    let hyphenated = name.replace('_', "-");
+    if available.contains(&hyphenated) {
+        return Some(hyphenated);
+    }
+    None
 }
 
 /// Build an enriched `// crate name[version] features = [...]` header for remote crates.

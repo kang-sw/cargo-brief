@@ -317,15 +317,53 @@ pub fn root_has_cross_crate_reexports(model: &CrateModel) -> bool {
     false
 }
 
+/// Collect external crate names from root-level re-exports.
+///
+/// Walks the root module's children and collects crate names from public Use items
+/// that point to external crates (not intra-crate, not local modules).
+/// Includes both named and glob re-exports.
+pub fn collect_external_crate_names(model: &CrateModel) -> Vec<String> {
+    let crate_name = model.crate_name();
+    let Some(root) = model.root_module() else {
+        return Vec::new();
+    };
+
+    let children = model.module_children(root);
+    let mut seen = HashSet::new();
+
+    for (_id, child) in &children {
+        let ItemEnum::Use(use_item) = &child.inner else {
+            continue;
+        };
+        if !matches!(child.visibility, Visibility::Public) {
+            continue;
+        }
+        if is_intra_crate_source(&use_item.source, crate_name) {
+            continue;
+        }
+
+        let source_crate = extract_crate_name(&use_item.source);
+
+        // Skip if it's a local module (not an external crate)
+        if model.find_module(&source_crate).is_some() {
+            continue;
+        }
+
+        seen.insert(source_crate);
+    }
+
+    seen.into_iter().collect()
+}
+
 // === Internal helpers ===
 
 /// Extract the crate name from a use source path like "bevy_internal" or "bevy_ecs::system".
-fn extract_crate_name(source: &str) -> String {
+pub(crate) fn extract_crate_name(source: &str) -> String {
     source.split("::").next().unwrap_or(source).to_string()
 }
 
 /// Check if a use source path is intra-crate (starts with "self::" or matches crate name).
-fn is_intra_crate_source(source: &str, crate_name: &str) -> bool {
+pub(crate) fn is_intra_crate_source(source: &str, crate_name: &str) -> bool {
     source.starts_with("self::") || extract_crate_name(source) == crate_name
 }
 

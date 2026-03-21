@@ -11,12 +11,14 @@
 - `examples` depends only on `cli` (for `ExamplesArgs`). It has no dependency on `model`, `render`, `rustdoc_json`, or `resolve`.
 - `lib.rs` is the sole orchestrator — all cross-module data flow passes through it.
 - `cross_crate` depends on `rustdoc_json` (for `generate_rustdoc_json(..., true)` / `parse_rustdoc_json_cached`) and `model`. It never calls `remote` or `resolve`.
+- `lib.rs` uses `cross_crate::collect_external_crate_names()` and the `pub(crate)` helpers `extract_crate_name` / `is_intra_crate_source` for pre-warming. These are the only inward references into `cross_crate` private surface from `lib.rs`.
 
 ## Coupling
 - `render` → `lib.rs`: Glob re-export output format must match after whitespace normalization. `render_module_api()` emits `pub use {source}::*;`; `replace_glob_lines()` normalizes each line by collapsing whitespace before comparing to the pattern `pub use {source}::*;`. Indentation is preserved and re-applied to replacement lines. Any structural change to the glob line (extra tokens, different keyword order) → globs silently remain unexpanded.
 - `cli` → all test files: Test helpers construct `ApiArgs` by building all four flattened structs (`TargetArgs`, `RemoteArgs`, `FilterArgs`, `GlobalArgs`) plus the per-subcommand fields. Adding a field to any of these structs causes compile errors across all helpers — intentional, not silent.
 - `lib.rs` → `resolve` + `rustdoc_json`: `manifest_path` is threaded through without validation. If it points to the wrong Cargo.toml, failure surfaces at JSON generation time, not at metadata loading.
-- `cross_crate` → `rustdoc_json` caching: `cross_crate` calls `generate_rustdoc_json(..., use_cache=true)` and `parse_rustdoc_json_cached`. `expand_glob_reexports` threads `use_cache` from `PipelineContext`, so local pipelines pass `false` (always regenerate) and remote pipelines pass `true` (skip if JSON exists). All callers share the same `target/doc/` directory — `.bin` cache files accumulate there and are never cleaned by `--clean`.
+- `cross_crate` → `rustdoc_json` caching: `cross_crate` calls `generate_rustdoc_json(..., use_cache=true)` and `parse_rustdoc_json_cached`. `expand_glob_reexports` and `collect_glob_items_recursive` determine `use_cache` per source crate by checking `workspace_members` — non-workspace deps use `true` (cache, locked via Cargo.lock), workspace members use `false` (always regenerate). All callers share the same `target/doc/` directory — `.bin` cache files accumulate there and are never cleaned by `--clean`.
+- `pre_warm_cross_crate_json` → `rustdoc_json::load_lockfile_packages`: Pre-warming validates candidate crate names against Cargo.lock. If Cargo.lock is absent (e.g. fresh checkout with workspace not yet resolved), `available_packages` is empty → all cross-crate pre-warming is silently skipped. Individual per-crate generation in `cross_crate.rs` still runs as fallback.
 
 ## Extension Points & Change Recipes
 - **Add a new `--no-*` filter flag**: Touch `cli.rs` (`FilterArgs` struct), `render.rs` (`should_render_item`), all test helpers (`default_filter()` in each file). Compile errors guide you.

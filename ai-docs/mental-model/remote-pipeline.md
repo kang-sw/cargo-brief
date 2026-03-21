@@ -6,7 +6,8 @@
 - `src/cross_crate.rs` — `resolve_cross_crate_module()`, `discover_all_reexported_crates()`, `root_has_cross_crate_reexports()`.
 
 ## Module Contracts
-- `build_remote_context_api()` / `build_remote_context_search()` guarantee: `WorkspaceDir` is stored in `PipelineContext._workspace` to keep it alive for the entire pipeline. Manifest path is an owned `String` — no borrow chain. `PipelineContext.use_cache = true` for all remote contexts.
+- `build_remote_context_api()` / `build_remote_context_search()` guarantee: `WorkspaceDir` is stored in `PipelineContext._workspace` to keep it alive for the entire pipeline. Manifest path is an owned `String` — no borrow chain. `PipelineContext.use_cache = true` for all remote contexts. `PipelineContext.available_packages` is populated from Cargo.lock at context-build time via `rustdoc_json::load_lockfile_packages()` — empty if Cargo.lock is absent.
+- `pre_warm_cross_crate_json()` runs before `discover_all_reexported_crates()` / `expand_glob_reexports()` in all three shared pipelines (api/search/summary) when `root_has_cross_crate_reexports` is true. It performs a recursive BFS (max 8 levels) using `batch_generate_rustdoc_json()`, which issues a single `cargo doc -p a -p b ...` invocation per batch level instead of sequential `cargo rustdoc` calls. Failures are silently suppressed; individual generation in `cross_crate.rs` remains as fallback.
 - Both remote and local pipelines go through the same `run_shared_api_pipeline()` with three mutually exclusive sub-paths evaluated in order: (1) module-target+cross-crate, (2) recursive+cross-crate, (3) normal. Cross-crate discovery now also runs for local crates that have cross-crate re-exports.
 - `generate_rustdoc_json(..., use_cache=true)` skips `cargo rustdoc` if the `.json` file already exists in `target/doc/`. Only pass `use_cache=true` for remote pipelines where versions are locked — passing it for local workspace members skips regeneration after source changes.
 - `run_examples_pipeline` remote path does not call `generate_rustdoc_json` at all — it uses `resolve::find_dep_source_root` to locate the crate source dir on disk, then reads `.rs` files directly. No model is built.
@@ -32,6 +33,8 @@
 - No timeout on `cargo rustdoc` subprocess. Large crates (e.g., `bevy`) can hang for minutes on first build. User must Ctrl-C manually.
 - `generate_rustdoc_json(..., use_cache=true)` only checks if the `.json` file exists — it does not validate the file corresponds to the requested crate version. Manually placing a `.json` file in the cache dir would be returned silently.
 - Cross-crate module path not found after >5 re-export hops → `resolve_cross_crate_module` returns `None`, falls through to normal render, which then fails with "module not found". No hint that cross-crate resolution was attempted.
+- `batch_generate_rustdoc_json()` sets `RUSTDOCFLAGS` via `cmd.env()` — it silently overwrites any `RUSTDOCFLAGS` the caller's environment already has. This differs from `generate_rustdoc_json()`, which passes flags as trailing `-- ...` arguments to `cargo rustdoc`. The two code paths are not interchangeable.
+- Pre-warming uses crate names from `cross_crate::collect_external_crate_names()`, which are Rust-identifier form (underscores). `normalize_to_lockfile_name()` converts these to the Cargo.lock form (preferring hyphenated if present) before passing to `batch_generate_rustdoc_json()`. If a name matches neither underscore nor hyphenated form in Cargo.lock, it is silently filtered out (not a real package).
 
 ## Technical Debt
 - No progress indication for downloads/builds of remote crates or sub-crates during cross-crate discovery.
