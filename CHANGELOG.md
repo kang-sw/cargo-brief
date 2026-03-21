@@ -2,6 +2,30 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.5.2] - 2026-03-21
+
+### Added
+
+- **`summary` subcommand**: `cargo brief summary` shows a compact module-level overview with item counts per kind (e.g., `mod io; // 4 traits, 15 structs, 8 fns`). Supports cross-crate facade merging for umbrella crates like bevy.
+- **Search pattern DSL**: Three new operators embedded in pattern tokens, no new CLI flags:
+  - `*`/`?` — glob wildcards (full-path anchored): `"Shader*Ref"`, `"*Plugin*"`
+  - `=term` — exact name match (final `::` segment): `"=Router"` finds Router, not RouterService
+  - `-term` — exclusion (global post-filter): `"spawn -test"` finds spawn items, excludes test-related
+  - Operators combine freely: `"*Plugin*,*Resource* -test"`, `"-=Name"`
+- **`--search-kind` filter**: `--search-kind fn,struct` limits search results by item kind. Comma-separated.
+- **Variadic pattern arguments**: `cargo brief search bevy ShaderRef Material` now works without quotes — multiple positional args are AND-matched.
+
+### Fixed
+
+- Cross-crate glob expansion now follows nested `pub use crate::*` chains recursively (max depth 8, cycle-safe) with underscore/hyphen package name fallback.
+- `--methods-of` uses exact parent-type segment matching instead of substring, preventing false positives.
+- Zero-result sub-crate headers suppressed in normal search output.
+- `--crates` positional arg correctly parses `crate::module` syntax.
+
+### Performance
+
+- Cross-crate glob expansion now caches rustdoc JSON for non-workspace dependencies (identified via `cargo metadata`). External deps locked by `Cargo.lock` are treated as immutable — repeat queries skip `cargo rustdoc` entirely.
+
 ## [0.5.1] - 2026-03-20
 
 ### Fixed
