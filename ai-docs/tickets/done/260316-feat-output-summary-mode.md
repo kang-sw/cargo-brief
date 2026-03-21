@@ -1,6 +1,7 @@
 ---
 title: "summary subcommand — module TOC with item counts"
-status: idea
+status: done
+completed: 2026-03-21
 ---
 
 # Summary Subcommand
@@ -61,3 +62,19 @@ other subcommands.
 
 Medium. New `summary.rs` module + `SummaryArgs` in cli.rs + pipeline
 in lib.rs. No changes to existing api/search/examples pipelines.
+
+### Result (556b12f) - 26-03-21
+
+Implemented as designed. New `src/summary.rs` (~260 lines) with:
+- `ItemKind` enum with Ord-based display ordering
+- `classify_item()` follows non-glob re-exports to target kind
+- `count_module_items()` recursive walk with visibility filtering
+- `render_summary()` produces column-aligned output
+- `merge_sub_crate_summary()` for cross-crate facades
+
+Key deviation: modules in the reachable set but not `Visibility::Public`
+(e.g., `pub(crate)` glob sources) are excluded from external view module
+listing. Items from such modules are still counted at their re-export site.
+
+7 integration tests covering: root/external/scoped views, empty module
+omission, column alignment, re-export kind counting, pipeline smoke test.

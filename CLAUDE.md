@@ -160,8 +160,9 @@ alternatives considered, and trade-offs — focus on _why_ this approach was cho
 
 ## Recent Work
 
+- v0.5.1+: `summary` subcommand — compact module-level overview with item counts per kind. `src/summary.rs` with `render_summary()` + `merge_sub_crate_summary()`. Cross-crate facade support. 7 integration tests.
 - v0.5.1+: Recursive cross-crate glob expansion — `expand_glob_reexports()` follows nested `pub use crate::*` chains (max depth 8, cycle-safe). `try_generate_rustdoc_json()` handles underscore↔hyphen package name fallback. `source_models` is `Vec<CrateModel>` per source.
-- v0.5.1+: Unified local/remote pipelines — `PipelineContext` → shared `run_shared_api_pipeline()` / `run_shared_search_pipeline()`. Cross-crate discovery now automatic for local crates too.
+- v0.5.1+: Unified local/remote pipelines — `PipelineContext` → shared `run_shared_api_pipeline()` / `run_shared_search_pipeline()` / `run_shared_summary_pipeline()`. Cross-crate discovery now automatic for local crates too.
 - v0.5.1: `examples` subcommand — list/grep mode, `--tests`/`--benches` scope flags, smart-case, dynamic line numbers
 - v0.5.0: CLI subcommand refactor — `api`/`search`/`examples` subcommands, smart-case search, comma-separated OR matching
 - v0.4.1+: `--verbose` / `-v` flag for pipeline progress on stderr
@@ -171,12 +172,12 @@ alternatives considered, and trade-offs — focus on _why_ this approach was cho
 ## Workspace Reference
 
 - Crate name: `cargo-brief` (binary: `cargo-brief`, lib: `cargo_brief`)
-- Entry: `src/lib.rs` → `run_api_pipeline()` + `run_search_pipeline()` + `run_examples_pipeline()`, `src/main.rs` → subcommand dispatch
+- Entry: `src/lib.rs` → `run_api_pipeline()` + `run_search_pipeline()` + `run_examples_pipeline()` + `run_summary_pipeline()`, `src/main.rs` → subcommand dispatch
 - Pipeline: Both api/search build `PipelineContext` (local or remote), then call `run_shared_api_pipeline()` / `run_shared_search_pipeline()`
-- CLI types: `ApiArgs`, `SearchArgs`, `ExamplesArgs` + shared `TargetArgs`/`RemoteArgs`/`FilterArgs`/`GlobalArgs`
-- Modules: `cli`, `cross_crate`, `examples`, `remote`, `resolve`, `rustdoc_json`, `model`, `render`, `search`
+- CLI types: `ApiArgs`, `SearchArgs`, `ExamplesArgs`, `SummaryArgs` + shared `TargetArgs`/`RemoteArgs`/`FilterArgs`/`GlobalArgs`
+- Modules: `cli`, `cross_crate`, `examples`, `remote`, `resolve`, `rustdoc_json`, `model`, `render`, `search`, `summary`
 - Test fixture: `test_fixture/` (workspace with `glob-source`/`glob-inner` sub-crates for cross-crate glob chain testing)
-- Integration tests: `tests/integration.rs` (122 tests)
+- Integration tests: `tests/integration.rs` (129 tests)
 
 ## Documented Dependencies
 
