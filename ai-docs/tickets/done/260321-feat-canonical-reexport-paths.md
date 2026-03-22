@@ -1,7 +1,8 @@
 ---
 title: "Show canonical public paths for glob-reexported items"
-status: wip
+status: done
 started: 2026-03-21
+completed: 2026-03-22
 ---
 
 ## Problem

@@ -1,7 +1,8 @@
 ---
 title: "Restructure --crates as boolean mode switch with clean subcommand"
-status: wip
+status: done
 started: 2026-03-22
+completed: 2026-03-22
 ---
 
 # Restructure `--crates` as boolean mode switch + `clean` subcommand
