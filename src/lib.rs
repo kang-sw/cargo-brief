@@ -951,7 +951,7 @@ fn apply_glob_expansions(
     if expand_glob && !result.source_models.is_empty() {
         // Phase 2: inline full definitions from source crates (only glob sources)
         let mut seen_names = HashSet::new();
-        for (source, _items) in &result.item_names {
+        for source in result.item_names.keys() {
             if let Some(models) = result.source_models.get(source) {
                 let mut rendered = String::new();
                 for model in models {
@@ -1195,11 +1195,8 @@ fn expand_glob_reexports(
         };
         let crate_name = source_prefix.split("::").next().unwrap();
 
-        // Skip module re-exports (e.g., `pub use serde_core::de;`)
-        // These are better navigated via --depth / module targeting.
-        // Heuristic: if the item name starts lowercase and has no further :: segments,
-        // it's likely a module. We can't be sure without loading the source crate,
-        // but render_single_inlined_item will return None for modules anyway.
+        // Module re-exports (e.g., `pub use serde_core::de;`) are not filtered here —
+        // render_single_inlined_item returns None for modules, leaving pub use line intact.
 
         // Generate source model if not already present from glob processing
         if !source_models.contains_key(crate_name) {

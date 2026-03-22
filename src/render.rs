@@ -184,7 +184,9 @@ pub fn render_single_inlined_item(
     seen_names: &mut HashSet<String>,
 ) -> Option<String> {
     for model in source_models {
-        let root = model.root_module()?;
+        let Some(root) = model.root_module() else {
+            continue;
+        };
         let observer = model.crate_name().to_string();
 
         for (child_id, child) in model.module_children(root) {

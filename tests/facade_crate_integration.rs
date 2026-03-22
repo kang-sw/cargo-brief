@@ -235,7 +235,7 @@ fn serde_named_reexports_expanded() {
     );
     // The raw pub use line should be replaced
     assert!(
-        !output.contains("pub use serde::Serialize;"),
+        !output.contains("pub use serde_core::Serialize;"),
         "Expanded named re-export should not show pub use line:\n{output}"
     );
 }
