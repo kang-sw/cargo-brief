@@ -26,8 +26,22 @@ fn collect_source_files(source_root: &Path) -> Vec<PathBuf> {
 pub fn run_query(source_root: &Path, query_src: &str, args: &TsArgs) -> Result<String> {
     let language: tree_sitter::Language = tree_sitter_rust::LANGUAGE.into();
 
-    let query = Query::new(&language, query_src)
+    // Auto-add a root capture when the query has none, so capture-less queries
+    // like `(function_item)` work in verbatim mode.
+    let probe = Query::new(&language, query_src)
         .map_err(|e| anyhow::anyhow!("Invalid tree-sitter query: {e}"))?;
+    let augmented = if probe.capture_names().is_empty() {
+        Some(format!("{query_src} @_match"))
+    } else {
+        None
+    };
+    let effective_src = augmented.as_deref().unwrap_or(query_src);
+    let query = if augmented.is_some() {
+        Query::new(&language, effective_src)
+            .map_err(|e| anyhow::anyhow!("Invalid tree-sitter query: {e}"))?
+    } else {
+        probe
+    };
 
     let mut parser = Parser::new();
     parser
@@ -132,12 +146,13 @@ fn render_with_context(
     let end = (match_end_row + ctx_after + 1).min(total);
 
     output.push_str(&format!("@{}:{}\n", rel_path.display(), start + 1));
-    for i in start..end {
-        let marker = if i >= match_start_row && i <= match_end_row {
+    for (i, line) in lines[start..end].iter().enumerate() {
+        let row = start + i;
+        let marker = if row >= match_start_row && row <= match_end_row {
             '*'
         } else {
             ' '
         };
-        output.push_str(&format!("{marker} {}\n", lines[i]));
+        output.push_str(&format!("{marker} {line}\n"));
     }
 }

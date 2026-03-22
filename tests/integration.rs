@@ -3505,3 +3505,18 @@ fn test_ts_context() {
         "Context mode should have * markers:\n{output}"
     );
 }
+
+#[test]
+fn test_ts_captureless_query() {
+    let mut args = default_ts_args();
+    args.query = "(function_item)".to_string();
+    let output = cargo_brief::run_ts_pipeline(&args, &RemoteOpts::default()).unwrap();
+    assert!(
+        output.contains("free_function"),
+        "Capture-less query should still match functions:\n{output}"
+    );
+    assert!(
+        !output.contains("// no matches"),
+        "Should not be empty:\n{output}"
+    );
+}
