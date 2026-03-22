@@ -2,6 +2,21 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.7.1] - 2026-03-22
+
+### Added
+
+- **`ts` subcommand: `--src-only`**: Restrict tree-sitter queries to `src/` only, skipping `examples/`, `tests/`, `benches/`.
+- **`ts` subcommand: `--limit [OFFSET:]N`**: Paginate tree-sitter query results. `--limit 10` shows first 10 matches; `--limit 5:10` skips 5 then shows 10.
+- **`ts` subcommand: `--quiet` / `-q`**: Output only `@file:line` locations without source text. Compatible with `--captures` and `--limit`.
+- **`ts` subcommand: remote crate support (`-C`)**: `cargo brief -C ts serde@1 '(struct_item)'` queries remote crate source files.
+- **`ts` subcommand: comprehensive `--help`**: Node type reference, capture semantics, predicate reference (`#eq?`, `#match?`, `#not-eq?`, `#any-of?`), practical tips, and tree-sitter playground link.
+
+### Fixed
+
+- **`ts` TARGET positional now required**: Fixes clap debug assert when non-required positional preceded required positional. Use `self` explicitly for the current crate.
+- **`ts` no-matches output**: Now includes a link to the tree-sitter playground for exploring node types.
+
 ## [0.7.0] - 2026-03-22
 
 ### Added
