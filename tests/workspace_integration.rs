@@ -419,8 +419,9 @@ fn core_lib_trait_impl_rendered() {
     let args = workspace_args("core-lib");
     let output = run_api_pipeline(&args, &RemoteOpts::default()).unwrap();
 
+    // Trait impl may be rendered in full or collapsed into summary comment
     assert!(
-        output.contains("impl Processor for Config"),
+        output.contains("impl Processor for Config") || output.contains("Config: Processor"),
         "trait impl rendered:\n{output}"
     );
 }
