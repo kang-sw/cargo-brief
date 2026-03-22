@@ -2,6 +2,19 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.7.0] - 2026-03-22
+
+### Added
+
+- **`--members` flag for search**: `cargo brief search self --members PubStruct` expands all fields, variants, methods, and associated items of matched types. Without the flag, member items are suppressed by default unless a search token exactly matches the member's own name (e.g., `cargo brief search self pub_field` still finds the field).
+- **Collapsed member display**: When members are shown, consecutive items sharing a parent path use compact `-::member` continuation lines instead of repeating the full path.
+- **Cross-crate member walking**: Search now indexes struct fields, enum variants, and union fields from cross-crate dependencies (via `CrossCrateIndex`).
+- **Parent context headers**: When a member matches by exact name but its parent type isn't in results, the parent is injected as a context header.
+
+### Fixed
+
+- Adapt test assertions for nightly rustdoc output changes (where clauses on `either` methods, trait impl collapsing).
+
 ## [0.6.0] - 2026-03-22
 
 ### Breaking Changes
