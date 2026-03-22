@@ -524,6 +524,7 @@ fn run_shared_search_pipeline(ctx: &PipelineContext, args: &SearchArgs) -> Resul
     let methods_of = args.methods_of.as_deref();
 
     let search_kind = args.search_kind.as_deref();
+    let members = args.members;
     let search_fn = |model: &CrateModel,
                      observer: Option<&str>,
                      same_crate: bool,
@@ -538,6 +539,7 @@ fn run_shared_search_pipeline(ctx: &PipelineContext, args: &SearchArgs) -> Resul
             reachable,
             methods_of,
             search_kind,
+            members,
         )
     };
 
@@ -575,6 +577,7 @@ fn run_shared_search_pipeline(ctx: &PipelineContext, args: &SearchArgs) -> Resul
             args.limit.as_deref(),
             search_kind,
             methods_of,
+            members,
         );
         if !cross_output.is_empty() {
             output.push_str(&cross_output);

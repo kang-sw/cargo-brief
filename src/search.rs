@@ -4,6 +4,8 @@
 //! multi-word AND on full path, comma-separated OR groups), and renders
 //! each match as a one-liner with a kind prefix and full path.
 
+use std::collections::HashSet;
+
 use rustdoc_types::{
     Attribute, Id, Item, ItemEnum, Struct, StructKind, Type, VariantKind, Visibility,
 };
@@ -101,6 +103,19 @@ pub(crate) enum LeafContext<'a> {
     Use {
         source: String,
     },
+}
+
+/// Check if a leaf item is a member of a parent type (field, variant, method, assoc item).
+///
+/// Free functions (context = None) are NOT members. Impl methods (context = ImplMethod) are.
+fn is_member(leaf: &LeafItem) -> bool {
+    matches!(
+        leaf.kind,
+        LeafKind::Field | LeafKind::Variant | LeafKind::AssocType | LeafKind::AssocConst
+    ) || matches!(
+        (&leaf.kind, &leaf.context),
+        (LeafKind::Function, LeafContext::ImplMethod)
+    )
 }
 
 /// Parse `--search-limit` value: `"N"` → (0, Some(N)), `"M:N"` → (M, Some(N)), `None` → (0, None).
@@ -268,6 +283,7 @@ pub fn render_search(
         reachable,
         None,
         None,
+        false,
     )
 }
 
@@ -294,6 +310,7 @@ pub fn render_search_methods_of(
         reachable,
         Some(methods_of),
         None,
+        false,
     )
 }
 
@@ -308,6 +325,7 @@ pub fn render_search_filtered(
     reachable: Option<&ReachableInfo>,
     methods_of: Option<&str>,
     search_kind: Option<&str>,
+    members: bool,
 ) -> String {
     render_search_inner(
         model,
@@ -319,6 +337,7 @@ pub fn render_search_filtered(
         reachable,
         methods_of,
         search_kind,
+        members,
     )
 }
 
@@ -333,6 +352,7 @@ fn render_search_inner(
     reachable: Option<&ReachableInfo>,
     methods_of: Option<&str>,
     search_kind: Option<&str>,
+    members: bool,
 ) -> String {
     let crate_name = model.crate_name();
     let observer = observer_module_path
@@ -395,6 +415,75 @@ fn render_search_inner(
         });
     }
 
+    // Member filtering (after exclusions, before --methods-of)
+    if members {
+        // --members: expand matched types to include all their children
+        let type_paths: HashSet<&str> = matched
+            .iter()
+            .filter(|l| {
+                matches!(
+                    l.kind,
+                    LeafKind::Struct | LeafKind::Enum | LeafKind::Trait | LeafKind::Union
+                )
+            })
+            .map(|l| l.path.as_str())
+            .collect();
+        let mut seen: HashSet<&str> = matched.iter().map(|l| l.path.as_str()).collect();
+        let mut extra: Vec<&LeafItem> = Vec::new();
+        for leaf in &leaves {
+            if is_member(leaf) {
+                if let Some(parent) = leaf.path.rsplit_once("::").map(|(p, _)| p) {
+                    if type_paths.contains(parent) && !seen.contains(leaf.path.as_str()) {
+                        seen.insert(&leaf.path);
+                        extra.push(leaf);
+                    }
+                }
+            }
+        }
+        matched.extend(extra);
+    } else if methods_of.is_none() {
+        // Default: suppress members unless exact name match on a token
+        matched.retain(|leaf| {
+            if !is_member(leaf) {
+                return true;
+            }
+            let name = leaf.path.rsplit("::").next().unwrap_or(&leaf.path);
+            let name_cmp = if case_sensitive {
+                name.to_string()
+            } else {
+                name.to_lowercase()
+            };
+            parsed
+                .or_groups
+                .iter()
+                .flat_map(|g| g.iter())
+                .any(|tok| match tok {
+                    TokenKind::Substring(s) | TokenKind::Exact(s) => *s == name_cmp,
+                    TokenKind::Glob(_) => false,
+                })
+        });
+
+        // Inject parent types as context headers for remaining orphan members
+        let member_parents: HashSet<&str> = matched
+            .iter()
+            .filter(|l| is_member(l))
+            .filter_map(|l| l.path.rsplit_once("::").map(|(p, _)| p))
+            .collect();
+        let matched_paths: HashSet<&str> = matched.iter().map(|l| l.path.as_str()).collect();
+        let mut extra: Vec<&LeafItem> = Vec::new();
+        for leaf in &leaves {
+            if matches!(
+                leaf.kind,
+                LeafKind::Struct | LeafKind::Enum | LeafKind::Trait | LeafKind::Union
+            ) && member_parents.contains(leaf.path.as_str())
+                && !matched_paths.contains(leaf.path.as_str())
+            {
+                extra.push(leaf);
+            }
+        }
+        matched.extend(extra);
+    }
+
     // --methods-of: exact parent-type segment matching
     if let Some(type_name) = methods_of {
         let suffix = format!("::{type_name}::");
@@ -408,13 +497,19 @@ fn render_search_inner(
         matched.retain(|leaf| kinds.iter().any(|k| leaf.kind.matches_kind_str(k)));
     }
 
-    // Sort: primary by kind, secondary by path alphabetically
-    matched.sort_by(|a, b| {
-        a.kind
-            .sort_key()
-            .cmp(&b.kind.sort_key())
-            .then_with(|| a.path.cmp(&b.path))
-    });
+    // Sort
+    if members {
+        // Path-based sort: groups members with their parent type
+        matched.sort_by(|a, b| a.path.cmp(&b.path));
+    } else {
+        // Default: primary by kind, secondary by path alphabetically
+        matched.sort_by(|a, b| {
+            a.kind
+                .sort_key()
+                .cmp(&b.kind.sort_key())
+                .then_with(|| a.path.cmp(&b.path))
+        });
+    }
 
     let total = matched.len();
     let (offset, search_limit) = parse_search_limit(limit);
@@ -432,8 +527,22 @@ fn render_search_inner(
         output.push_str(&format!("// (skipped {skipped_before} results)\n"));
     }
 
+    let mut prev_parent: Option<&str> = None;
     for leaf in &matched[offset..end] {
-        render_leaf(&mut output, model, leaf, filter);
+        let parent = leaf.path.rsplit_once("::").map(|(p, _)| p);
+
+        if let Some(p) = parent
+            && Some(p) == prev_parent
+            && is_member(leaf)
+        {
+            let member_name = leaf.path.rsplit_once("::").unwrap().1;
+            let padding = " ".repeat(p.len().saturating_sub(1));
+            render_collapsed_member(&mut output, model, leaf, &padding, member_name);
+        } else {
+            render_leaf(&mut output, model, leaf, filter);
+        }
+
+        prev_parent = parent;
     }
 
     if skipped_after > 0 {
@@ -910,6 +1019,117 @@ pub(crate) fn render_leaf(
     }
 }
 
+/// Render a member item with collapsed `-::member` continuation format.
+fn render_collapsed_member(
+    output: &mut String,
+    model: &CrateModel,
+    leaf: &LeafItem,
+    padding: &str,
+    member_name: &str,
+) {
+    match (&leaf.kind, &leaf.context) {
+        (LeafKind::Field, LeafContext::Field { field_type }) => {
+            output.push_str(&format!(
+                "{padding}-::{member_name}: {};\n",
+                render::format_type_pub(field_type)
+            ));
+        }
+        (LeafKind::Function, _) => {
+            if let ItemEnum::Function(f) = &leaf.item.inner {
+                let sig = render::format_function_sig_pub(member_name, f, "");
+                // Strip the name prefix to get just params+return
+                let params_ret = sig.find('(').map(|i| &sig[i..]).unwrap_or("()");
+                output.push_str(&format!("{padding}-::{member_name}{params_ret};\n"));
+            }
+        }
+        (LeafKind::Variant, _) => {
+            render_collapsed_variant(output, model, leaf, padding, member_name);
+        }
+        (LeafKind::AssocType, _) => {
+            if let ItemEnum::AssocType {
+                type_: Some(ty), ..
+            } = &leaf.item.inner
+            {
+                output.push_str(&format!(
+                    "{padding}-::type {member_name} = {};\n",
+                    render::format_type_pub(ty)
+                ));
+            } else {
+                output.push_str(&format!("{padding}-::type {member_name};\n"));
+            }
+        }
+        (LeafKind::AssocConst, _) => {
+            if let ItemEnum::AssocConst { type_, value } = &leaf.item.inner {
+                let val = value.as_deref().unwrap_or("..");
+                output.push_str(&format!(
+                    "{padding}-::const {member_name}: {} = {val};\n",
+                    render::format_type_pub(type_)
+                ));
+            }
+        }
+        _ => {
+            // Non-member kinds don't reach collapsed rendering
+        }
+    }
+}
+
+/// Render an enum variant in collapsed format.
+fn render_collapsed_variant(
+    output: &mut String,
+    model: &CrateModel,
+    leaf: &LeafItem,
+    padding: &str,
+    member_name: &str,
+) {
+    let ItemEnum::Variant(variant) = &leaf.item.inner else {
+        return;
+    };
+    match &variant.kind {
+        VariantKind::Plain => {
+            output.push_str(&format!("{padding}-::{member_name},\n"));
+        }
+        VariantKind::Tuple(fields) => {
+            let field_strs: Vec<String> = fields
+                .iter()
+                .map(|f_id| {
+                    f_id.as_ref()
+                        .and_then(|id| model.krate.index.get(id))
+                        .map(|f| {
+                            if let ItemEnum::StructField(ty) = &f.inner {
+                                render::format_type_pub(ty)
+                            } else {
+                                "?".to_string()
+                            }
+                        })
+                        .unwrap_or_else(|| "_".to_string())
+                })
+                .collect();
+            output.push_str(&format!(
+                "{padding}-::{member_name}({}),\n",
+                field_strs.join(", ")
+            ));
+        }
+        VariantKind::Struct { fields, .. } => {
+            let field_strs: Vec<String> = fields
+                .iter()
+                .filter_map(|fid| model.krate.index.get(fid))
+                .filter_map(|f| {
+                    if let ItemEnum::StructField(ty) = &f.inner {
+                        let fname = f.name.as_deref().unwrap_or("?");
+                        Some(format!("{fname}: {}", render::format_type_pub(ty)))
+                    } else {
+                        None
+                    }
+                })
+                .collect();
+            output.push_str(&format!(
+                "{padding}-::{member_name} {{ {} }},\n",
+                field_strs.join(", ")
+            ));
+        }
+    }
+}
+
 fn render_function_leaf(output: &mut String, leaf: &LeafItem) {
     if let ItemEnum::Function(f) = &leaf.item.inner {
         let sig = render::format_function_sig_pub(
@@ -1179,6 +1399,7 @@ pub fn search_cross_crate_index(
     limit: Option<&str>,
     search_kind: Option<&str>,
     methods_of: Option<&str>,
+    members: bool,
 ) -> String {
     // Smart-case
     let case_sensitive = pattern.chars().any(|c| c.is_uppercase());

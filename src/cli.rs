@@ -347,6 +347,10 @@ pub struct SearchArgs {
     /// Filter results by item kind (comma-separated: fn, struct, enum, trait, union, field, variant, const, static, type, macro, use)
     #[arg(long, value_name = "KINDS", help_heading = "Filtering")]
     pub search_kind: Option<String>,
+
+    /// Show all members (fields, variants, methods) of matched types
+    #[arg(long)]
+    pub members: bool,
 }
 
 impl SearchArgs {
