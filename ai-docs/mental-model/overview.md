@@ -6,8 +6,10 @@
 
 ## Module Contracts
 - `lib.rs` guarantees: four public pipeline functions, each taking `(args: &XxxArgs, remote: &RemoteOpts)` — remote mode is a separate parameter, not embedded in the args struct. Both `run_api_pipeline` and `run_search_pipeline` follow the same two-phase structure: (1) build a `PipelineContext` via `build_local_context_*` or `build_remote_context_*`, then (2) call the shared `run_shared_api_pipeline` / `run_shared_search_pipeline`. Both local and remote paths get cross-crate discovery through the shared pipeline. `run_examples_pipeline` is disk-only — no rustdoc JSON, no model building; it reads `.rs` files directly from `examples/`, `tests/`, and `benches/` directories. `run_summary_pipeline` uses the same `PipelineContext` two-phase structure as api/search. No stage within a path may be reordered.
+- `run_shared_api_pipeline` module path resolution order (must not be changed): (1) local module match via `model.find_module()`, (2) cross-crate module resolution via `resolve_cross_crate_module()`, (3) leaf item resolution via `model.find_item_in_module()` on the parent module, (4) `render_leaf_not_found()` if parent module exists, (5) fall through to `render_module_api()` "module not found" error. Leaf resolution only triggers when both (1) and (2) fail — module paths always win.
 - `resolve`, `rustdoc_json`, `remote`, and `cross_crate` are pure utilities with zero internal dependencies on each other. They can be tested in isolation.
 - `model` depends only on `rustdoc_types` (external). `compute_reachable_set()` returns `ReachableInfo` (with `reachable`, `glob_private_modules`, `glob_inlined`). `render` depends on `model` + `cli` + `cross_crate`. `search` and `summary` also depend on `cross_crate` for their index-based functions.
+- `CrateModel::find_item_in_module(parent_path, item_name)` guarantees: skips `Module` items (module resolution takes priority), follows non-glob `Use` chains up to 10 hops, returns the original `Use` item if the chain leads to a foreign item absent from the local index. Empty `parent_path` means the crate root module.
 - `examples` depends only on `cli` (for `ExamplesArgs`). It has no dependency on `model`, `render`, `rustdoc_json`, or `resolve`.
 - `lib.rs` is the sole orchestrator — all cross-module data flow passes through it.
 - `cross_crate` depends on `rustdoc_json` (for `generate_rustdoc_json(..., true)` / `parse_rustdoc_json_cached`) and `model`. It never calls `remote` or `resolve`.
@@ -26,6 +28,8 @@
 
 ## Common Mistakes
 - Calling `render_item()` for a new item type without a preceding `is_visible_from()` check → private items appear in output.
+- `render_leaf_not_found()` lists available items filtered by visibility. Items whose `Use` chain ends in a foreign-id are returned as the original `Use` item by `find_item_in_module()` — the rendered error list will show the re-export name, not the underlying item's name, which may look odd but is correct.
+- Leaf resolution skips glob `Use` items (`use_item.is_glob == true`). A path like `my_crate::prelude::Foo` where `Foo` is re-exported only through a glob `pub use inner::*` will fall through to "leaf not found" rather than following the glob. This is intentional — glob expansion is handled by a separate mechanism.
 
 ## Technical Debt
 - String-based glob detection/replacement in `apply_glob_expansions` — fragile (whitespace-normalized string matching). See `glob-expansion.md`.

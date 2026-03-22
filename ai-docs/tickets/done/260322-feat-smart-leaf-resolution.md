@@ -1,6 +1,8 @@
 ---
 title: "Smart leaf item resolution in api target path"
-status: idea
+status: done
+started: 2026-03-22
+completed: 2026-03-22
 ---
 
 # Smart leaf item resolution in `api` target path
@@ -61,3 +63,18 @@ When the leaf is a `pub use` re-export:
   (unlikely in practice), show all of them.
 - **Enum variants**: `Enum::Variant` should work the same way — resolve `Enum`
   in parent module, then find the variant.
+
+### Result (e9a1ce1) - 26-03-22
+
+Implemented all planned features:
+
+- `CrateModel::find_item_in_module()` — finds non-module items in a parent module, follows Use chains (max 10 hops), returns resolved item or original Use item for foreign refs
+- `render::render_leaf_item()` — renders single item + all impl blocks (inherent + trait) with same collapsing as module view
+- `render::render_leaf_not_found()` — error listing with visibility-filtered available items
+- Pipeline wiring in `run_shared_api_pipeline()`: tries leaf after local module + cross-crate resolution, before "module not found" error. Parent module existence checked to show leaf-not-found vs module-not-found
+- 9 new integration tests (165 total): struct/trait/reexport leaf, root-level item, not-found, private visibility, module-wins, two pipeline e2e tests
+
+**Deviations from plan:**
+- `render_leaf_not_found` received `same_crate` + `reachable` params (not in original plan) — code review caught private item leakage
+- `find_module_entry` made public (was private) — needed by render module for parent module existence checks
+- Impl rendering inlined in `render_leaf_item` rather than reusing `render_inlined_impl_blocks` — avoids hardcoded `same_crate=false` coupling, consistent with plan's simplification note

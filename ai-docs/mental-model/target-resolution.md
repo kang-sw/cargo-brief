@@ -11,7 +11,7 @@
 
 ## Coupling
 - `ResolvedTarget.package_name` ↔ `CrateModel.crate_name()`: These use different naming conventions. Package names use hyphens (`my-crate`), crate names use underscores (`my_crate`). `lib.rs:68` normalizes with `replace('-', "_")` for `same_crate` detection, but other comparisons may not normalize.
-- `--crates` bypass (lib.rs:27-30): When `args.crates` is `Some`, the entire resolve pipeline is skipped. `args.crate_name` is silently ignored. No `conflicts_with` in clap prevents passing both.
+- `-C`/`--crates` bypass: When `remote.crates` is `true`, the entire resolve pipeline is skipped and `args.target.crate_name` is used directly as the remote crate spec. The local resolve path is never entered.
 - File path detection: `is_file_path()` triggers on `/` or `.rs` suffix. False positives possible for crate names containing `.rs` (unlikely but not validated).
 
 ## Extension Points & Change Recipes
@@ -19,11 +19,9 @@
 - **Change `self` detection**: Modify `load_cargo_metadata()`. The `current_package` field is set by matching cwd against manifest directories. Virtual workspace roots produce `current_package: None`.
 
 ## Common Mistakes
-- Passing `cargo brief serde --crates tokio`: `serde` stored in `args.crate_name` is silently ignored; `tokio` from `--crates` is used. No error or warning.
+- Running `cargo brief -C api serde` and also specifying a local manifest path: `remote.crates = true` bypasses all local resolution; the manifest path is unused. No error or warning.
 - Running from virtual workspace root without `--at-package`: `current_package` is `None`, `same_crate` becomes unconditionally `false`. All `pub(crate)` items hidden.
 - File path resolution uses three fallbacks: (1) cwd-relative, (2) package `src/`-relative, (3) package-root-relative. If a file exists at multiple locations, the first match wins — potentially resolving to the wrong module.
-
-## Common Mistakes
 - `find_dep_source_root` issues a second subprocess (`cargo metadata` with deps). If the remote workspace's dependencies have not been fetched yet (e.g., immediately after `resolve_workspace`), this call may trigger a network download or silently return a stale path on failure.
 
 ## Technical Debt
