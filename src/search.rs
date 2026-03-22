@@ -844,6 +844,32 @@ fn walk_struct_fields<'a>(
     }
 }
 
+/// Walk public struct fields (cross-crate only — no visibility check beyond `pub`).
+fn walk_struct_fields_pub<'a>(
+    model: &'a CrateModel,
+    s: &Struct,
+    struct_path: &str,
+    leaves: &mut Vec<LeafItem<'a>>,
+) {
+    if let StructKind::Plain { fields, .. } = &s.kind {
+        for field_id in fields {
+            if let Some(field_item) = model.krate.index.get(field_id) {
+                if let ItemEnum::StructField(ty) = &field_item.inner {
+                    if matches!(field_item.visibility, Visibility::Public) {
+                        let fname = field_item.name.as_deref().unwrap_or("?");
+                        leaves.push(LeafItem {
+                            path: format!("{struct_path}::{fname}"),
+                            item: field_item,
+                            kind: LeafKind::Field,
+                            context: LeafContext::Field { field_type: ty },
+                        });
+                    }
+                }
+            }
+        }
+    }
+}
+
 /// Walk impl blocks for types defined in this module.
 #[allow(clippy::too_many_arguments)]
 fn walk_impl_blocks<'a>(
@@ -1456,6 +1482,48 @@ pub fn search_cross_crate_index(
                 &mut type_leaves,
             );
         }
+        // Walk struct fields for cross-crate types
+        if entry.item_kind == AccessibleItemKind::Struct {
+            if let ItemEnum::Struct(s) = &item.inner {
+                walk_struct_fields_pub(model, s, &entry.accessible_path, &mut type_leaves);
+            }
+        }
+        // Walk enum variants for cross-crate types
+        if entry.item_kind == AccessibleItemKind::Enum {
+            if let ItemEnum::Enum(e) = &item.inner {
+                for variant_id in &e.variants {
+                    if let Some(v) = model.krate.index.get(variant_id) {
+                        let vname = v.name.as_deref().unwrap_or("?");
+                        type_leaves.push(LeafItem {
+                            path: format!("{}::{vname}", entry.accessible_path),
+                            item: v,
+                            kind: LeafKind::Variant,
+                            context: LeafContext::Variant,
+                        });
+                    }
+                }
+            }
+        }
+        // Walk union fields for cross-crate types
+        if entry.item_kind == AccessibleItemKind::Union {
+            if let ItemEnum::Union(u) = &item.inner {
+                for field_id in &u.fields {
+                    if let Some(f) = model.krate.index.get(field_id) {
+                        if let ItemEnum::StructField(ty) = &f.inner {
+                            if matches!(f.visibility, Visibility::Public) {
+                                let fname = f.name.as_deref().unwrap_or("?");
+                                type_leaves.push(LeafItem {
+                                    path: format!("{}::{fname}", entry.accessible_path),
+                                    item: f,
+                                    kind: LeafKind::Field,
+                                    context: LeafContext::Field { field_type: ty },
+                                });
+                            }
+                        }
+                    }
+                }
+            }
+        }
 
         matched.push((
             entry.crate_idx,
@@ -1504,6 +1572,73 @@ pub fn search_cross_crate_index(
         });
     }
 
+    // Member filtering (mirrors local-crate logic)
+    if members {
+        let type_paths: HashSet<&str> = filtered
+            .iter()
+            .filter(|(_, l)| {
+                matches!(
+                    l.kind,
+                    LeafKind::Struct | LeafKind::Enum | LeafKind::Trait | LeafKind::Union
+                )
+            })
+            .map(|(_, l)| l.path.as_str())
+            .collect();
+        let mut seen: HashSet<&str> = filtered.iter().map(|(_, l)| l.path.as_str()).collect();
+        let mut extra: Vec<(usize, &LeafItem)> = Vec::new();
+        for (ci, leaf) in &matched {
+            if is_member(leaf) {
+                if let Some(parent) = leaf.path.rsplit_once("::").map(|(p, _)| p) {
+                    if type_paths.contains(parent) && !seen.contains(leaf.path.as_str()) {
+                        seen.insert(&leaf.path);
+                        extra.push((*ci, leaf));
+                    }
+                }
+            }
+        }
+        filtered.extend(extra);
+    } else if methods_of.is_none() {
+        filtered.retain(|(_, leaf)| {
+            if !is_member(leaf) {
+                return true;
+            }
+            let name = leaf.path.rsplit("::").next().unwrap_or(&leaf.path);
+            let name_cmp = if case_sensitive {
+                name.to_string()
+            } else {
+                name.to_lowercase()
+            };
+            parsed
+                .or_groups
+                .iter()
+                .flat_map(|g| g.iter())
+                .any(|tok| match tok {
+                    TokenKind::Substring(s) | TokenKind::Exact(s) => *s == name_cmp,
+                    TokenKind::Glob(_) => false,
+                })
+        });
+
+        // Inject parent types as context headers
+        let member_parents: HashSet<&str> = filtered
+            .iter()
+            .filter(|(_, l)| is_member(l))
+            .filter_map(|(_, l)| l.path.rsplit_once("::").map(|(p, _)| p))
+            .collect();
+        let matched_paths: HashSet<&str> = filtered.iter().map(|(_, l)| l.path.as_str()).collect();
+        let mut extra: Vec<(usize, &LeafItem)> = Vec::new();
+        for (ci, leaf) in &matched {
+            if matches!(
+                leaf.kind,
+                LeafKind::Struct | LeafKind::Enum | LeafKind::Trait | LeafKind::Union
+            ) && member_parents.contains(leaf.path.as_str())
+                && !matched_paths.contains(leaf.path.as_str())
+            {
+                extra.push((*ci, leaf));
+            }
+        }
+        filtered.extend(extra);
+    }
+
     // --methods-of
     if let Some(type_name) = methods_of {
         let suffix = format!("::{type_name}::");
@@ -1518,13 +1653,17 @@ pub fn search_cross_crate_index(
         filtered.retain(|(_, leaf)| kinds.iter().any(|k| leaf.kind.matches_kind_str(k)));
     }
 
-    // Sort: primary by kind, secondary by path
-    filtered.sort_by(|a, b| {
-        a.1.kind
-            .sort_key()
-            .cmp(&b.1.kind.sort_key())
-            .then_with(|| a.1.path.cmp(&b.1.path))
-    });
+    // Sort
+    if members {
+        filtered.sort_by(|a, b| a.1.path.cmp(&b.1.path));
+    } else {
+        filtered.sort_by(|a, b| {
+            a.1.kind
+                .sort_key()
+                .cmp(&b.1.kind.sort_key())
+                .then_with(|| a.1.path.cmp(&b.1.path))
+        });
+    }
 
     let total = filtered.len();
     let (offset, search_limit) = parse_search_limit(limit);
@@ -1534,12 +1673,26 @@ pub fn search_cross_crate_index(
         .unwrap_or(total);
     let skipped_after = total - end;
 
-    // Render — direct model lookup via stored crate_idx
+    // Render with collapsed display
     let mut output = String::new();
+    let mut prev_parent: Option<&str> = None;
 
     for &(ci, ref leaf) in &filtered[offset..end] {
         let model = &index.source_models[ci].0;
-        render_leaf(&mut output, model, leaf, filter);
+        let parent = leaf.path.rsplit_once("::").map(|(p, _)| p);
+
+        if let Some(p) = parent
+            && Some(p) == prev_parent
+            && is_member(leaf)
+        {
+            let member_name = leaf.path.rsplit_once("::").unwrap().1;
+            let padding = " ".repeat(p.len().saturating_sub(1));
+            render_collapsed_member(&mut output, model, leaf, &padding, member_name);
+        } else {
+            render_leaf(&mut output, model, leaf, filter);
+        }
+
+        prev_parent = parent;
     }
 
     if skipped_after > 0 {
