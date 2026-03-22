@@ -949,19 +949,21 @@ fn apply_glob_expansions(
     filter: &FilterArgs,
 ) {
     if expand_glob && !result.source_models.is_empty() {
-        // Phase 2: inline full definitions from source crates (including recursive models)
+        // Phase 2: inline full definitions from source crates (only glob sources)
         let mut seen_names = HashSet::new();
-        for (source, models) in &result.source_models {
-            let mut rendered = String::new();
-            for model in models {
-                rendered.push_str(&render::render_inlined_items(
-                    model,
-                    filter,
-                    &mut seen_names,
-                ));
+        for (source, _items) in &result.item_names {
+            if let Some(models) = result.source_models.get(source) {
+                let mut rendered = String::new();
+                for model in models {
+                    rendered.push_str(&render::render_inlined_items(
+                        model,
+                        filter,
+                        &mut seen_names,
+                    ));
+                }
+                let pattern = format!("pub use {source}::*;");
+                replace_glob_lines(output, &pattern, &rendered);
             }
-            let pattern = format!("pub use {source}::*;");
-            replace_glob_lines(output, &pattern, &rendered);
         }
 
         // Named cross-crate re-exports (same expand_glob gate as Phase 2)
