@@ -2162,10 +2162,10 @@ fn test_cross_crate_glob_phase1() {
         output.contains("GlobInnerTrait"),
         "Phase 1 should list GlobInnerTrait from glob-inner via recursive expansion:\n{output}"
     );
-    // Verify Phase 2 inlining is NOT happening
+    // Verify Phase 1 still shows individual pub use lines (not just Phase 2 inlined defs)
     assert!(
-        !output.contains("struct GlobSourceItem"),
-        "Phase 1 should NOT inline full struct definitions:\n{output}"
+        output.contains("pub use glob_source::GlobSourceItem"),
+        "Phase 1 should show individual pub use lines:\n{output}"
     );
 }
 

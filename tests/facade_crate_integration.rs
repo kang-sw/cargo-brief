@@ -78,14 +78,14 @@ fn clap_facade_expands_clap_builder_items() {
     let args = facade_args("clap");
     let output = run_api_pipeline(&args, &RemoteOpts::default()).unwrap();
 
-    // Key types from clap_builder should appear as individual pub use
+    // With default expansion on, full definitions should be inlined
     assert!(
-        output.contains("pub use clap_builder::Command;"),
-        "Command should be re-exported from clap_builder:\n{output}"
+        output.contains("pub struct Command"),
+        "Command struct definition should be inlined by default:\n{output}"
     );
     assert!(
-        output.contains("pub use clap_builder::Arg;"),
-        "Arg should be re-exported from clap_builder"
+        output.contains("pub struct Arg"),
+        "Arg struct definition should be inlined by default"
     );
 }
 
