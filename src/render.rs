@@ -209,7 +209,10 @@ pub fn render_single_inlined_item(
             if name != item_name {
                 continue;
             }
-            if !seen_names.insert(name.to_string()) {
+            // Check dedup but don't insert yet — only insert on successful render.
+            // A source crate that can't render the item (e.g., proc macro crate)
+            // must not block other source crates from trying.
+            if seen_names.contains(name) {
                 return None;
             }
 
@@ -221,7 +224,7 @@ pub fn render_single_inlined_item(
                     && let Some(target_item) = model.krate.index.get(target_id)
                 {
                     if matches!(target_item.inner, ItemEnum::Module(_)) {
-                        return None;
+                        continue; // not renderable here — try next model
                     }
                     if !should_render_item(target_item, filter) {
                         return None;
@@ -256,11 +259,12 @@ pub fn render_single_inlined_item(
             }
 
             render_inlined_impl_blocks(model, filter, &observer, &impl_ids, "", &mut output);
-            return if output.is_empty() {
-                None
-            } else {
-                Some(output)
-            };
+            if !output.is_empty() {
+                seen_names.insert(name.to_string());
+                return Some(output);
+            }
+            // Render produced nothing (e.g., proc macro) — don't claim the name,
+            // let other source crates try
         }
     }
     None
