@@ -302,9 +302,9 @@ pub struct ApiArgs {
     #[arg(long)]
     pub recursive: bool,
 
-    /// Inline full definitions from glob re-export sources
+    /// Suppress glob re-export expansion (show pub use lines instead of inlined definitions)
     #[arg(long)]
-    pub expand_glob: bool,
+    pub no_expand_glob: bool,
 }
 
 /// Arguments for the `search` subcommand.

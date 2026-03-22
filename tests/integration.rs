@@ -65,7 +65,7 @@ fn default_args() -> ApiArgs {
         },
         depth: 1,
         recursive: true,
-        expand_glob: false,
+        no_expand_glob: false,
     }
 }
 
@@ -2144,7 +2144,7 @@ fn test_examples_smart_case() {
 #[test]
 fn test_cross_crate_glob_phase1() {
     let mut args = default_args();
-    args.expand_glob = false;
+    args.no_expand_glob = true;
     let output = cargo_brief::run_api_pipeline(&args, &RemoteOpts::default()).unwrap();
 
     // GlobSourceItem is a direct item in glob-source
@@ -2162,14 +2162,18 @@ fn test_cross_crate_glob_phase1() {
         output.contains("GlobInnerTrait"),
         "Phase 1 should list GlobInnerTrait from glob-inner via recursive expansion:\n{output}"
     );
+    // Verify Phase 2 inlining is NOT happening
+    assert!(
+        !output.contains("struct GlobSourceItem"),
+        "Phase 1 should NOT inline full struct definitions:\n{output}"
+    );
 }
 
-/// Phase 2: expand_glob=true, full struct/trait definitions from both
+/// Phase 2: expand_glob defaults to on, full struct/trait definitions from both
 /// glob-source and glob-inner should be inlined.
 #[test]
 fn test_cross_crate_glob_phase2() {
-    let mut args = default_args();
-    args.expand_glob = true;
+    let args = default_args();
     let output = cargo_brief::run_api_pipeline(&args, &RemoteOpts::default()).unwrap();
 
     // Full struct definition from glob-inner (2 levels deep)

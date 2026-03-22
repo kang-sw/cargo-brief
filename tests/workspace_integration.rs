@@ -32,7 +32,7 @@ fn workspace_args(crate_name: &str) -> ApiArgs {
         },
         depth: 1,
         recursive: true,
-        expand_glob: false,
+        no_expand_glob: false,
     }
 }
 

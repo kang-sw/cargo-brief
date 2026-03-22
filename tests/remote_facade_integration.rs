@@ -39,7 +39,7 @@ fn hecs_args() -> (ApiArgs, RemoteOpts) {
         },
         depth: 1,
         recursive: true,
-        expand_glob: false,
+        no_expand_glob: false,
     };
     let remote = RemoteOpts {
         crates: true,
