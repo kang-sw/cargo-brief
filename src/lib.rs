@@ -309,7 +309,13 @@ fn run_shared_api_pipeline(ctx: &PipelineContext, args: &ApiArgs) -> Result<Stri
                     };
 
                     if parent_exists {
-                        render::render_leaf_not_found(&model, parent_path, leaf_name)
+                        render::render_leaf_not_found(
+                            &model,
+                            parent_path,
+                            leaf_name,
+                            same_crate,
+                            reachable.as_ref(),
+                        )
                     } else {
                         // Fall through to normal render (produces "module not found" error)
                         render_and_expand_globs(

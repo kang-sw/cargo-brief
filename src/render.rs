@@ -376,6 +376,8 @@ pub fn render_leaf_not_found(
     model: &CrateModel,
     parent_module_path: &str,
     leaf_name: &str,
+    same_crate: bool,
+    reachable: Option<&ReachableInfo>,
 ) -> String {
     let mut output = String::new();
     let crate_name = model.crate_name();
@@ -409,8 +411,21 @@ pub fn render_leaf_not_found(
     let children = model.module_children(parent_item);
     let mut items: Vec<(&str, &str)> = Vec::new();
 
-    for (_child_id, child) in &children {
+    let observer = model.crate_name().to_string();
+
+    for (child_id, child) in &children {
         if matches!(child.inner, ItemEnum::Module(_)) {
+            continue;
+        }
+
+        // Filter by visibility — don't leak private items to external observers
+        if let Some(info) = reachable {
+            if !info.reachable.contains(child_id) {
+                continue;
+            }
+        } else if !matches!(child.visibility, Visibility::Public | Visibility::Default)
+            && !is_visible_from(model, child, child_id, &observer, same_crate)
+        {
             continue;
         }
 

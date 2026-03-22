@@ -3009,7 +3009,7 @@ fn test_leaf_root_level_item() {
 #[test]
 fn test_leaf_not_found_shows_available() {
     let model = fixture_model();
-    let output = render_leaf_not_found(&model, "outer", "NonExistent");
+    let output = render_leaf_not_found(&model, "outer", "NonExistent", true, None);
 
     assert!(
         output.contains("ERROR: item 'NonExistent' not found in module 'outer'"),
