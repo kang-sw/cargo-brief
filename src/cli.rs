@@ -468,8 +468,8 @@ pub struct ExamplesArgs {
 /// Arguments for the `ts` (tree-sitter) subcommand.
 #[derive(Args, Debug, Clone)]
 pub struct TsArgs {
-    /// Target crate
-    #[arg(value_name = "TARGET", default_value = "self")]
+    /// Target crate (use 'self' for current crate)
+    #[arg(value_name = "TARGET")]
     pub crate_name: String,
 
     /// Tree-sitter S-expression query
