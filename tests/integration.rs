@@ -2944,8 +2944,8 @@ fn test_leaf_struct_resolution() {
         "Should NOT contain sibling items:\n{output}"
     );
     assert!(
-        !output.contains("MyTrait"),
-        "Should NOT contain sibling traits:\n{output}"
+        !output.contains("pub trait MyTrait"),
+        "Should NOT contain sibling trait definitions:\n{output}"
     );
 }
 

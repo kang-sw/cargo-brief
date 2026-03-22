@@ -181,13 +181,14 @@ impl CrateModel {
             }
 
             // Extract item name using the item.name / use_item.name fallback pattern
-            let name = child.name.as_deref().or_else(|| {
-                if let ItemEnum::Use(u) = &child.inner {
+            let name = child
+                .name
+                .as_deref()
+                .or(if let ItemEnum::Use(u) = &child.inner {
                     Some(u.name.as_str())
                 } else {
                     None
-                }
-            });
+                });
 
             let Some(name) = name else { continue };
 
@@ -207,11 +208,11 @@ impl CrateModel {
                         match self.krate.index.get(current_id) {
                             Some(item) if matches!(item.inner, ItemEnum::Use(ref u) if !u.is_glob) =>
                             {
-                                if let ItemEnum::Use(u) = &item.inner {
-                                    if let Some(next_id) = &u.id {
-                                        current_id = next_id;
-                                        continue;
-                                    }
+                                if let ItemEnum::Use(u) = &item.inner
+                                    && let Some(next_id) = &u.id
+                                {
+                                    current_id = next_id;
+                                    continue;
                                 }
                                 // Chain broken — return what we have
                                 return Some((current_id, item));
