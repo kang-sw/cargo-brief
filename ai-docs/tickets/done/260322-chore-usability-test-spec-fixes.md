@@ -1,6 +1,7 @@
 ---
 title: "Fix usability test spec issues found in first run"
-status: todo
+status: done
+completed: 2026-03-22
 ---
 
 ## Issues
@@ -32,3 +33,13 @@ criteria to accept re-export-only output as WARN (not FAIL).
 ## Found By
 
 First usability test run (2026-03-22).
+
+### Result (69dea6d) - 26-03-22
+
+All three issues fixed in `ai-docs/usability-test-spec.md`:
+- S05: `search self fn` → `search self run`
+- Network: added setup section with pre-warm commands and SKIP guidance
+- Q02/Q04: commands now use `--expand-glob`; criteria note that re-export-only
+  output is expected default behavior
+- Q03: command uses `-F full` (spawn requires `rt` feature)
+- SKILL.md: remote commands now use `dangerouslyDisableSandbox: true`

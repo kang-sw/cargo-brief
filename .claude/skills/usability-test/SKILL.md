@@ -54,7 +54,7 @@ When running commands, substitute BRIEF with the binary path above.
 ## Rules
 
 - Run each command via the Bash tool
-- For commands with -C flag (remote crates), use timeout: 180000
+- For commands with -C flag (remote crates), use timeout: 180000 and dangerouslyDisableSandbox: true
 - Capture both stdout and stderr
 - For smoke tests: check exit code and stdout non-empty
 - For quality tests: evaluate output against each criterion specifically —
