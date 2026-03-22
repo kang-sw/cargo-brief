@@ -272,15 +272,62 @@ fn run_shared_api_pipeline(ctx: &PipelineContext, args: &ApiArgs) -> Result<Stri
                 apply_glob_expansions(&mut output, &result, args.expand_glob, &args.filter);
                 output
             } else {
-                // Fall through to normal render (produces "module not found" error)
-                render_and_expand_globs(
-                    &model,
-                    Some(module_path),
-                    args,
-                    ctx,
-                    same_crate,
-                    reachable.as_ref(),
-                )?
+                // Try leaf item resolution before falling through to error
+                let leaf_result = if let Some((parent, leaf_name)) = module_path.rsplit_once("::") {
+                    model.find_item_in_module(parent, leaf_name)
+                } else {
+                    model.find_item_in_module("", module_path)
+                };
+
+                if let Some((item_id, item)) = leaf_result {
+                    render::render_leaf_item(
+                        &model,
+                        item,
+                        item_id,
+                        args,
+                        if same_crate {
+                            args.target.at_mod.as_deref()
+                        } else {
+                            None
+                        },
+                        same_crate,
+                        reachable.as_ref(),
+                    )
+                } else {
+                    // Check if parent module exists — if so, show leaf-not-found with available items
+                    let (parent_path, leaf_name) =
+                        if let Some((p, l)) = module_path.rsplit_once("::") {
+                            (p, l)
+                        } else {
+                            ("", module_path.as_str())
+                        };
+
+                    let parent_exists = if parent_path.is_empty() {
+                        model.root_module().is_some()
+                    } else {
+                        model.find_module(parent_path).is_some()
+                    };
+
+                    if parent_exists {
+                        render::render_leaf_not_found(
+                            &model,
+                            parent_path,
+                            leaf_name,
+                            same_crate,
+                            reachable.as_ref(),
+                        )
+                    } else {
+                        // Fall through to normal render (produces "module not found" error)
+                        render_and_expand_globs(
+                            &model,
+                            Some(module_path),
+                            args,
+                            ctx,
+                            same_crate,
+                            reachable.as_ref(),
+                        )?
+                    }
+                }
             }
         }
     } else if args.recursive && has_cross_crate {

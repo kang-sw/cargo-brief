@@ -160,7 +160,8 @@ alternatives considered, and trade-offs — focus on _why_ this approach was cho
 
 ## Recent Work
 
-- v0.6.0: **CLI restructure (breaking)** — `--crates <SPEC>` replaced by `-C`/`--crates` boolean flag on `BriefDirect` (global). Crate spec moves to TARGET positional. `-F`/`--features` and `--no-cache` also global. `--clean [SPEC]` replaced by `clean` subcommand. `RemoteArgs` removed → `RemoteOpts` (plain struct, not clap-derived). All 4 pipeline functions take `remote: &RemoteOpts` as separate param. Search/examples `Cow` workarounds removed.
+- Smart leaf resolution: `cargo brief api <target> outer::PubStruct` resolves leaf items (struct/enum/trait/fn/etc.) when the final path segment is not a module. `CrateModel::find_item_in_module()`, `render::render_leaf_item()`, `render::render_leaf_not_found()`. Wired into `run_shared_api_pipeline()` after module + cross-crate resolution.
+- v0.6.0: **CLI restructure (breaking)** — `-C`/`--crates` boolean flag, `clean` subcommand, `RemoteOpts`. All 4 pipeline functions take `remote: &RemoteOpts` as separate param.
 - v0.5.2+: Canonical reexport paths, batch rustdoc pre-warming, search pattern DSL, summary subcommand, recursive cross-crate glob expansion, unified local/remote pipelines.
 
 ## Workspace Reference
@@ -171,7 +172,7 @@ alternatives considered, and trade-offs — focus on _why_ this approach was cho
 - CLI types: `ApiArgs`, `SearchArgs`, `ExamplesArgs`, `SummaryArgs`, `CleanArgs` + shared `TargetArgs`/`FilterArgs`/`GlobalArgs` + `RemoteOpts` (plain struct, not clap). `BriefDirect` has `-C`, `-F`, `--no-cache` as `global = true` flags.
 - Modules: `cli`, `cross_crate`, `examples`, `remote`, `resolve`, `rustdoc_json`, `model`, `render`, `search`, `summary`
 - Test fixture: `test_fixture/` (workspace with `glob-source`/`glob-inner` sub-crates for cross-crate glob chain testing)
-- Integration tests: `tests/integration.rs` (156 tests)
+- Integration tests: `tests/integration.rs` (165 tests)
 
 ## Documented Dependencies
 

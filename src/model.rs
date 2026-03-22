@@ -108,7 +108,7 @@ impl CrateModel {
     }
 
     /// Find a module by path, returning both its Id and Item.
-    fn find_module_entry(&self, module_path: &str) -> Option<(&Id, &Item)> {
+    pub fn find_module_entry(&self, module_path: &str) -> Option<(&Id, &Item)> {
         let full_path = format!("{}::{}", self.crate_name(), module_path);
         let id = self
             .module_index
@@ -149,6 +149,93 @@ impl CrateModel {
                 return Some(path.as_str());
             }
         }
+        None
+    }
+
+    /// Find a non-module item by name within a parent module.
+    ///
+    /// `parent_module_path` is relative to the crate root (e.g., "outer" or "outer::inner").
+    /// An empty string means the crate root module.
+    ///
+    /// For `Use` items (re-exports), follows the chain to the actual definition (max 10 hops).
+    /// If the chain leads to a foreign item not in the index, returns the original Use item.
+    /// Skips `Module` items — those are resolved by the module path system.
+    pub fn find_item_in_module(
+        &self,
+        parent_module_path: &str,
+        item_name: &str,
+    ) -> Option<(&Id, &Item)> {
+        let parent_item = if parent_module_path.is_empty() {
+            self.root_module()?
+        } else {
+            self.find_module_entry(parent_module_path)
+                .map(|(_, item)| item)?
+        };
+
+        let children = self.module_children(parent_item);
+
+        for (child_id, child) in children {
+            // Skip modules — module resolution takes priority
+            if matches!(child.inner, ItemEnum::Module(_)) {
+                continue;
+            }
+
+            // Extract item name using the item.name / use_item.name fallback pattern
+            let name = child
+                .name
+                .as_deref()
+                .or(if let ItemEnum::Use(u) = &child.inner {
+                    Some(u.name.as_str())
+                } else {
+                    None
+                });
+
+            let Some(name) = name else { continue };
+
+            if name != item_name {
+                continue;
+            }
+
+            // For Use items, follow the chain to the actual definition
+            if let ItemEnum::Use(use_item) = &child.inner {
+                if use_item.is_glob {
+                    continue;
+                }
+                if let Some(target_id) = &use_item.id {
+                    // Follow the chain (max 10 hops)
+                    let mut current_id = target_id;
+                    for _ in 0..10 {
+                        match self.krate.index.get(current_id) {
+                            Some(item) if matches!(item.inner, ItemEnum::Use(ref u) if !u.is_glob) =>
+                            {
+                                if let ItemEnum::Use(u) = &item.inner
+                                    && let Some(next_id) = &u.id
+                                {
+                                    current_id = next_id;
+                                    continue;
+                                }
+                                // Chain broken — return what we have
+                                return Some((current_id, item));
+                            }
+                            Some(item) => return Some((current_id, item)),
+                            None => {
+                                // Foreign item — return the original Use item
+                                return Some((child_id, child));
+                            }
+                        }
+                    }
+                    // Exceeded hop limit — return current resolution
+                    if let Some(item) = self.krate.index.get(current_id) {
+                        return Some((current_id, item));
+                    }
+                }
+                // Use without target id — return it as-is
+                return Some((child_id, child));
+            }
+
+            return Some((child_id, child));
+        }
+
         None
     }
 

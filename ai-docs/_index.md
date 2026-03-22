@@ -133,14 +133,15 @@ Parsed via `rustdoc-types` 0.57. Post-macro-expansion output.
 - Missing nightly toolchain: actionable install command
 - Package not found: clear message with original cargo error
 - Module not found: lists available modules in the crate
+- Leaf item not found: lists available items in the parent module (visibility-filtered)
 - `.with_context()` at each pipeline step
 
 ---
 
 ## Operational State (v0.6.0)
 
-- Core pipeline complete. All item types supported. 156 integration tests.
-- Flexible package name resolution: `self`, `crate::module`, file path→module. Bare names always resolve as package.
+- Core pipeline complete. All item types supported. 165 integration tests.
+- Flexible package name resolution: `self`, `crate::module`, file path→module. Bare names always resolve as package. **Smart leaf resolution**: when the final path segment is a leaf item (struct, enum, trait, fn, etc.) instead of a module, resolves the parent module and renders the item with full detail (definition + impls). Module resolution always wins (backward compatible).
 - Remote crate support: `-C` boolean flag + TARGET positional as crate spec (e.g., `cargo brief -C api serde@1`). Workspaces cached at `~/.cache/cargo-brief/crates/` with version-normalized directory names (`name[version]`). Exact version resolved via crates.io API with 24h cache; bare specs auto-update. `cargo brief clean [SPEC]` clears cached workspaces.
 - **Unified pipeline**: Local and remote entry points produce a `PipelineContext`, then call shared `run_shared_api_pipeline()` / `run_shared_search_pipeline()`. Cross-crate discovery fires automatically for both local and remote crates.
 - **Cross-crate accessible paths**: Facade crates (bevy, axum) show items with user-facing paths via `CrossCrateIndex`. `build_cross_crate_index()` walks the facade root top-down, tracking accessible paths through glob/named re-exports. All three pipelines (search, api, summary) use the unified index — items appear as `render::render_resource::AsBindGroup` not `bevy_render::render_resource::bind_group::AsBindGroup`. Dedup keeps shortest non-prelude path per (crate_idx, item_id). Module targeting (`bevy ecs`) still uses the original `resolve_cross_crate_module()`.
@@ -193,8 +194,7 @@ Domain-oriented operational knowledge in `ai-docs/mental-model/`:
 
 ## In Progress
 
-1. **`tickets/wip/260321-feat-canonical-reexport-paths.md`** — Phase 1 done (intra-crate). Phase 2 (cross-crate) pending.
-2. **`tickets/wip/260322-feat-crates-boolean-flag.md`** — CLI restructure: `-C` boolean flag, `clean` subcommand, `RemoteOpts`. v0.6.0 breaking.
+(none)
 
 ## Next Up (priority order)
 
