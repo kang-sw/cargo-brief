@@ -149,3 +149,20 @@ Implementation: ~40 lines in `ts.rs` (S-expression pattern boundary detection
 **Key findings:**
 - tree-sitter `QueryMatches`/`QueryCaptures` use `StreamingIterator` — explicit dep required
 - Capture-less queries need auto-augmentation; S-expression queries without `@capture` produce empty captures array
+
+### Result - 26-03-22
+
+**Phase 2 completed.** Implemented:
+- `--src-only`: restricts file scanning to `src/` only (skips examples/tests/benches)
+- `--limit [OFFSET:]N`: pagination with early-exit via labeled `'files:` break. `parse_limit()` helper in `ts.rs`
+- `--quiet`/`-q`: location-only output (`@file:line`), compatible with `--captures` and `--limit`
+- Remote `-C` support: follows `run_examples_pipeline` pattern — `resolve_workspace` + `find_dep_source_root` + `run_query`. `WorkspaceDir` binding keeps workspace alive through query execution
+- Comprehensive `--help`: node type reference, capture semantics, predicate reference, practical tips, playground link
+- No-matches output enhanced with playground URL hint
+- 7 new integration tests (191 total): src_only exclusion/inclusion, limit, limit+offset, quiet, quiet+captures, no-matches hint
+
+**Deviations from plan:** `--examples-only` deferred as planned — `--src-only` covers 90% of use cases.
+
+**Key findings:**
+- Limit logic uses `match_count` (total seen) for offset skip and `emitted` (actually written) for limit check — clean separation
+- Quiet mode in captures branch still emits `@file:line` but omits `@name: text` lines

@@ -34,7 +34,7 @@ cargo brief [-C] api [target] [module_path] [OPTIONS]
 cargo brief [-C] search [target] <pattern> [OPTIONS]
 cargo brief [-C] examples [target] [pattern] [OPTIONS]
 cargo brief [-C] summary [target] [module_path] [OPTIONS]
-cargo brief ts [target] '<query>' [OPTIONS]
+cargo brief [-C] ts [target] '<query>' [OPTIONS]
 cargo brief clean [SPEC]
 ```
 
@@ -55,9 +55,10 @@ lines with context and `*` markers. `--tests [DEPTH]` / `--benches [DEPTH]` exte
 **`summary`** — Compact module-level overview with item counts per kind.
 
 **`ts`** — Run tree-sitter structural queries against crate source files.
-Query is a required S-expression pattern. Scans `src/`, `examples/`, `tests/`, `benches/`.
+Query is a required S-expression pattern. Scans `src/`, `examples/`, `tests/`, `benches/` (default) or `--src-only` for `src/` only.
 Modes: verbatim (default), `--captures` (capture name + text pairs), `--context N` (surrounding lines).
-Remote crate support (`-C`) not yet implemented. Disk-only pipeline (no rustdoc JSON).
+`--quiet`/`-q` outputs location-only (`@file:line`). `--limit [OFFSET:]N` paginates results.
+Capture-less queries auto-augmented with `@_match`. Remote crate support (`-C`) via disk-only pipeline (no rustdoc JSON).
 
 **`clean`** — Clear cached remote crate workspaces. Optional `SPEC` argument for specific crate.
 
@@ -148,7 +149,7 @@ Parsed via `rustdoc-types` 0.57. Post-macro-expansion output.
 
 ## Operational State (v0.6.0)
 
-- Core pipeline complete. All item types supported. 183 integration tests.
+- Core pipeline complete. All item types supported. 191 integration tests.
 - Flexible package name resolution: `self`, `crate::module`, file path→module. Bare names always resolve as package. **Smart leaf resolution**: when the final path segment is a leaf item (struct, enum, trait, fn, etc.) instead of a module, resolves the parent module and renders the item with full detail (definition + impls). Module resolution always wins (backward compatible).
 - Remote crate support: `-C` boolean flag + TARGET positional as crate spec (e.g., `cargo brief -C api serde@1`). Workspaces cached at `~/.cache/cargo-brief/crates/` with version-normalized directory names (`name[version]`). Exact version resolved via crates.io API with 24h cache; bare specs auto-update. `cargo brief clean [SPEC]` clears cached workspaces.
 - **Unified pipeline**: Local and remote entry points produce a `PipelineContext`, then call shared `run_shared_api_pipeline()` / `run_shared_search_pipeline()`. Cross-crate discovery fires automatically for both local and remote crates.

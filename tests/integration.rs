@@ -3433,6 +3433,9 @@ fn default_ts_args() -> TsArgs {
         manifest_path: Some("test_fixture/Cargo.toml".to_string()),
         captures: false,
         context: "0".to_string(),
+        src_only: false,
+        limit: None,
+        quiet: false,
     }
 }
 
@@ -3532,5 +3535,111 @@ fn test_ts_verbatim_shows_pattern_root() {
     assert!(
         output.contains("impl MyTrait for PubStruct"),
         "Verbatim mode should show full impl block:\n{output}"
+    );
+}
+
+#[test]
+fn test_ts_src_only_excludes_examples() {
+    let mut args = default_ts_args();
+    args.query = "(function_item name: (identifier) @n (#eq? @n \"main\"))".to_string();
+    args.src_only = true;
+    let output = cargo_brief::run_ts_pipeline(&args, &RemoteOpts::default()).unwrap();
+    assert!(
+        output.contains("// no matches"),
+        "src_only should not find main() from examples/:\n{output}"
+    );
+}
+
+#[test]
+fn test_ts_src_only_finds_src() {
+    let mut args = default_ts_args();
+    args.query = "(function_item name: (identifier) @name)".to_string();
+    args.src_only = true;
+    let output = cargo_brief::run_ts_pipeline(&args, &RemoteOpts::default()).unwrap();
+    assert!(
+        output.contains("free_function"),
+        "src_only should still find functions in src/:\n{output}"
+    );
+}
+
+#[test]
+fn test_ts_limit() {
+    let mut args = default_ts_args();
+    args.query = "(function_item)".to_string();
+    args.limit = Some("3".to_string());
+    let output = cargo_brief::run_ts_pipeline(&args, &RemoteOpts::default()).unwrap();
+    let at_count = output.lines().filter(|l| l.starts_with('@')).count();
+    assert_eq!(
+        at_count, 3,
+        "limit=3 should produce exactly 3 @-lines:\n{output}"
+    );
+}
+
+#[test]
+fn test_ts_limit_offset() {
+    let mut args = default_ts_args();
+    args.query = "(function_item)".to_string();
+    args.limit = Some("2:2".to_string());
+    let output = cargo_brief::run_ts_pipeline(&args, &RemoteOpts::default()).unwrap();
+    let at_count = output.lines().filter(|l| l.starts_with('@')).count();
+    assert_eq!(
+        at_count, 2,
+        "limit=2:2 should produce exactly 2 @-lines:\n{output}"
+    );
+    // The first match should NOT be the same as limit=2 without offset
+    let mut args_no_offset = default_ts_args();
+    args_no_offset.query = "(function_item)".to_string();
+    args_no_offset.limit = Some("2".to_string());
+    let output_no_offset =
+        cargo_brief::run_ts_pipeline(&args_no_offset, &RemoteOpts::default()).unwrap();
+    let first_with_offset = output.lines().find(|l| l.starts_with('@'));
+    let first_without_offset = output_no_offset.lines().find(|l| l.starts_with('@'));
+    assert_ne!(
+        first_with_offset, first_without_offset,
+        "Offset should skip the first matches"
+    );
+}
+
+#[test]
+fn test_ts_quiet() {
+    let mut args = default_ts_args();
+    args.query = "(function_item)".to_string();
+    args.quiet = true;
+    let output = cargo_brief::run_ts_pipeline(&args, &RemoteOpts::default()).unwrap();
+    assert!(
+        output.lines().all(|l| l.starts_with('@') || l.is_empty()),
+        "quiet mode should only have @file:line lines:\n{output}"
+    );
+    assert!(
+        !output.contains("fn "),
+        "quiet mode should not contain source text:\n{output}"
+    );
+}
+
+#[test]
+fn test_ts_quiet_captures() {
+    let mut args = default_ts_args();
+    args.query = "(function_item name: (identifier) @name)".to_string();
+    args.captures = true;
+    args.quiet = true;
+    let output = cargo_brief::run_ts_pipeline(&args, &RemoteOpts::default()).unwrap();
+    assert!(
+        output.contains('@'),
+        "quiet captures should still have @-lines:\n{output}"
+    );
+    assert!(
+        !output.contains("@name:"),
+        "quiet captures should not show capture text:\n{output}"
+    );
+}
+
+#[test]
+fn test_ts_no_matches_hint() {
+    let mut args = default_ts_args();
+    args.query = "(while_expression) @w".to_string();
+    let output = cargo_brief::run_ts_pipeline(&args, &RemoteOpts::default()).unwrap();
+    assert!(
+        output.contains("tree-sitter.github.io"),
+        "No-match output should include playground hint:\n{output}"
     );
 }

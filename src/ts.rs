@@ -9,10 +9,16 @@ use tree_sitter::{Parser, Query, QueryCursor};
 use crate::cli::TsArgs;
 use crate::examples;
 
-/// Collect all `.rs` files from src/, examples/, tests/, benches/.
-fn collect_source_files(source_root: &Path) -> Vec<PathBuf> {
+/// Collect all `.rs` files from source directories.
+/// When `src_only` is true, only `src/` is scanned.
+fn collect_source_files(source_root: &Path, src_only: bool) -> Vec<PathBuf> {
     let mut files = Vec::new();
-    for dir_name in &["src", "examples", "tests", "benches"] {
+    let dirs: &[&str] = if src_only {
+        &["src"]
+    } else {
+        &["src", "examples", "tests", "benches"]
+    };
+    for dir_name in dirs {
         let dir = source_root.join(dir_name);
         if dir.is_dir() {
             files.extend(examples::collect_rs_files(&dir, 999));
@@ -20,6 +26,21 @@ fn collect_source_files(source_root: &Path) -> Vec<PathBuf> {
     }
     files.sort();
     files
+}
+
+/// Parse `--limit` value: `"N"` → (0, N), `"M:N"` → (M, N), `None` → (0, None).
+fn parse_limit(raw: Option<&str>) -> (usize, Option<usize>) {
+    let Some(raw) = raw else {
+        return (0, None);
+    };
+    if let Some((offset_str, limit_str)) = raw.split_once(':') {
+        (
+            offset_str.parse().unwrap_or(0),
+            Some(limit_str.parse().unwrap_or(0)),
+        )
+    } else {
+        (0, Some(raw.parse().unwrap_or(0)))
+    }
 }
 
 /// Find positions after each top-level pattern's closing `)` in an S-expression query.
@@ -96,7 +117,7 @@ pub fn run_query(source_root: &Path, query_src: &str, args: &TsArgs) -> Result<S
         .set_language(&language)
         .context("Failed to set tree-sitter Rust language")?;
 
-    let files = collect_source_files(source_root);
+    let files = collect_source_files(source_root, args.src_only);
     let capture_names = query.capture_names().to_vec();
 
     // Find the index of the auto-added @_match capture (if present).
@@ -111,10 +132,13 @@ pub fn run_query(source_root: &Path, query_src: &str, args: &TsArgs) -> Result<S
         eprintln!("warning: --context is ignored in --captures mode");
     }
 
-    let mut output = String::new();
-    let mut match_count = 0;
+    let (offset, limit) = parse_limit(args.limit.as_deref());
 
-    for file_path in &files {
+    let mut output = String::new();
+    let mut match_count = 0usize;
+    let mut emitted = 0usize;
+
+    'files: for file_path in &files {
         let source = match std::fs::read_to_string(file_path) {
             Ok(s) => s,
             Err(_) => continue,
@@ -140,12 +164,27 @@ pub fn run_query(source_root: &Path, query_src: &str, args: &TsArgs) -> Result<S
                     let name = &capture_names[capture.index as usize];
                     let text = &source[node.start_byte()..node.end_byte()];
                     let line = node.start_position().row + 1;
+
+                    match_count += 1;
+                    if match_count <= offset {
+                        continue;
+                    }
+                    if let Some(n) = limit {
+                        if emitted >= n {
+                            break 'files;
+                        }
+                    }
+                    emitted += 1;
+
                     if !output.is_empty() {
                         output.push('\n');
                     }
-                    output.push_str(&format!("@{}:{}\n", rel.display(), line));
-                    output.push_str(&format!("  @{name}: {text}\n"));
-                    match_count += 1;
+                    if args.quiet {
+                        output.push_str(&format!("@{}:{}\n", rel.display(), line));
+                    } else {
+                        output.push_str(&format!("@{}:{}\n", rel.display(), line));
+                        output.push_str(&format!("  @{name}: {text}\n"));
+                    }
                 }
             }
         } else {
@@ -166,38 +205,55 @@ pub fn run_query(source_root: &Path, query_src: &str, args: &TsArgs) -> Result<S
                     None => query_match.captures[0].node,
                 };
 
+                match_count += 1;
+                if match_count <= offset {
+                    continue;
+                }
+                if let Some(n) = limit {
+                    if emitted >= n {
+                        break 'files;
+                    }
+                }
+                emitted += 1;
+
                 let start_line = node.start_position().row + 1;
-                let text = &source[node.start_byte()..node.end_byte()];
                 let rel = file_path.strip_prefix(source_root).unwrap_or(file_path);
 
                 if !output.is_empty() {
                     output.push('\n');
                 }
 
-                if ctx_before > 0 || ctx_after > 0 {
-                    render_with_context(
-                        &source,
-                        node.start_position().row,
-                        node.end_position().row,
-                        ctx_before,
-                        ctx_after,
-                        rel,
-                        &mut output,
-                    );
-                } else {
+                if args.quiet {
                     output.push_str(&format!("@{}:{}\n", rel.display(), start_line));
-                    output.push_str(text);
-                    if !text.ends_with('\n') {
-                        output.push('\n');
+                } else {
+                    let text = &source[node.start_byte()..node.end_byte()];
+                    if ctx_before > 0 || ctx_after > 0 {
+                        render_with_context(
+                            &source,
+                            node.start_position().row,
+                            node.end_position().row,
+                            ctx_before,
+                            ctx_after,
+                            rel,
+                            &mut output,
+                        );
+                    } else {
+                        output.push_str(&format!("@{}:{}\n", rel.display(), start_line));
+                        output.push_str(text);
+                        if !text.ends_with('\n') {
+                            output.push('\n');
+                        }
                     }
                 }
-                match_count += 1;
             }
         }
     }
 
     if match_count == 0 {
         output.push_str("// no matches\n");
+        output.push_str(
+            "// tip: explore node types at https://tree-sitter.github.io/tree-sitter/playground\n",
+        );
     }
 
     Ok(output)

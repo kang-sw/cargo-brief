@@ -187,14 +187,63 @@ EXAMPLES:
   # Find struct definitions with their fields
   cargo brief ts self '(struct_item name: (type_identifier) @name body: (field_declaration_list) @fields)' --captures
 
-QUERY SYNTAX:
-  Tree-sitter S-expression patterns. Key node types for Rust:
-    function_item, struct_item, enum_item, impl_item, trait_item,
-    type_item, const_item, static_item, macro_definition,
-    use_declaration, mod_item, call_expression, field_expression
+  # Find functions returning Result
+  cargo brief ts self '(function_item return_type: (generic_type type: (type_identifier) @r (#eq? @r \"Result\")))'
 
-  Captures: @name binds a node. With --captures, only captured nodes are shown.
-  Predicates: (#eq? @cap \"value\"), (#match? @cap \"regex\")")]
+  # Find let bindings with type annotations
+  cargo brief ts self '(let_declaration pattern: (_) @pat type: (_) @type)' --captures
+
+  # Find all call expressions to a specific function
+  cargo brief ts self '(call_expression function: (identifier) @fn (#eq? @fn \"spawn\"))'
+
+  # Location-only output for large result sets
+  cargo brief ts self '(function_item)' --quiet
+
+  # Limit results
+  cargo brief ts self '(function_item)' --limit 10
+
+  # Only search src/ (skip tests/examples/benches)
+  cargo brief ts self '(function_item)' --src-only
+
+  # Query a remote crate's source
+  cargo brief -C ts serde@1 '(struct_item)'
+
+QUERY SYNTAX:
+  Tree-sitter S-expression patterns match AST nodes by type and structure.
+  Explore the AST interactively: https://tree-sitter.github.io/tree-sitter/playground
+
+NODE TYPES (common Rust constructs):
+  Items:       function_item, struct_item, enum_item, impl_item, trait_item,
+               type_item, const_item, static_item, macro_definition,
+               use_declaration, mod_item
+  Expressions: call_expression, method_call_expression, field_expression,
+               match_expression, if_expression, closure_expression,
+               return_expression, await_expression
+  Statements:  let_declaration, expression_statement, assignment_expression
+  Types:       type_identifier, generic_type, reference_type, array_type,
+               function_type, tuple_type
+  Other:       attribute_item, line_comment, block_comment, string_literal,
+               identifier, field_identifier
+
+CAPTURES:
+  @name binds a node. In default mode, the outermost matched node is shown
+  (captures used only in predicates don't affect output). With --captures,
+  each @name: text pair is shown separately. Capture-less queries work too —
+  an internal @_match capture is auto-added.
+
+PREDICATES:
+  (#eq? @cap \"value\")     — exact string match on captured node text
+  (#match? @cap \"regex\")  — regex match on captured node text
+  (#not-eq? @cap \"value\") — negated exact match
+  (#any-of? @cap \"a\" \"b\") — match any of the listed strings
+
+TIPS:
+  - Rust async functions are function_item with modifiers, not a separate type
+  - Use (type_identifier) for type names, (identifier) for variable/fn names
+  - Nested captures: (struct_item (field_declaration_list
+      (field_declaration name: (field_identifier) @field)))
+  - Wildcards: (_) matches any single node type
+  - #[derive(...)] is: (attribute_item (attribute (identifier) @a (#eq? @a \"derive\")))")]
     Ts(TsArgs),
 
     /// Clear cached remote crate workspaces
@@ -441,6 +490,18 @@ pub struct TsArgs {
     /// Lines of context around matched nodes: N or BEFORE:AFTER
     #[arg(long, default_value = "0")]
     pub context: String,
+
+    /// Only search src/ directory (skip examples, tests, benches)
+    #[arg(long)]
+    pub src_only: bool,
+
+    /// Limit matches: N (first N) or OFFSET:N (skip OFFSET, show N)
+    #[arg(long, value_name = "[OFFSET:]N")]
+    pub limit: Option<String>,
+
+    /// Output only file:line locations, no source text
+    #[arg(short = 'q', long)]
+    pub quiet: bool,
 }
 
 /// Arguments for the `summary` subcommand.

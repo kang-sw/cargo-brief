@@ -687,52 +687,82 @@ pub fn run_examples_pipeline(args: &ExamplesArgs, remote: &RemoteOpts) -> Result
 /// Run the tree-sitter query pipeline and return the rendered output string.
 pub fn run_ts_pipeline(args: &TsArgs, remote: &RemoteOpts) -> Result<String> {
     if remote.crates {
-        anyhow::bail!(
-            "Tree-sitter queries on remote crates (-C) are not yet supported.\n\
-             Hint: run against a local workspace dependency instead."
-        );
-    }
-
-    let metadata = resolve::load_cargo_metadata(args.manifest_path.as_deref())
-        .context("Failed to load cargo metadata")?;
-
-    let (_pkg_name, source_root) = if args.crate_name == "self" {
-        let pkg = metadata.current_package.as_ref().ok_or_else(|| {
-            anyhow::anyhow!("Cannot resolve 'self': no package found for the current directory.")
-        })?;
-        let dir = metadata
-            .package_manifest_dirs
-            .get(pkg)
-            .cloned()
-            .or(metadata.current_package_manifest_dir.clone())
-            .ok_or_else(|| anyhow::anyhow!("Cannot find manifest directory for package '{pkg}'"))?;
-        (pkg.clone(), dir)
-    } else {
-        let normalized = args.crate_name.replace('-', "_");
-        let found = metadata
-            .package_manifest_dirs
-            .iter()
-            .find(|(k, _)| k.replace('-', "_") == normalized);
-        match found {
-            Some((name, dir)) => (name.clone(), dir.clone()),
-            None => {
-                anyhow::bail!(
-                    "Package '{}' not found in workspace. Available: {}",
-                    args.crate_name,
-                    metadata.workspace_packages.join(", ")
-                );
-            }
+        let spec = &args.crate_name;
+        let (name, _) = remote::parse_crate_spec(spec);
+        if args.global.verbose {
+            eprintln!("[cargo-brief] Resolving workspace for '{name}'...");
         }
-    };
+        let (workspace, _resolved_version) = remote::resolve_workspace(
+            spec,
+            remote.features.as_deref(),
+            remote.no_default_features,
+            remote.no_cache,
+        )
+        .with_context(|| format!("Failed to create workspace for '{name}'"))?;
 
-    if args.global.verbose {
-        eprintln!(
-            "[cargo-brief] Running tree-sitter query on '{}'...",
-            args.crate_name
-        );
+        let manifest_path = workspace
+            .path()
+            .join("Cargo.toml")
+            .to_string_lossy()
+            .into_owned();
+
+        if args.global.verbose {
+            eprintln!("[cargo-brief] Finding source root for '{name}'...");
+        }
+        let source_root = resolve::find_dep_source_root(&manifest_path, &name)
+            .with_context(|| format!("Failed to find source root for '{name}'"))?;
+
+        if args.global.verbose {
+            eprintln!("[cargo-brief] Running tree-sitter query on '{name}'...");
+        }
+
+        ts::run_query(&source_root, &args.query, args)
+    } else {
+        let metadata = resolve::load_cargo_metadata(args.manifest_path.as_deref())
+            .context("Failed to load cargo metadata")?;
+
+        let (_pkg_name, source_root) = if args.crate_name == "self" {
+            let pkg = metadata.current_package.as_ref().ok_or_else(|| {
+                anyhow::anyhow!(
+                    "Cannot resolve 'self': no package found for the current directory."
+                )
+            })?;
+            let dir = metadata
+                .package_manifest_dirs
+                .get(pkg)
+                .cloned()
+                .or(metadata.current_package_manifest_dir.clone())
+                .ok_or_else(|| {
+                    anyhow::anyhow!("Cannot find manifest directory for package '{pkg}'")
+                })?;
+            (pkg.clone(), dir)
+        } else {
+            let normalized = args.crate_name.replace('-', "_");
+            let found = metadata
+                .package_manifest_dirs
+                .iter()
+                .find(|(k, _)| k.replace('-', "_") == normalized);
+            match found {
+                Some((name, dir)) => (name.clone(), dir.clone()),
+                None => {
+                    anyhow::bail!(
+                        "Package '{}' not found in workspace. Available: {}",
+                        args.crate_name,
+                        metadata.workspace_packages.join(", ")
+                    );
+                }
+            }
+        };
+
+        if args.global.verbose {
+            eprintln!(
+                "[cargo-brief] Running tree-sitter query on '{}'...",
+                args.crate_name
+            );
+        }
+
+        ts::run_query(&source_root, &args.query, args)
     }
-
-    ts::run_query(&source_root, &args.query, args)
 }
 
 /// Run the summary pipeline and return the rendered output string.
