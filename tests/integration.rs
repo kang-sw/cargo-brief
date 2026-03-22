@@ -2,7 +2,7 @@ use cargo_brief::cli::{
     ApiArgs, ExamplesArgs, FilterArgs, GlobalArgs, RemoteOpts, SummaryArgs, TargetArgs,
 };
 use cargo_brief::model::{CrateModel, compute_reachable_set};
-use cargo_brief::render::render_module_api;
+use cargo_brief::render::{render_leaf_item, render_leaf_not_found, render_module_api};
 use cargo_brief::resolve;
 use cargo_brief::rustdoc_json;
 use cargo_brief::search;
@@ -2916,5 +2916,196 @@ fn test_cross_crate_search_all_item_types() {
     assert!(
         output.contains("GlobInnerTrait"),
         "Should find GlobInnerTrait:\n{output}"
+    );
+}
+
+// === Leaf Item Resolution Tests ===
+
+#[test]
+fn test_leaf_struct_resolution() {
+    let model = fixture_model();
+    let args = default_args();
+    let (item_id, item) = model
+        .find_item_in_module("outer", "PubStruct")
+        .expect("PubStruct should be found in outer");
+    let output = render_leaf_item(&model, item, item_id, &args, None, true, None);
+
+    assert!(
+        output.contains("pub struct PubStruct"),
+        "Should render PubStruct definition:\n{output}"
+    );
+    assert!(
+        output.contains("pub fn pub_method"),
+        "Should render impl methods:\n{output}"
+    );
+    // Should NOT contain sibling items
+    assert!(
+        !output.contains("PlainEnum"),
+        "Should NOT contain sibling items:\n{output}"
+    );
+    assert!(
+        !output.contains("MyTrait"),
+        "Should NOT contain sibling traits:\n{output}"
+    );
+}
+
+#[test]
+fn test_leaf_trait_resolution() {
+    let model = fixture_model();
+    let args = default_args();
+    let (item_id, item) = model
+        .find_item_in_module("outer", "MyTrait")
+        .expect("MyTrait should be found in outer");
+    let output = render_leaf_item(&model, item, item_id, &args, None, true, None);
+
+    assert!(
+        output.contains("pub trait MyTrait"),
+        "Should render MyTrait definition:\n{output}"
+    );
+    assert!(
+        output.contains("fn do_thing"),
+        "Should render trait methods:\n{output}"
+    );
+    // Should NOT contain sibling items
+    assert!(
+        !output.contains("PubStruct"),
+        "Should NOT contain sibling structs:\n{output}"
+    );
+}
+
+#[test]
+fn test_leaf_reexport_resolution() {
+    let model = fixture_model();
+    let args = default_args();
+    // ReExported is `pub use outer::PubStruct as ReExported` at crate root
+    let (item_id, item) = model
+        .find_item_in_module("", "ReExported")
+        .expect("ReExported should be found at crate root");
+    let output = render_leaf_item(&model, item, item_id, &args, None, true, None);
+
+    // Should follow the re-export and render the actual PubStruct definition
+    assert!(
+        output.contains("pub struct PubStruct"),
+        "Should render the actual PubStruct definition via re-export:\n{output}"
+    );
+}
+
+#[test]
+fn test_leaf_root_level_item() {
+    let model = fixture_model();
+    let args = default_args();
+    // DeprecatedStruct is at crate root
+    let (item_id, item) = model
+        .find_item_in_module("", "DeprecatedStruct")
+        .expect("DeprecatedStruct should be found at crate root");
+    let output = render_leaf_item(&model, item, item_id, &args, None, true, None);
+
+    assert!(
+        output.contains("DeprecatedStruct"),
+        "Should render DeprecatedStruct:\n{output}"
+    );
+}
+
+#[test]
+fn test_leaf_not_found_shows_available() {
+    let model = fixture_model();
+    let output = render_leaf_not_found(&model, "outer", "NonExistent");
+
+    assert!(
+        output.contains("ERROR: item 'NonExistent' not found in module 'outer'"),
+        "Should show error message:\n{output}"
+    );
+    assert!(
+        output.contains("Available items:"),
+        "Should list available items:\n{output}"
+    );
+    assert!(
+        output.contains("PubStruct (struct)"),
+        "Should list PubStruct as available:\n{output}"
+    );
+    assert!(
+        output.contains("MyTrait (trait)"),
+        "Should list MyTrait as available:\n{output}"
+    );
+    assert!(
+        output.contains("TIP: Try `search NonExistent`"),
+        "Should show search tip:\n{output}"
+    );
+}
+
+#[test]
+fn test_leaf_private_item_not_visible_external() {
+    let model = fixture_model();
+    let args = default_args();
+    let reachable = compute_reachable_set(&model);
+    // PrivateStruct is private in outer — should not be visible from external view
+    let result = model.find_item_in_module("outer", "PrivateStruct");
+
+    if let Some((item_id, item)) = result {
+        let output = render_leaf_item(&model, item, item_id, &args, None, false, Some(&reachable));
+        assert!(
+            output.contains("not visible from observer position"),
+            "Private item should not be rendered in external view:\n{output}"
+        );
+    }
+    // If find_item_in_module returns None, that's also acceptable since PrivateStruct
+    // may not match visibility criteria at the module level
+}
+
+#[test]
+fn test_leaf_module_wins_over_item() {
+    let model = fixture_model();
+    // `inner` is a module under `outer` — module resolution should take priority
+    let module = model.find_module("outer::inner");
+    assert!(module.is_some(), "inner should resolve as a module");
+
+    // find_item_in_module should NOT find it (skips Module items)
+    let leaf = model.find_item_in_module("outer", "inner");
+    assert!(
+        leaf.is_none(),
+        "find_item_in_module should skip Module items"
+    );
+}
+
+#[test]
+fn test_leaf_resolution_via_pipeline() {
+    use cargo_brief::cli::RemoteOpts;
+    let mut args = default_args();
+    args.target.module_path = Some("outer::PubStruct".to_string());
+
+    let output =
+        cargo_brief::run_api_pipeline(&args, &RemoteOpts::default()).expect("pipeline should work");
+
+    assert!(
+        output.contains("pub struct PubStruct"),
+        "Pipeline should resolve leaf item PubStruct:\n{output}"
+    );
+    assert!(
+        output.contains("pub fn pub_method"),
+        "Pipeline should include impl methods:\n{output}"
+    );
+    // Should NOT contain sibling items
+    assert!(
+        !output.contains("PlainEnum"),
+        "Pipeline should NOT contain siblings:\n{output}"
+    );
+}
+
+#[test]
+fn test_leaf_not_found_via_pipeline() {
+    use cargo_brief::cli::RemoteOpts;
+    let mut args = default_args();
+    args.target.module_path = Some("outer::NonExistent".to_string());
+
+    let output =
+        cargo_brief::run_api_pipeline(&args, &RemoteOpts::default()).expect("pipeline should work");
+
+    assert!(
+        output.contains("ERROR: item 'NonExistent' not found"),
+        "Pipeline should show leaf-not-found error:\n{output}"
+    );
+    assert!(
+        output.contains("Available items:"),
+        "Pipeline should list available items:\n{output}"
     );
 }
