@@ -24,6 +24,10 @@ fn main() -> Result<()> {
             let output = cargo_brief::run_summary_pipeline(args, &remote)?;
             print!("{output}");
         }
+        BriefCommand::Ts(args) => {
+            let output = cargo_brief::run_ts_pipeline(args, &remote)?;
+            print!("{output}");
+        }
         BriefCommand::Clean(args) => {
             cargo_brief::clean_cache(args.spec.as_deref().unwrap_or(""))?;
         }

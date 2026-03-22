@@ -8,6 +8,7 @@ pub mod resolve;
 pub mod rustdoc_json;
 pub mod search;
 pub mod summary;
+pub mod ts;
 
 /// Clean cached remote crate workspaces. Empty spec = all.
 pub fn clean_cache(spec: &str) -> anyhow::Result<()> {
@@ -21,7 +22,7 @@ use std::path::{Path, PathBuf};
 use anyhow::{Context, Result};
 use rustdoc_types::{ItemEnum, Visibility};
 
-use cli::{ApiArgs, ExamplesArgs, FilterArgs, RemoteOpts, SearchArgs, SummaryArgs};
+use cli::{ApiArgs, ExamplesArgs, FilterArgs, RemoteOpts, SearchArgs, SummaryArgs, TsArgs};
 use model::{CrateModel, ReachableInfo, compute_reachable_set};
 
 /// Result of glob re-export expansion. Contains both the item names (for Phase 1
@@ -681,6 +682,57 @@ pub fn run_examples_pipeline(args: &ExamplesArgs, remote: &RemoteOpts) -> Result
 
         Ok(examples::render_examples(&source_root, &pkg_name, args))
     }
+}
+
+/// Run the tree-sitter query pipeline and return the rendered output string.
+pub fn run_ts_pipeline(args: &TsArgs, remote: &RemoteOpts) -> Result<String> {
+    if remote.crates {
+        anyhow::bail!(
+            "Tree-sitter queries on remote crates (-C) are not yet supported.\n\
+             Hint: run against a local workspace dependency instead."
+        );
+    }
+
+    let metadata = resolve::load_cargo_metadata(args.manifest_path.as_deref())
+        .context("Failed to load cargo metadata")?;
+
+    let (_pkg_name, source_root) = if args.crate_name == "self" {
+        let pkg = metadata.current_package.as_ref().ok_or_else(|| {
+            anyhow::anyhow!("Cannot resolve 'self': no package found for the current directory.")
+        })?;
+        let dir = metadata
+            .package_manifest_dirs
+            .get(pkg)
+            .cloned()
+            .or(metadata.current_package_manifest_dir.clone())
+            .ok_or_else(|| anyhow::anyhow!("Cannot find manifest directory for package '{pkg}'"))?;
+        (pkg.clone(), dir)
+    } else {
+        let normalized = args.crate_name.replace('-', "_");
+        let found = metadata
+            .package_manifest_dirs
+            .iter()
+            .find(|(k, _)| k.replace('-', "_") == normalized);
+        match found {
+            Some((name, dir)) => (name.clone(), dir.clone()),
+            None => {
+                anyhow::bail!(
+                    "Package '{}' not found in workspace. Available: {}",
+                    args.crate_name,
+                    metadata.workspace_packages.join(", ")
+                );
+            }
+        }
+    };
+
+    if args.global.verbose {
+        eprintln!(
+            "[cargo-brief] Running tree-sitter query on '{}'...",
+            args.crate_name
+        );
+    }
+
+    ts::run_query(&source_root, &args.query, args)
 }
 
 /// Run the summary pipeline and return the rendered output string.

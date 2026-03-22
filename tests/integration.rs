@@ -1,5 +1,6 @@
 use cargo_brief::cli::{
     ApiArgs, ExamplesArgs, FilterArgs, GlobalArgs, RemoteOpts, SearchArgs, SummaryArgs, TargetArgs,
+    TsArgs,
 };
 use cargo_brief::model::{CrateModel, compute_reachable_set};
 use cargo_brief::render::{render_leaf_item, render_leaf_not_found, render_module_api};
@@ -3416,5 +3417,91 @@ fn test_named_cross_crate_reexport_no_expand() {
     assert!(
         output.contains("pub use named_source::NamedSourceItem;"),
         "With --no-expand-glob, named re-export should stay as pub use:\n{output}"
+    );
+}
+
+// === Tree-sitter Subcommand Tests ===
+
+fn default_ts_args() -> TsArgs {
+    TsArgs {
+        crate_name: "test-fixture".to_string(),
+        query: String::new(),
+        global: GlobalArgs {
+            toolchain: "nightly".to_string(),
+            verbose: false,
+        },
+        manifest_path: Some("test_fixture/Cargo.toml".to_string()),
+        captures: false,
+        context: "0".to_string(),
+    }
+}
+
+#[test]
+fn test_ts_finds_function_items() {
+    let mut args = default_ts_args();
+    args.query = "(function_item name: (identifier) @name)".to_string();
+    let output = cargo_brief::run_ts_pipeline(&args, &RemoteOpts::default()).unwrap();
+    assert!(
+        output.contains("free_function"),
+        "Should find free_function:\n{output}"
+    );
+}
+
+#[test]
+fn test_ts_captures_mode() {
+    let mut args = default_ts_args();
+    args.query = "(function_item name: (identifier) @name)".to_string();
+    args.captures = true;
+    let output = cargo_brief::run_ts_pipeline(&args, &RemoteOpts::default()).unwrap();
+    assert!(
+        output.contains("@name: free_function"),
+        "Captures mode should show @name: free_function:\n{output}"
+    );
+}
+
+#[test]
+fn test_ts_finds_struct_items() {
+    let mut args = default_ts_args();
+    args.query = "(struct_item name: (type_identifier) @name)".to_string();
+    let output = cargo_brief::run_ts_pipeline(&args, &RemoteOpts::default()).unwrap();
+    assert!(
+        output.contains("PubStruct"),
+        "Should find PubStruct:\n{output}"
+    );
+}
+
+#[test]
+fn test_ts_invalid_query_error() {
+    let mut args = default_ts_args();
+    args.query = "(invalid_syntax!!!".to_string();
+    let result = cargo_brief::run_ts_pipeline(&args, &RemoteOpts::default());
+    assert!(result.is_err(), "Invalid query should return Err");
+    let err = result.unwrap_err().to_string();
+    assert!(
+        err.contains("Invalid tree-sitter query"),
+        "Error should mention invalid query: {err}"
+    );
+}
+
+#[test]
+fn test_ts_no_matches() {
+    let mut args = default_ts_args();
+    args.query = "(while_expression) @w".to_string();
+    let output = cargo_brief::run_ts_pipeline(&args, &RemoteOpts::default()).unwrap();
+    assert!(
+        output.contains("// no matches"),
+        "No matches should show comment:\n{output}"
+    );
+}
+
+#[test]
+fn test_ts_context() {
+    let mut args = default_ts_args();
+    args.query = "(function_item name: (identifier) @name)".to_string();
+    args.context = "1".to_string();
+    let output = cargo_brief::run_ts_pipeline(&args, &RemoteOpts::default()).unwrap();
+    assert!(
+        output.contains('*'),
+        "Context mode should have * markers:\n{output}"
     );
 }

@@ -22,7 +22,7 @@ pub fn parse_context(s: &str) -> (usize, usize) {
 
 /// Recursively collect `.rs` files under `dir`, up to `max_depth` levels.
 /// Depth 0 means only files directly in `dir` (no subdirectories).
-fn collect_rs_files(dir: &Path, max_depth: u32) -> Vec<PathBuf> {
+pub(crate) fn collect_rs_files(dir: &Path, max_depth: u32) -> Vec<PathBuf> {
     let mut result = Vec::new();
     collect_rs_files_inner(dir, max_depth, &mut result);
     result.sort();
