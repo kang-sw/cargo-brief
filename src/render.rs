@@ -173,6 +173,99 @@ pub fn render_inlined_items(
     output
 }
 
+/// Render a single named item from source models, with its impl blocks.
+///
+/// Used for named cross-crate re-export expansion (e.g., `pub use serde_core::Serialize;`).
+/// Returns `None` if the item is not found, is a module, or was already rendered (dedup).
+pub fn render_single_inlined_item(
+    source_models: &[CrateModel],
+    item_name: &str,
+    filter: &FilterArgs,
+    seen_names: &mut HashSet<String>,
+) -> Option<String> {
+    for model in source_models {
+        let Some(root) = model.root_module() else {
+            continue;
+        };
+        let observer = model.crate_name().to_string();
+
+        for (child_id, child) in model.module_children(root) {
+            if !matches!(child.visibility, Visibility::Public) {
+                continue;
+            }
+            if matches!(child.inner, ItemEnum::Module(_)) {
+                continue;
+            }
+
+            let name = child
+                .name
+                .as_deref()
+                .or(if let ItemEnum::Use(u) = &child.inner {
+                    Some(u.name.as_str())
+                } else {
+                    None
+                });
+            let Some(name) = name else { continue };
+            if name != item_name {
+                continue;
+            }
+            if !seen_names.insert(name.to_string()) {
+                return None;
+            }
+
+            let mut output = String::new();
+            let mut impl_ids = Vec::new();
+
+            if let ItemEnum::Use(use_item) = &child.inner {
+                if let Some(target_id) = &use_item.id
+                    && let Some(target_item) = model.krate.index.get(target_id)
+                {
+                    if matches!(target_item.inner, ItemEnum::Module(_)) {
+                        return None;
+                    }
+                    if !should_render_item(target_item, filter) {
+                        return None;
+                    }
+                    render_item(
+                        model,
+                        target_item,
+                        target_id,
+                        "",
+                        filter,
+                        &observer,
+                        false,
+                        &mut output,
+                    );
+                    collect_impl_ids(target_item, &mut impl_ids);
+                }
+            } else {
+                if !should_render_item(child, filter) {
+                    return None;
+                }
+                render_item(
+                    model,
+                    child,
+                    child_id,
+                    "",
+                    filter,
+                    &observer,
+                    false,
+                    &mut output,
+                );
+                collect_impl_ids(child, &mut impl_ids);
+            }
+
+            render_inlined_impl_blocks(model, filter, &observer, &impl_ids, "", &mut output);
+            return if output.is_empty() {
+                None
+            } else {
+                Some(output)
+            };
+        }
+    }
+    None
+}
+
 /// Render a single leaf item (struct, enum, trait, fn, etc.) with its impl blocks.
 ///
 /// Used when the user targets a specific item by path (e.g., `cargo brief api crate outer::PubStruct`).

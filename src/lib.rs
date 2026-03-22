@@ -30,7 +30,10 @@ struct GlobExpansionResult {
     /// Phase 1 data: source crate → sorted list of public item names
     item_names: HashMap<String, Vec<String>>,
     /// Phase 2 data: source crate → full CrateModels (direct + recursively discovered)
+    /// Shared by both glob and named expansion — keyed by source crate name.
     source_models: HashMap<String, Vec<CrateModel>>,
+    /// Named cross-crate re-exports: source crate → list of (item_name, full_source_path)
+    named_reexports: HashMap<String, Vec<(String, String)>>,
 }
 
 /// Shared context produced after target resolution, consumed by api/search pipelines.
@@ -946,19 +949,38 @@ fn apply_glob_expansions(
     filter: &FilterArgs,
 ) {
     if expand_glob && !result.source_models.is_empty() {
-        // Phase 2: inline full definitions from source crates (including recursive models)
+        // Phase 2: inline full definitions from source crates (only glob sources)
         let mut seen_names = HashSet::new();
-        for (source, models) in &result.source_models {
-            let mut rendered = String::new();
-            for model in models {
-                rendered.push_str(&render::render_inlined_items(
-                    model,
-                    filter,
-                    &mut seen_names,
-                ));
+        for source in result.item_names.keys() {
+            if let Some(models) = result.source_models.get(source) {
+                let mut rendered = String::new();
+                for model in models {
+                    rendered.push_str(&render::render_inlined_items(
+                        model,
+                        filter,
+                        &mut seen_names,
+                    ));
+                }
+                let pattern = format!("pub use {source}::*;");
+                replace_glob_lines(output, &pattern, &rendered);
             }
-            let pattern = format!("pub use {source}::*;");
-            replace_glob_lines(output, &pattern, &rendered);
+        }
+
+        // Named cross-crate re-exports (same expand_glob gate as Phase 2)
+        for (source, items) in &result.named_reexports {
+            if let Some(models) = result.source_models.get(source) {
+                for (item_name, full_source_path) in items {
+                    if let Some(rendered) = render::render_single_inlined_item(
+                        models,
+                        item_name,
+                        filter,
+                        &mut seen_names,
+                    ) {
+                        let pattern = format!("pub use {full_source_path};");
+                        replace_glob_lines(output, &pattern, &rendered);
+                    }
+                }
+            }
         }
     } else if !result.item_names.is_empty() {
         // Phase 1: individual pub use lines
@@ -1080,6 +1102,7 @@ fn expand_glob_reexports(
         return GlobExpansionResult {
             item_names: HashMap::new(),
             source_models: HashMap::new(),
+            named_reexports: HashMap::new(),
         };
     };
 
@@ -1145,9 +1168,69 @@ fn expand_glob_reexports(
         source_models.insert(source.clone(), models);
     }
 
+    // Second pass: named cross-crate re-exports
+    let mut named_reexports: HashMap<String, Vec<(String, String)>> = HashMap::new();
+
+    for (_id, child) in model.module_children(target_item) {
+        let ItemEnum::Use(use_item) = &child.inner else {
+            continue;
+        };
+        if use_item.is_glob {
+            continue;
+        }
+
+        // Cross-crate: target id exists but is not in the local model's index
+        let is_cross_crate = match &use_item.id {
+            Some(id) => !model.krate.index.contains_key(id),
+            None => continue, // unresolvable (primitive re-export) — skip
+        };
+        if !is_cross_crate {
+            continue;
+        }
+
+        // Extract source crate name (first :: segment) and item name (last :: segment)
+        let source_path = &use_item.source;
+        let Some((source_prefix, item_name)) = source_path.rsplit_once("::") else {
+            continue;
+        };
+        let crate_name = source_prefix.split("::").next().unwrap();
+
+        // Module re-exports (e.g., `pub use serde_core::de;`) are not filtered here —
+        // render_single_inlined_item returns None for modules, leaving pub use line intact.
+
+        // Generate source model if not already present from glob processing
+        if !source_models.contains_key(crate_name) {
+            let dep_use_cache = !workspace_members.contains(crate_name)
+                && !workspace_members.contains(&crate_name.replace('_', "-"));
+            let Some(json_path) = try_generate_rustdoc_json(
+                crate_name,
+                toolchain,
+                manifest_path,
+                target_dir,
+                verbose,
+                dep_use_cache,
+            ) else {
+                continue;
+            };
+            let Ok(source_krate) = rustdoc_json::parse_rustdoc_json_cached(&json_path) else {
+                continue;
+            };
+            source_models.insert(
+                crate_name.to_string(),
+                vec![CrateModel::from_crate(source_krate)],
+            );
+        }
+
+        named_reexports
+            .entry(crate_name.to_string())
+            .or_default()
+            .push((item_name.to_string(), source_path.clone()));
+    }
+
     GlobExpansionResult {
         item_names,
         source_models,
+        named_reexports,
     }
 }
 

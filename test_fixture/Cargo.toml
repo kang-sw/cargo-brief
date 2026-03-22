@@ -4,7 +4,8 @@ version = "0.1.0"
 edition = "2021"
 
 [workspace]
-members = ["glob-source", "glob-inner"]
+members = ["glob-source", "glob-inner", "named-source"]
 
 [dependencies]
 glob-source = { path = "glob-source" }
+named-source = { path = "named-source" }
