@@ -172,7 +172,7 @@ alternatives considered, and trade-offs — focus on _why_ this approach was cho
 - CLI types: `ApiArgs`, `SearchArgs`, `ExamplesArgs`, `SummaryArgs`, `CleanArgs` + shared `TargetArgs`/`FilterArgs`/`GlobalArgs` + `RemoteOpts` (plain struct, not clap). `BriefDirect` has `-C`, `-F`, `--no-cache` as `global = true` flags.
 - Modules: `cli`, `cross_crate`, `examples`, `remote`, `resolve`, `rustdoc_json`, `model`, `render`, `search`, `summary`
 - Test fixture: `test_fixture/` (workspace with `glob-source`/`glob-inner` sub-crates for cross-crate glob chain testing)
-- Integration tests: `tests/integration.rs` (165 tests)
+- Integration tests: `tests/integration.rs` (173 tests)
 
 ## Documented Dependencies
 

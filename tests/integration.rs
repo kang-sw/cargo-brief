@@ -1,5 +1,5 @@
 use cargo_brief::cli::{
-    ApiArgs, ExamplesArgs, FilterArgs, GlobalArgs, RemoteOpts, SummaryArgs, TargetArgs,
+    ApiArgs, ExamplesArgs, FilterArgs, GlobalArgs, RemoteOpts, SearchArgs, SummaryArgs, TargetArgs,
 };
 use cargo_brief::model::{CrateModel, compute_reachable_set};
 use cargo_brief::render::{render_leaf_item, render_leaf_not_found, render_module_api};
@@ -3318,5 +3318,40 @@ fn search_collapsed_variant_display() {
     assert!(
         output.contains("Alpha"),
         "variant Alpha should be present:\n{output}"
+    );
+}
+
+// === run_search_pipeline entry point tests ===
+
+#[test]
+fn methods_of_no_stack_overflow() {
+    // Must call run_search_pipeline (not render_search_methods_of) to exercise
+    // the --methods-of arg preprocessing path that previously caused infinite recursion.
+    let args = SearchArgs {
+        crate_name: "test-fixture".to_string(),
+        patterns: vec![],
+        filter: default_filter(),
+        global: GlobalArgs {
+            toolchain: "nightly".to_string(),
+            verbose: false,
+        },
+        at_package: None,
+        at_mod: None,
+        manifest_path: Some("test_fixture/Cargo.toml".to_string()),
+        limit: None,
+        methods_of: Some("PubStruct".to_string()),
+        search_kind: None,
+        members: false,
+    };
+    let result = cargo_brief::run_search_pipeline(&args, &RemoteOpts::default());
+    assert!(
+        result.is_ok(),
+        "run_search_pipeline failed: {:?}",
+        result.err()
+    );
+    let output = result.unwrap();
+    assert!(
+        output.contains("pub_method"),
+        "should contain methods of PubStruct:\n{output}"
     );
 }

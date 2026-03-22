@@ -430,9 +430,14 @@ pub fn run_search_pipeline(args: &SearchArgs, remote: &RemoteOpts) -> Result<Str
         args.filter.no_constants = true;
         args.filter.no_macros = true;
         args.filter.no_aliases = true;
-        // Leave methods_of set — run_shared_search_pipeline uses it for exact matching
+        // methods_of stays set — run_shared_search_pipeline uses it for exact matching
         // Leave no_functions = false (methods are functions)
-        return run_search_pipeline(&args, remote);
+        let ctx = if remote.crates {
+            build_remote_context_search(&args, &args.crate_name, remote)?
+        } else {
+            build_local_context_search(&args)?
+        };
+        return run_shared_search_pipeline(&ctx, &args);
     }
 
     let ctx = if remote.crates {
