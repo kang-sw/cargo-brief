@@ -14,8 +14,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "named-source"
+version = "0.1.0"
+
+[[package]]
 name = "test-fixture"
 version = "0.1.0"
 dependencies = [
  "glob-source",
+ "named-source",
 ]
