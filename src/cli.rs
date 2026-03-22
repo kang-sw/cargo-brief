@@ -172,6 +172,31 @@ EXAMPLES:
   cargo brief -C summary bevy bevy::ecs")]
     Summary(SummaryArgs),
 
+    /// Run a tree-sitter structural query against crate source files
+    #[command(after_help = "\
+EXAMPLES:
+  # Find all function definitions
+  cargo brief ts self '(function_item)'
+
+  # Capture function names
+  cargo brief ts self '(function_item name: (identifier) @name)' --captures
+
+  # Find impl blocks for a specific trait
+  cargo brief ts self '(impl_item trait: (type_identifier) @t (#eq? @t \"MyTrait\"))'
+
+  # Find struct definitions with their fields
+  cargo brief ts self '(struct_item name: (type_identifier) @name body: (field_declaration_list) @fields)' --captures
+
+QUERY SYNTAX:
+  Tree-sitter S-expression patterns. Key node types for Rust:
+    function_item, struct_item, enum_item, impl_item, trait_item,
+    type_item, const_item, static_item, macro_definition,
+    use_declaration, mod_item, call_expression, field_expression
+
+  Captures: @name binds a node. With --captures, only captured nodes are shown.
+  Predicates: (#eq? @cap \"value\"), (#match? @cap \"regex\")")]
+    Ts(TsArgs),
+
     /// Clear cached remote crate workspaces
     #[command(after_help = "\
 EXAMPLES:
@@ -389,6 +414,33 @@ pub struct ExamplesArgs {
     /// Include benches/ directory [default depth: unlimited]
     #[arg(long, num_args(0..=1), default_missing_value = "999", value_name = "DEPTH")]
     pub benches: Option<u32>,
+}
+
+/// Arguments for the `ts` (tree-sitter) subcommand.
+#[derive(Args, Debug, Clone)]
+pub struct TsArgs {
+    /// Target crate
+    #[arg(value_name = "TARGET", default_value = "self")]
+    pub crate_name: String,
+
+    /// Tree-sitter S-expression query
+    #[arg(value_name = "QUERY")]
+    pub query: String,
+
+    #[command(flatten)]
+    pub global: GlobalArgs,
+
+    /// Path to Cargo.toml
+    #[arg(long, help_heading = "Local Workspace")]
+    pub manifest_path: Option<String>,
+
+    /// Show capture names with matched text (for multi-capture queries)
+    #[arg(long)]
+    pub captures: bool,
+
+    /// Lines of context around matched nodes: N or BEFORE:AFTER
+    #[arg(long, default_value = "0")]
+    pub context: String,
 }
 
 /// Arguments for the `summary` subcommand.

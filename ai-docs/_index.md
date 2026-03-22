@@ -34,6 +34,7 @@ cargo brief [-C] api [target] [module_path] [OPTIONS]
 cargo brief [-C] search [target] <pattern> [OPTIONS]
 cargo brief [-C] examples [target] [pattern] [OPTIONS]
 cargo brief [-C] summary [target] [module_path] [OPTIONS]
+cargo brief ts [target] '<query>' [OPTIONS]
 cargo brief clean [SPEC]
 ```
 
@@ -52,6 +53,11 @@ List mode (no pattern) shows files with `//!` doc comments; grep mode shows matc
 lines with context and `*` markers. `--tests [DEPTH]` / `--benches [DEPTH]` extend scope.
 
 **`summary`** — Compact module-level overview with item counts per kind.
+
+**`ts`** — Run tree-sitter structural queries against crate source files.
+Query is a required S-expression pattern. Scans `src/`, `examples/`, `tests/`, `benches/`.
+Modes: verbatim (default), `--captures` (capture name + text pairs), `--context N` (surrounding lines).
+Remote crate support (`-C`) not yet implemented. Disk-only pipeline (no rustdoc JSON).
 
 **`clean`** — Clear cached remote crate workspaces. Optional `SPEC` argument for specific crate.
 
@@ -111,6 +117,7 @@ src/
   model.rs         — CrateModel with module index, visibility resolution
   render.rs        — pseudo-Rust rendering of all item types
   search.rs        — search mode: leaf item walker + one-line-per-item renderer
+  ts.rs            — tree-sitter structural query execution + output formatting
 ```
 
 ### Supported Item Types
@@ -141,7 +148,7 @@ Parsed via `rustdoc-types` 0.57. Post-macro-expansion output.
 
 ## Operational State (v0.6.0)
 
-- Core pipeline complete. All item types supported. 173 integration tests.
+- Core pipeline complete. All item types supported. 183 integration tests.
 - Flexible package name resolution: `self`, `crate::module`, file path→module. Bare names always resolve as package. **Smart leaf resolution**: when the final path segment is a leaf item (struct, enum, trait, fn, etc.) instead of a module, resolves the parent module and renders the item with full detail (definition + impls). Module resolution always wins (backward compatible).
 - Remote crate support: `-C` boolean flag + TARGET positional as crate spec (e.g., `cargo brief -C api serde@1`). Workspaces cached at `~/.cache/cargo-brief/crates/` with version-normalized directory names (`name[version]`). Exact version resolved via crates.io API with 24h cache; bare specs auto-update. `cargo brief clean [SPEC]` clears cached workspaces.
 - **Unified pipeline**: Local and remote entry points produce a `PipelineContext`, then call shared `run_shared_api_pipeline()` / `run_shared_search_pipeline()`. Cross-crate discovery fires automatically for both local and remote crates.
@@ -157,7 +164,8 @@ Parsed via `rustdoc-types` 0.57. Post-macro-expansion output.
 - Attribute rendering: `#[deprecated]`, `#[non_exhaustive]` by default; `--verbose-metadata` adds `#[repr]`, `#[must_use]`, etc.
 - Re-export kind annotations: `pub use` lines show `// struct`, `// trait`, etc.
 - **Examples subcommand**: `cargo brief examples <target> [pattern]` greps example/test/bench source files. List mode (no pattern) shows files with `//!` docs; grep mode shows matches with `*` markers, dynamic line numbers, context control. `--tests [DEPTH]` / `--benches [DEPTH]` extend scope. Smart-case matching.
-- Dependencies: `clap` 4, `rustdoc-types` 0.57, `serde_json` 1, `anyhow` 1, `tempfile` 3, `bincode` 1, `semver` 1, `ureq` 2.
+- **Tree-sitter subcommand**: `cargo brief ts <target> '<query>'` runs S-expression structural queries against `.rs` source files. Supports verbatim output, `--captures` mode (capture name + text pairs), `--context N` (surrounding lines with `*` markers). Capture-less queries auto-augmented with `@_match`. Scans `src/`, `examples/`, `tests/`, `benches/`. Remote crate support (`-C`) not yet implemented.
+- Dependencies: `clap` 4, `rustdoc-types` 0.57, `serde_json` 1, `anyhow` 1, `tempfile` 3, `bincode` 1, `semver` 1, `ureq` 2, `tree-sitter` 0.25, `tree-sitter-rust` 0.23, `streaming-iterator` 0.1.
 - Test fixture (`test_fixture/`) covers all supported item types. Workspace with `glob-source`/`glob-inner` sub-crates for cross-crate glob chain testing and `named-source` sub-crate for named re-export expansion testing.
 
 ## Mental Model Documents
