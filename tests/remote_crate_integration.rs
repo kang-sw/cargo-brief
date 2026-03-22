@@ -42,6 +42,7 @@ fn remote_args(spec: &str) -> (ApiArgs, RemoteOpts) {
     let remote = RemoteOpts {
         crates: true,
         features: None,
+        no_default_features: false,
         no_cache: false,
     };
     (args, remote)

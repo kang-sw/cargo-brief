@@ -36,6 +36,10 @@ pub struct BriefDirect {
     )]
     pub features: Option<String>,
 
+    /// Disable default features (requires -C)
+    #[arg(long, global = true, requires = "crates")]
+    pub no_default_features: bool,
+
     /// Skip cache and use a temporary workspace (requires -C)
     #[arg(long, global = true, requires = "crates")]
     pub no_cache: bool,
@@ -50,6 +54,7 @@ impl BriefDirect {
         RemoteOpts {
             crates: self.crates,
             features: self.features.clone(),
+            no_default_features: self.no_default_features,
             no_cache: self.no_cache,
         }
     }
@@ -60,6 +65,7 @@ impl BriefDirect {
 pub struct RemoteOpts {
     pub crates: bool,
     pub features: Option<String>,
+    pub no_default_features: bool,
     pub no_cache: bool,
 }
 

@@ -179,18 +179,25 @@ fn write_workspace_files(
     name: &str,
     version_req: &str,
     features: Option<&str>,
+    no_default_features: bool,
 ) -> Result<()> {
-    let dep_value = match features {
-        Some(f) => {
-            let feat_list: Vec<&str> = f.split(',').map(|s| s.trim()).collect();
-            let feat_str = feat_list
-                .iter()
-                .map(|f| format!("\"{f}\""))
+    let needs_table = features.is_some() || no_default_features;
+    let dep_value = if needs_table {
+        let mut parts = vec![format!("version = \"{version_req}\"")];
+        if no_default_features {
+            parts.push("default-features = false".to_string());
+        }
+        if let Some(f) = features {
+            let feat_str = f
+                .split(',')
+                .map(|s| format!("\"{}\"", s.trim()))
                 .collect::<Vec<_>>()
                 .join(", ");
-            format!("{{ version = \"{version_req}\", features = [{feat_str}] }}")
+            parts.push(format!("features = [{feat_str}]"));
         }
-        None => format!("\"{version_req}\""),
+        format!("{{ {} }}", parts.join(", "))
+    } else {
+        format!("\"{version_req}\"")
     };
 
     let cargo_toml = format!(
@@ -230,6 +237,7 @@ edition = "2021"
 pub fn resolve_workspace(
     spec: &str,
     features: Option<&str>,
+    no_default_features: bool,
     no_cache: bool,
 ) -> Result<(WorkspaceDir, Option<String>)> {
     let (name, version_req) = parse_crate_spec(spec);
@@ -242,7 +250,13 @@ pub fn resolve_workspace(
             .map(|v| format!("={v}"))
             .unwrap_or(version_req);
         let tmp = TempDir::new().context("Failed to create temp directory")?;
-        write_workspace_files(tmp.path(), &name, &actual_req, features)?;
+        write_workspace_files(
+            tmp.path(),
+            &name,
+            &actual_req,
+            features,
+            no_default_features,
+        )?;
         return Ok((WorkspaceDir::Temp(tmp), resolved));
     }
 
@@ -253,7 +267,13 @@ pub fn resolve_workspace(
     if !dir.join("Cargo.toml").exists() {
         std::fs::create_dir_all(&dir)
             .with_context(|| format!("Failed to create cache dir {}", dir.display()))?;
-        write_workspace_files(&dir, &name, &format!("={resolved}"), features)?;
+        write_workspace_files(
+            &dir,
+            &name,
+            &format!("={resolved}"),
+            features,
+            no_default_features,
+        )?;
     }
 
     Ok((WorkspaceDir::Cached(dir), Some(resolved.clone())))
@@ -362,7 +382,7 @@ fn dir_size(path: &Path) -> u64 {
 /// Returns `TempDir` — the workspace is cleaned up when dropped.
 pub fn create_temp_workspace(name: &str, version_req: &str) -> Result<TempDir> {
     let tmp = TempDir::new().context("Failed to create temp directory")?;
-    write_workspace_files(tmp.path(), name, version_req, None)?;
+    write_workspace_files(tmp.path(), name, version_req, None, false)?;
     Ok(tmp)
 }
 
@@ -435,7 +455,7 @@ mod tests {
     #[test]
     fn write_workspace_with_features() {
         let tmp = tempfile::tempdir().unwrap();
-        write_workspace_files(tmp.path(), "tokio", "1", Some("rt,net,macros")).unwrap();
+        write_workspace_files(tmp.path(), "tokio", "1", Some("rt,net,macros"), false).unwrap();
         let content = std::fs::read_to_string(tmp.path().join("Cargo.toml")).unwrap();
         assert!(content.contains("features"));
         assert!(content.contains("\"rt\""));
@@ -445,7 +465,7 @@ mod tests {
 
     #[test]
     fn resolve_workspace_no_cache() {
-        let (ws, _resolved) = resolve_workspace("serde", None, true).unwrap();
+        let (ws, _resolved) = resolve_workspace("serde", None, false, true).unwrap();
         assert!(matches!(ws, WorkspaceDir::Temp(_)));
         assert!(ws.path().join("Cargo.toml").exists());
         assert!(ws.path().join("src/lib.rs").exists());
@@ -455,7 +475,7 @@ mod tests {
     fn resolve_workspace_cached() {
         let test_dir = tempfile::tempdir().unwrap();
         with_cache_dir(test_dir.path(), || {
-            let (ws, resolved) = resolve_workspace("serde@1.0.200", None, false).unwrap();
+            let (ws, resolved) = resolve_workspace("serde@1.0.200", None, false, false).unwrap();
             assert!(matches!(ws, WorkspaceDir::Cached(_)));
             assert!(ws.path().join("Cargo.toml").exists());
             assert!(ws.path().join("src/lib.rs").exists());
@@ -466,7 +486,7 @@ mod tests {
             assert_eq!(dir_name, "serde[1.0.200]");
 
             // Second call reuses the same directory (idempotent)
-            let (ws2, _) = resolve_workspace("serde@1.0.200", None, false).unwrap();
+            let (ws2, _) = resolve_workspace("serde@1.0.200", None, false, false).unwrap();
             assert_eq!(ws.path(), ws2.path());
         });
     }

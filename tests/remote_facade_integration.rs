@@ -44,6 +44,7 @@ fn hecs_args() -> (ApiArgs, RemoteOpts) {
     let remote = RemoteOpts {
         crates: true,
         features: None,
+        no_default_features: false,
         no_cache: false,
     };
     (args, remote)
@@ -163,6 +164,7 @@ fn hecs_search_no_pub_crate() {
     let remote = RemoteOpts {
         crates: true,
         features: None,
+        no_default_features: false,
         no_cache: false,
     };
     let output = run_search_pipeline(&args, &remote).unwrap();

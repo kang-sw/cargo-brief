@@ -176,9 +176,13 @@ fn build_remote_context_api(
     if args.global.verbose {
         eprintln!("[cargo-brief] Resolving workspace for '{name}'...");
     }
-    let (workspace, resolved_version) =
-        remote::resolve_workspace(actual_spec, remote.features.as_deref(), remote.no_cache)
-            .with_context(|| format!("Failed to create workspace for '{name}'"))?;
+    let (workspace, resolved_version) = remote::resolve_workspace(
+        actual_spec,
+        remote.features.as_deref(),
+        remote.no_default_features,
+        remote.no_cache,
+    )
+    .with_context(|| format!("Failed to create workspace for '{name}'"))?;
 
     let manifest_path = workspace
         .path()
@@ -432,9 +436,13 @@ fn build_remote_context_search(
     if args.global.verbose {
         eprintln!("[cargo-brief] Resolving workspace for '{name}'...");
     }
-    let (workspace, _resolved_version) =
-        remote::resolve_workspace(spec, remote.features.as_deref(), remote.no_cache)
-            .with_context(|| format!("Failed to create workspace for '{name}'"))?;
+    let (workspace, _resolved_version) = remote::resolve_workspace(
+        spec,
+        remote.features.as_deref(),
+        remote.no_default_features,
+        remote.no_cache,
+    )
+    .with_context(|| format!("Failed to create workspace for '{name}'"))?;
 
     let manifest_path = workspace
         .path()
@@ -538,9 +546,13 @@ pub fn run_examples_pipeline(args: &ExamplesArgs, remote: &RemoteOpts) -> Result
         if args.global.verbose {
             eprintln!("[cargo-brief] Resolving workspace for '{name}'...");
         }
-        let (workspace, resolved_version) =
-            remote::resolve_workspace(spec, remote.features.as_deref(), remote.no_cache)
-                .with_context(|| format!("Failed to create workspace for '{name}'"))?;
+        let (workspace, resolved_version) = remote::resolve_workspace(
+            spec,
+            remote.features.as_deref(),
+            remote.no_default_features,
+            remote.no_cache,
+        )
+        .with_context(|| format!("Failed to create workspace for '{name}'"))?;
 
         let manifest_path = workspace
             .path()
@@ -689,9 +701,13 @@ fn build_remote_context_summary(
     if args.global.verbose {
         eprintln!("[cargo-brief] Resolving workspace for '{name}'...");
     }
-    let (workspace, resolved_version) =
-        remote::resolve_workspace(actual_spec, remote.features.as_deref(), remote.no_cache)
-            .with_context(|| format!("Failed to create workspace for '{name}'"))?;
+    let (workspace, resolved_version) = remote::resolve_workspace(
+        actual_spec,
+        remote.features.as_deref(),
+        remote.no_default_features,
+        remote.no_cache,
+    )
+    .with_context(|| format!("Failed to create workspace for '{name}'"))?;
 
     let manifest_path = workspace
         .path()

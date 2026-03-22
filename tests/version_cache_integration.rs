@@ -43,6 +43,7 @@ fn remote_args(spec: &str) -> (ApiArgs, RemoteOpts) {
     let remote = RemoteOpts {
         crates: true,
         features: None,
+        no_default_features: false,
         no_cache: false,
     };
     (args, remote)
@@ -85,7 +86,7 @@ fn fetch_resolved_version_major_range() {
 #[ignore = "network: requires crates.io API access"]
 fn resolve_workspace_creates_normalized_dir() {
     with_temp_cache(|cache_path| {
-        let (ws, resolved) = resolve_workspace("serde@1.0.200", None, false).unwrap();
+        let (ws, resolved) = resolve_workspace("serde@1.0.200", None, false, false).unwrap();
         assert_eq!(resolved, Some("1.0.200".to_string()));
 
         let dir_name = ws.path().file_name().unwrap().to_string_lossy().to_string();
@@ -108,11 +109,11 @@ fn resolve_workspace_creates_normalized_dir() {
 fn resolve_workspace_same_version_reuses_dir() {
     with_temp_cache(|_cache_path| {
         // First call with bare spec
-        let (ws1, ver1) = resolve_workspace("serde", None, false).unwrap();
+        let (ws1, ver1) = resolve_workspace("serde", None, false, false).unwrap();
         let ver1 = ver1.unwrap();
 
         // Second call with major-pinned spec — should resolve to same version
-        let (ws2, ver2) = resolve_workspace("serde@1", None, false).unwrap();
+        let (ws2, ver2) = resolve_workspace("serde@1", None, false, false).unwrap();
         let ver2 = ver2.unwrap();
 
         assert_eq!(ver1, ver2, "bare and @1 should resolve to same latest 1.x");
@@ -128,7 +129,8 @@ fn resolve_workspace_same_version_reuses_dir() {
 #[ignore = "network: requires crates.io API access"]
 fn resolve_workspace_features_in_dir_name() {
     with_temp_cache(|_cache_path| {
-        let (ws, _) = resolve_workspace("serde@1.0.200", Some("derive,alloc"), false).unwrap();
+        let (ws, _) =
+            resolve_workspace("serde@1.0.200", Some("derive,alloc"), false, false).unwrap();
         let dir_name = ws.path().file_name().unwrap().to_string_lossy().to_string();
         // Features should be alpha-sorted
         assert_eq!(dir_name, "serde[1.0.200]+alloc+derive");
@@ -139,7 +141,7 @@ fn resolve_workspace_features_in_dir_name() {
 #[ignore = "network: requires crates.io API access"]
 fn version_cache_file_created() {
     with_temp_cache(|cache_path| {
-        let (_ws, _) = resolve_workspace("serde", None, false).unwrap();
+        let (_ws, _) = resolve_workspace("serde", None, false, false).unwrap();
         let version_cache = cache_path.join("versions").join("serde.json");
         assert!(
             version_cache.exists(),
@@ -161,8 +163,8 @@ fn version_cache_file_created() {
 fn clean_cache_removes_matching_dirs() {
     with_temp_cache(|cache_path| {
         // Create two serde workspaces with different versions
-        let (ws1, _) = resolve_workspace("serde@1.0.200", None, false).unwrap();
-        let (ws2, _) = resolve_workspace("serde@1.0.210", None, false).unwrap();
+        let (ws1, _) = resolve_workspace("serde@1.0.200", None, false, false).unwrap();
+        let (ws2, _) = resolve_workspace("serde@1.0.210", None, false, false).unwrap();
         let path1 = ws1.path().to_path_buf();
         let path2 = ws2.path().to_path_buf();
 
