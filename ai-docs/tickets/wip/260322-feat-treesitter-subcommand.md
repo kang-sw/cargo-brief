@@ -112,7 +112,25 @@ learn query syntax before writing queries.
 
 ### Phase 2: Polish
 
-- `--help` with comprehensive query examples
-- `--captures` output mode
-- Scope-limiting flags
+- Comprehensive `--help` examples (more query patterns, Rust-specific tips)
+- Scope-limiting flags (`--src-only`, `--examples-only`)
 - Remote crate support (`-C`)
+- `--limit` pagination
+
+### Result (c6715e8) - 26-03-22
+
+**Phase 1 completed.** Implemented:
+- `cargo brief ts <target> '<query>'` subcommand with verbatim, `--captures`, and `--context` output modes
+- Always-on deps: `tree-sitter 0.25`, `tree-sitter-rust 0.23`, `streaming-iterator 0.1`
+- `TsArgs` in `cli.rs`, `BriefCommand::Ts` variant, `run_ts_pipeline()` in `lib.rs`, dispatch in `main.rs`
+- `src/ts.rs` module (~140 lines): `collect_source_files`, `run_query`, `render_with_context`
+- Reuses `examples::collect_rs_files` (promoted to `pub(crate)`) and `examples::parse_context`
+- Capture-less queries auto-augmented with `@_match` (caught in code review)
+- Remote crate support returns clear error message
+- 7 integration tests added (183 total)
+
+**Deviations from plan:** `--captures` mode included in Phase 1 (simpler than expected). Moved from Phase 2.
+
+**Key findings:**
+- tree-sitter `QueryMatches`/`QueryCaptures` use `StreamingIterator` — explicit dep required
+- Capture-less queries need auto-augmentation; S-expression queries without `@capture` produce empty captures array
