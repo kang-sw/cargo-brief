@@ -110,6 +110,21 @@ learn query syntax before writing queries.
 - `run_ts_pipeline()` in `lib.rs`
 - Basic tests with test_fixture
 
+### Phase 1.5: Usability fixes (from Haiku/Sonnet testing)
+
+LLM usability tests revealed two issues:
+
+1. **Verbatim mode shows first capture, not pattern root node.**
+   Query `(impl_item trait: (type_identifier) @t (#eq? @t "MyTrait"))`
+   outputs just `"MyTrait"` instead of the full impl block. Fix: auto-augment
+   every top-level pattern with `@_match` (extending existing capture-less
+   augmentation), then prefer `@_match` in verbatim mode.
+
+2. **`--context` + `--captures` silently ignored.** Emit stderr warning.
+
+Implementation: ~40 lines in `ts.rs` (S-expression pattern boundary detection
++ capture selection logic). No new files, no API changes.
+
 ### Phase 2: Polish
 
 - Comprehensive `--help` examples (more query patterns, Rust-specific tips)

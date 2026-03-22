@@ -3520,3 +3520,17 @@ fn test_ts_captureless_query() {
         "Should not be empty:\n{output}"
     );
 }
+
+#[test]
+fn test_ts_verbatim_shows_pattern_root() {
+    // When captures are used only for filtering (e.g., #eq? predicate),
+    // verbatim mode should show the full pattern root, not the filtered capture.
+    let mut args = default_ts_args();
+    args.query = "(impl_item trait: (type_identifier) @t (#eq? @t \"MyTrait\"))".to_string();
+    let output = cargo_brief::run_ts_pipeline(&args, &RemoteOpts::default()).unwrap();
+    // Should show the full impl block, not just "MyTrait"
+    assert!(
+        output.contains("impl MyTrait for PubStruct"),
+        "Verbatim mode should show full impl block:\n{output}"
+    );
+}

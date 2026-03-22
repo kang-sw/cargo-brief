@@ -22,26 +22,74 @@ fn collect_source_files(source_root: &Path) -> Vec<PathBuf> {
     files
 }
 
+/// Find positions after each top-level pattern's closing `)` in an S-expression query.
+/// Handles string literals and escaped characters inside predicates.
+fn find_pattern_boundaries(query_src: &str) -> Vec<usize> {
+    let mut boundaries = Vec::new();
+    let mut depth: i32 = 0;
+    let mut in_string = false;
+    let bytes = query_src.as_bytes();
+    let mut i = 0;
+
+    while i < bytes.len() {
+        match bytes[i] {
+            b'"' if !in_string => in_string = true,
+            b'"' if in_string => in_string = false,
+            b'\\' if in_string => {
+                i += 1; // skip escaped char
+            }
+            b'(' if !in_string => depth += 1,
+            b')' if !in_string => {
+                depth -= 1;
+                if depth == 0 {
+                    boundaries.push(i + 1);
+                }
+            }
+            _ => {}
+        }
+        i += 1;
+    }
+
+    boundaries
+}
+
+/// Auto-add `@_match` capture to each top-level pattern that doesn't already
+/// have a root capture. This ensures verbatim mode can show the full matched
+/// node (pattern root) instead of just the first named capture.
+fn augment_with_root_captures(query_src: &str) -> String {
+    let boundaries = find_pattern_boundaries(query_src);
+    if boundaries.is_empty() {
+        return query_src.to_string();
+    }
+
+    let mut result = String::with_capacity(query_src.len() + boundaries.len() * 8);
+    let mut last = 0;
+
+    for &pos in &boundaries {
+        result.push_str(&query_src[last..pos]);
+        // Check if already followed by @capture (skip whitespace)
+        let rest = query_src[pos..].trim_start();
+        if !rest.starts_with('@') {
+            result.push_str(" @_match");
+        }
+        last = pos;
+    }
+    result.push_str(&query_src[last..]);
+    result
+}
+
 /// Run a tree-sitter query against all source files and format output.
 pub fn run_query(source_root: &Path, query_src: &str, args: &TsArgs) -> Result<String> {
     let language: tree_sitter::Language = tree_sitter_rust::LANGUAGE.into();
 
-    // Auto-add a root capture when the query has none, so capture-less queries
-    // like `(function_item)` work in verbatim mode.
-    let probe = Query::new(&language, query_src)
+    // Validate the query first with the original source.
+    Query::new(&language, query_src)
         .map_err(|e| anyhow::anyhow!("Invalid tree-sitter query: {e}"))?;
-    let augmented = if probe.capture_names().is_empty() {
-        Some(format!("{query_src} @_match"))
-    } else {
-        None
-    };
-    let effective_src = augmented.as_deref().unwrap_or(query_src);
-    let query = if augmented.is_some() {
-        Query::new(&language, effective_src)
-            .map_err(|e| anyhow::anyhow!("Invalid tree-sitter query: {e}"))?
-    } else {
-        probe
-    };
+
+    // Auto-add @_match capture on each pattern root for verbatim mode.
+    let augmented = augment_with_root_captures(query_src);
+    let query = Query::new(&language, &augmented)
+        .map_err(|e| anyhow::anyhow!("Invalid tree-sitter query: {e}"))?;
 
     let mut parser = Parser::new();
     parser
@@ -50,7 +98,19 @@ pub fn run_query(source_root: &Path, query_src: &str, args: &TsArgs) -> Result<S
 
     let files = collect_source_files(source_root);
     let capture_names = query.capture_names().to_vec();
+
+    // Find the index of the auto-added @_match capture (if present).
+    let match_capture_idx = capture_names
+        .iter()
+        .position(|n| *n == "_match")
+        .map(|i| i as u32);
+
     let (ctx_before, ctx_after) = examples::parse_context(&args.context);
+
+    if args.captures && (ctx_before > 0 || ctx_after > 0) {
+        eprintln!("warning: --context is ignored in --captures mode");
+    }
+
     let mut output = String::new();
     let mut match_count = 0;
 
@@ -72,6 +132,10 @@ pub fn run_query(source_root: &Path, query_src: &str, args: &TsArgs) -> Result<S
             while let Some((query_match, _capture_idx)) = captures.next() {
                 let rel = file_path.strip_prefix(source_root).unwrap_or(file_path);
                 for capture in query_match.captures {
+                    // Skip internal @_match captures in --captures mode
+                    if Some(capture.index) == match_capture_idx {
+                        continue;
+                    }
                     let node = capture.node;
                     let name = &capture_names[capture.index as usize];
                     let text = &source[node.start_byte()..node.end_byte()];
@@ -87,10 +151,19 @@ pub fn run_query(source_root: &Path, query_src: &str, args: &TsArgs) -> Result<S
         } else {
             let mut matches = cursor.matches(&query, root, source.as_bytes());
             while let Some(query_match) = matches.next() {
-                let node = if !query_match.captures.is_empty() {
-                    query_match.captures[0].node
-                } else {
+                if query_match.captures.is_empty() {
                     continue;
+                }
+
+                // Prefer @_match (pattern root) over first capture
+                let node = match match_capture_idx {
+                    Some(idx) => query_match
+                        .captures
+                        .iter()
+                        .find(|c| c.index == idx)
+                        .map(|c| c.node)
+                        .unwrap_or(query_match.captures[0].node),
+                    None => query_match.captures[0].node,
                 };
 
                 let start_line = node.start_position().row + 1;
@@ -154,5 +227,62 @@ fn render_with_context(
             ' '
         };
         output.push_str(&format!("{marker} {line}\n"));
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_find_pattern_boundaries_single() {
+        let q = "(function_item)";
+        assert_eq!(find_pattern_boundaries(q), vec![15]);
+    }
+
+    #[test]
+    fn test_find_pattern_boundaries_multi() {
+        let q = "(function_item) (struct_item)";
+        assert_eq!(find_pattern_boundaries(q), vec![15, 29]);
+    }
+
+    #[test]
+    fn test_find_pattern_boundaries_nested() {
+        let q = "(impl_item trait: (type_identifier) @t (#eq? @t \"MyTrait\"))";
+        assert_eq!(find_pattern_boundaries(q), vec![q.len()]);
+    }
+
+    #[test]
+    fn test_find_pattern_boundaries_string_with_paren() {
+        let q = "(impl_item (#eq? @t \")\"))";
+        assert_eq!(find_pattern_boundaries(q), vec![q.len()]);
+    }
+
+    #[test]
+    fn test_augment_adds_match() {
+        let q = "(function_item name: (identifier) @name)";
+        let aug = augment_with_root_captures(q);
+        assert!(aug.ends_with("@_match"), "Should add @_match: {aug}");
+    }
+
+    #[test]
+    fn test_augment_skips_existing_root_capture() {
+        let q = "(function_item) @fn";
+        let aug = augment_with_root_captures(q);
+        assert!(!aug.contains("@_match"), "Should not add @_match: {aug}");
+    }
+
+    #[test]
+    fn test_augment_multi_pattern() {
+        let q = "(function_item) @fn (struct_item)";
+        let aug = augment_with_root_captures(q);
+        assert!(
+            aug.contains("(struct_item) @_match"),
+            "Should add @_match to second pattern: {aug}"
+        );
+        assert!(
+            !aug.contains("(function_item) @_match"),
+            "Should not add @_match to first pattern: {aug}"
+        );
     }
 }
