@@ -173,6 +173,288 @@ pub fn render_inlined_items(
     output
 }
 
+/// Render a single leaf item (struct, enum, trait, fn, etc.) with its impl blocks.
+///
+/// Used when the user targets a specific item by path (e.g., `cargo brief api crate outer::PubStruct`).
+/// Shows only the matched item + its impls, not sibling items.
+#[allow(clippy::too_many_arguments)]
+pub fn render_leaf_item(
+    model: &CrateModel,
+    item: &Item,
+    item_id: &Id,
+    args: &ApiArgs,
+    observer_module_path: Option<&str>,
+    same_crate: bool,
+    reachable: Option<&ReachableInfo>,
+) -> String {
+    let mut output = String::new();
+    let crate_name = model.crate_name();
+
+    // Crate header + docs
+    output.push_str(&format!("// crate {crate_name}\n"));
+    render_crate_docs(model, &args.filter, &mut output);
+
+    // Normalize observer
+    let observer = observer_module_path
+        .map(|p| {
+            if p.contains("::") || p == crate_name {
+                p.to_string()
+            } else {
+                format!("{crate_name}::{p}")
+            }
+        })
+        .unwrap_or_else(|| crate_name.to_string());
+
+    // Visibility check
+    if let Some(info) = reachable {
+        if !info.reachable.contains(item_id) {
+            output.push_str(&format!(
+                "// ERROR: item '{}' is not visible from observer position\n",
+                item.name.as_deref().unwrap_or("?")
+            ));
+            return output;
+        }
+    } else if !matches!(item.visibility, Visibility::Default)
+        && !is_visible_from(model, item, item_id, &observer, same_crate)
+    {
+        output.push_str(&format!(
+            "// ERROR: item '{}' is not visible from observer position\n",
+            item.name.as_deref().unwrap_or("?")
+        ));
+        return output;
+    }
+
+    // Check filter
+    if !should_render_item(item, &args.filter) {
+        output.push_str(&format!(
+            "// Item '{}' is excluded by filter flags\n",
+            item.name.as_deref().unwrap_or("?")
+        ));
+        return output;
+    }
+
+    // Render the item definition
+    render_item(
+        model,
+        item,
+        item_id,
+        "",
+        &args.filter,
+        &observer,
+        same_crate,
+        &mut output,
+    );
+
+    // Render impl blocks for types with impls (struct/enum/union)
+    let impls = match &item.inner {
+        ItemEnum::Struct(s) => Some(&s.impls),
+        ItemEnum::Enum(e) => Some(&e.impls),
+        ItemEnum::Union(u) => Some(&u.impls),
+        _ => None,
+    };
+
+    if let Some(impl_ids) = impls {
+        let source_type_name = item.name.as_deref().unwrap_or("?");
+        let mut simple_trait_impls: Vec<&rustdoc_types::Impl> = Vec::new();
+
+        for impl_id in impl_ids {
+            let Some(impl_item) = model.krate.index.get(impl_id) else {
+                continue;
+            };
+            let ItemEnum::Impl(impl_block) = &impl_item.inner else {
+                continue;
+            };
+
+            if !args.filter.all && (impl_block.is_synthetic || impl_block.blanket_impl.is_some()) {
+                continue;
+            }
+
+            let type_name = format_type(&impl_block.for_);
+            if type_name.is_empty() {
+                continue;
+            }
+
+            let generics = format_generics(&impl_block.generics);
+            let wc = format_where_clause(&impl_block.generics, "");
+            let is_trait_impl = impl_block.trait_.is_some();
+
+            if is_trait_impl {
+                if !args.filter.all
+                    && !impl_block.is_negative
+                    && !has_assoc_items(model, impl_block)
+                {
+                    simple_trait_impls.push(impl_block);
+                    continue;
+                }
+
+                let impl_header = if let Some(trait_) = &impl_block.trait_ {
+                    let trait_path = format_path(trait_);
+                    format!("impl{generics} {trait_path} for {type_name}{wc}")
+                } else {
+                    format!("impl{generics} {type_name}{wc}")
+                };
+
+                let mut assoc_items = Vec::new();
+                let mut has_other_items = false;
+
+                for assoc_id in &impl_block.items {
+                    if let Some(assoc_item) = model.krate.index.get(assoc_id) {
+                        match &assoc_item.inner {
+                            ItemEnum::AssocType { .. } | ItemEnum::AssocConst { .. } => {
+                                if let Some(r) = render_impl_item(assoc_item, "    ", &args.filter)
+                                {
+                                    assoc_items.push(r);
+                                }
+                            }
+                            _ => {
+                                has_other_items = true;
+                            }
+                        }
+                    }
+                }
+
+                render_docs(impl_item, "", &args.filter, &mut output);
+                if assoc_items.is_empty() {
+                    output.push_str(&format!("{impl_header} {{ .. }}\n"));
+                } else {
+                    output.push_str(&format!("{impl_header} {{\n"));
+                    for item_str in &assoc_items {
+                        output.push_str(item_str);
+                    }
+                    if has_other_items {
+                        output.push_str("    // ..\n");
+                    }
+                    output.push_str("}\n");
+                }
+            } else {
+                let impl_header = format!("impl{generics} {type_name}{wc}");
+
+                if args.filter.compact {
+                    render_docs(impl_item, "", &args.filter, &mut output);
+                    output.push_str(&format!("{impl_header} {{ .. }}\n"));
+                    continue;
+                }
+
+                let mut rendered_items = Vec::new();
+
+                for assoc_id in &impl_block.items {
+                    if let Some(assoc_item) = model.krate.index.get(assoc_id) {
+                        if !matches!(
+                            assoc_item.visibility,
+                            Visibility::Default | Visibility::Public
+                        ) && !is_visible_from(model, assoc_item, assoc_id, &observer, same_crate)
+                        {
+                            continue;
+                        }
+                        if let Some(r) = render_impl_item(assoc_item, "    ", &args.filter) {
+                            rendered_items.push(r);
+                        }
+                    }
+                }
+
+                if !rendered_items.is_empty() {
+                    render_docs(impl_item, "", &args.filter, &mut output);
+                    output.push_str(&format!("{impl_header} {{\n"));
+                    for item_str in &rendered_items {
+                        output.push_str(item_str);
+                    }
+                    output.push_str("}\n");
+                }
+            }
+        }
+
+        render_trait_impl_summary(source_type_name, &simple_trait_impls, "", &mut output);
+    }
+
+    output
+}
+
+/// Render an error message when a leaf item is not found in a parent module.
+///
+/// Lists available non-module items with their kind annotation.
+pub fn render_leaf_not_found(
+    model: &CrateModel,
+    parent_module_path: &str,
+    leaf_name: &str,
+) -> String {
+    let mut output = String::new();
+    let crate_name = model.crate_name();
+
+    output.push_str(&format!("// crate {crate_name}\n"));
+
+    let parent_item = if parent_module_path.is_empty() {
+        model.root_module()
+    } else {
+        model.find_module(parent_module_path)
+    };
+
+    let Some(parent_item) = parent_item else {
+        output.push_str(&format!(
+            "// ERROR: module '{parent_module_path}' not found\n"
+        ));
+        return output;
+    };
+
+    let display_path = if parent_module_path.is_empty() {
+        crate_name
+    } else {
+        parent_module_path
+    };
+
+    output.push_str(&format!(
+        "// ERROR: item '{leaf_name}' not found in module '{display_path}'\n"
+    ));
+    output.push_str("// Available items:\n");
+
+    let children = model.module_children(parent_item);
+    let mut items: Vec<(&str, &str)> = Vec::new();
+
+    for (_child_id, child) in &children {
+        if matches!(child.inner, ItemEnum::Module(_)) {
+            continue;
+        }
+
+        let name = child.name.as_deref().or_else(|| {
+            if let ItemEnum::Use(u) = &child.inner {
+                Some(u.name.as_str())
+            } else {
+                None
+            }
+        });
+
+        let Some(name) = name else { continue };
+
+        let kind = match &child.inner {
+            ItemEnum::Struct(_) => "struct",
+            ItemEnum::Enum(_) => "enum",
+            ItemEnum::Trait(_) => "trait",
+            ItemEnum::Function(_) => "fn",
+            ItemEnum::TypeAlias(_) => "type",
+            ItemEnum::Constant { .. } => "const",
+            ItemEnum::Static(_) => "static",
+            ItemEnum::Union(_) => "union",
+            ItemEnum::Macro(_) => "macro",
+            ItemEnum::Use(_) => "use",
+            _ => "item",
+        };
+
+        items.push((name, kind));
+    }
+
+    items.sort_by_key(|(name, _)| *name);
+    items.dedup();
+
+    for (name, kind) in &items {
+        output.push_str(&format!("//   {name} ({kind})\n"));
+    }
+
+    output.push_str(&format!(
+        "// TIP: Try `search {leaf_name}` to find items by name across the crate.\n"
+    ));
+
+    output
+}
+
 /// Collect impl IDs from a type item (struct/enum/union).
 fn collect_impl_ids(item: &Item, impl_ids: &mut Vec<Id>) {
     let impls = match &item.inner {
