@@ -70,7 +70,7 @@ fn clap_facade_has_crate_header() {
 }
 
 // ============================================================
-// Glob expansion shows individual pub use items
+// Glob expansion inlines full definitions by default
 // ============================================================
 
 #[test]
@@ -175,7 +175,7 @@ fn clap_expand_glob_no_pub_use_lines() {
     // No individual `pub use clap_builder::Name;` lines either
     assert!(
         !output.contains("pub use clap_builder::Command;"),
-        "individual pub use lines should not appear with --expand-glob"
+        "individual pub use lines should not appear with default expansion"
     );
 }
 
