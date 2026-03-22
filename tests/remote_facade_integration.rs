@@ -160,6 +160,7 @@ fn hecs_search_no_pub_crate() {
         limit: None,
         methods_of: None,
         search_kind: None,
+        members: false,
     };
     let remote = RemoteOpts {
         crates: true,

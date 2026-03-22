@@ -1,6 +1,7 @@
 ---
 title: "Search: show struct fields and type members"
-status: idea
+status: wip
+started: 2026-03-22
 ---
 
 # Search: show struct fields and type members
@@ -49,6 +50,28 @@ positives are unlikely.
 
 ## Open questions
 
-- Flag naming: `--members`, `--expand`, `--fields`? `--members` covers both
-  fields and methods.
-- Should the collapsed display also apply to enum variants?
+- ~~Flag naming: `--members`, `--expand`, `--fields`?~~ Resolved: `--members`
+- ~~Should the collapsed display also apply to enum variants?~~ Resolved: Yes
+
+### Result (efecd8a) - 26-03-22
+
+Implemented `--members` flag and member filtering for search.
+
+**What was implemented:**
+- `--members` flag on `SearchArgs`
+- Default member suppression: fields/variants/methods/assoc items hidden unless
+  a Substring/Exact token exactly matches the member's final `::` segment name
+- `--members` expansion: all children of matched types included
+- Collapsed `-::member` display for consecutive items sharing a parent path
+- Parent context headers injected for orphan members
+- Cross-crate: struct field, enum variant, and union field walking added to
+  `search_cross_crate_index`
+- Path-based sort when `--members` active; kind-based sort otherwise
+- `--methods-of` bypasses member suppression (existing behavior preserved)
+
+**Decisions:**
+- Glob tokens skip exact-name check (only Substring/Exact match member names)
+- Function signature in collapsed display strips name, shows just `(params) -> ret`
+- Variant collapsed display uses `,` terminator (not `;`) to visually distinguish
+
+**Tests:** 7 existing tests updated, 7 new tests added. 172/172 pass.

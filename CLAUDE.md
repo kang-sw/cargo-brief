@@ -160,9 +160,9 @@ alternatives considered, and trade-offs — focus on _why_ this approach was cho
 
 ## Recent Work
 
-- Smart leaf resolution: `cargo brief api <target> outer::PubStruct` resolves leaf items (struct/enum/trait/fn/etc.) when the final path segment is not a module. `CrateModel::find_item_in_module()`, `render::render_leaf_item()`, `render::render_leaf_not_found()`. Wired into `run_shared_api_pipeline()` after module + cross-crate resolution.
-- v0.6.0: **CLI restructure (breaking)** — `-C`/`--crates` boolean flag, `clean` subcommand, `RemoteOpts`. All 4 pipeline functions take `remote: &RemoteOpts` as separate param.
-- v0.5.2+: Canonical reexport paths, batch rustdoc pre-warming, search pattern DSL, summary subcommand, recursive cross-crate glob expansion, unified local/remote pipelines.
+- **Search member display**: `--members` flag on `SearchArgs`. Default: member items (fields, variants, methods, assoc items) suppressed unless search token exactly matches member name. `--members` expands all members of matched types. Collapsed display: `-::member` continuation lines. `is_member()` distinguishes members from free items. Cross-crate search walks struct fields + enum variants + union fields. `render_search_filtered` and `search_cross_crate_index` have `members: bool` param.
+- Smart leaf resolution: `cargo brief api <target> outer::PubStruct` resolves leaf items.
+- v0.6.0: **CLI restructure (breaking)** — `-C`/`--crates` boolean flag, `clean` subcommand, `RemoteOpts`.
 
 ## Workspace Reference
 

@@ -881,15 +881,16 @@ fn search_case_insensitive() {
 fn search_multi_word_and() {
     let model = fixture_model();
     // All-lowercase → case-insensitive AND
-    let output = search_output(&model, "outer method");
+    // "outer pub_method" matches the method exactly (exact name match on "pub_method")
+    let output = search_output(&model, "outer pub_method");
     assert!(
-        output.contains("fn outer::PubStruct::pub_method"),
-        "Multi-word AND should match:\n{output}"
+        output.contains("pub_method"),
+        "Multi-word AND should match method by exact name:\n{output}"
     );
     // Should not contain items that only match one word
     assert!(
         !output.contains("free_function"),
-        "free_function doesn't match 'method':\n{output}"
+        "free_function doesn't match 'pub_method':\n{output}"
     );
 }
 
@@ -909,8 +910,9 @@ fn search_no_functions_excludes_methods() {
 fn search_result_count_in_header() {
     let model = fixture_model();
     let output = search_output(&model, "Alpha");
+    // Alpha matches the variant exactly → parent enum injected as context header → 2 results
     assert!(
-        output.contains("(1 results)"),
+        output.contains("(2 results)"),
         "Header should show result count:\n{output}"
     );
 }
@@ -1259,16 +1261,26 @@ fn methods_of_shows_only_methods_and_fields() {
     filter.no_constants = true;
     filter.no_macros = true;
     filter.no_aliases = true;
-    let output = search::render_search(&model, "PubStruct", &filter, None, None, true, None);
+    // Must use render_search_methods_of to bypass member suppression
+    let output = search::render_search_methods_of(
+        &model,
+        "PubStruct",
+        &filter,
+        None,
+        None,
+        true,
+        None,
+        "PubStruct",
+    );
 
-    // Should contain methods
+    // Should contain methods (collapsed or full path)
     assert!(
-        output.contains("fn outer::PubStruct::pub_method"),
+        output.contains("pub_method"),
         "should show methods:\n{output}"
     );
     // Should contain fields
     assert!(
-        output.contains("field outer::PubStruct::pub_field"),
+        output.contains("pub_field"),
         "should show fields:\n{output}"
     );
     // Should NOT contain the struct definition itself
@@ -2254,8 +2266,9 @@ fn methods_of_exact_match_finds_correct_type() {
         None,
         "PubStruct",
     );
+    // Collapsed display: method appears as -::pub_method or fn ...PubStruct::pub_method
     assert!(
-        output.contains("PubStruct::pub_method"),
+        output.contains("pub_method"),
         "--methods-of PubStruct should find pub_method:\n{output}"
     );
     // Should NOT include DerivedStruct methods (DerivedStruct also contains "Struct")
@@ -2436,7 +2449,7 @@ fn test_search_kind_fn_only() {
     let filter = default_filter();
     let output = search::render_search_filtered(
         &model,
-        "pub",
+        "free_function",
         &filter,
         None,
         None,
@@ -2444,8 +2457,9 @@ fn test_search_kind_fn_only() {
         None,
         None,
         Some("fn"),
+        false,
     );
-    // Should include functions
+    // Should include functions (free_function is not a member, so no suppression)
     assert!(
         output.contains("fn "),
         "search-kind fn should include functions:\n{output}"
@@ -2475,6 +2489,7 @@ fn test_search_kind_struct_enum() {
         None,
         None,
         Some("struct,enum"),
+        false,
     );
     // Should include PubStruct
     assert!(
@@ -2502,6 +2517,7 @@ fn test_search_kind_no_match() {
         None,
         None,
         Some("macro"),
+        false,
     );
     assert!(
         output.contains("(0 results)"),
@@ -2537,7 +2553,11 @@ fn search_glob_star_matches_suffix() {
 #[test]
 fn search_glob_question_mark() {
     let model = fixture_model();
-    let output = search_output(&model, "*::?lpha");
+    // Glob tokens skip exact-name check; use --members to include variants
+    let filter = default_filter();
+    let output = search::render_search_filtered(
+        &model, "*::?lpha", &filter, None, None, true, None, None, None, true,
+    );
     assert!(
         output.contains("Alpha"),
         "glob ?lpha should match Alpha:\n{output}"
@@ -2552,7 +2572,20 @@ fn search_glob_question_mark() {
 fn search_glob_mid_pattern() {
     let model = fixture_model();
     // Full-path anchored: need leading * to match "outer::PubStruct::pub_method"
-    let output = search_output(&model, "*pub*method");
+    // Glob tokens skip exact-name check; use --members to include methods
+    let filter = default_filter();
+    let output = search::render_search_filtered(
+        &model,
+        "*pub*method",
+        &filter,
+        None,
+        None,
+        true,
+        None,
+        None,
+        None,
+        true,
+    );
     assert!(
         output.contains("pub_method"),
         "glob *pub*method should match pub_method:\n{output}"
@@ -2694,6 +2727,7 @@ fn test_search_kind_trait() {
         None,
         None,
         Some("trait"),
+        false,
     );
     assert!(
         output.contains("trait "),
@@ -2719,6 +2753,7 @@ fn test_search_kind_const() {
         None,
         None,
         Some("const"),
+        false,
     );
     assert!(
         output.contains("const "),
@@ -2865,6 +2900,7 @@ fn test_cross_crate_search_accessible_paths() {
         None,
         None,
         None,
+        false,
     );
 
     assert!(
@@ -2906,6 +2942,7 @@ fn test_cross_crate_search_all_item_types() {
         None,
         None,
         None,
+        false,
     );
 
     // Should find both struct and trait
@@ -3107,5 +3144,179 @@ fn test_leaf_not_found_via_pipeline() {
     assert!(
         output.contains("Available items:"),
         "Pipeline should list available items:\n{output}"
+    );
+}
+
+// === Member Display Tests ===
+
+#[test]
+fn search_members_flag_expands_all_members() {
+    let model = fixture_model();
+    let filter = default_filter();
+    let output = search::render_search_filtered(
+        &model,
+        "PubStruct",
+        &filter,
+        None,
+        None,
+        true,
+        None,
+        None,
+        None,
+        true, // members=true
+    );
+    // With --members, fields and methods of PubStruct should be present
+    assert!(
+        output.contains("pub_field"),
+        "--members should show fields:\n{output}"
+    );
+    assert!(
+        output.contains("pub_method"),
+        "--members should show methods:\n{output}"
+    );
+}
+
+#[test]
+fn search_default_suppresses_members() {
+    let model = fixture_model();
+    let output = search_output(&model, "PubStruct");
+    // Default: members suppressed (no exact name match on "PubStruct" for field/method names)
+    assert!(
+        output.contains("struct outer::PubStruct"),
+        "struct itself should appear:\n{output}"
+    );
+    assert!(
+        !output.contains("pub_field"),
+        "fields should be suppressed by default:\n{output}"
+    );
+    assert!(
+        !output.contains("pub_method"),
+        "methods should be suppressed by default:\n{output}"
+    );
+}
+
+#[test]
+fn search_exact_name_shows_member() {
+    let model = fixture_model();
+    let output = search_output(&model, "pub_field");
+    // "pub_field" exactly matches the field name → field shown with parent context
+    assert!(
+        output.contains("pub_field"),
+        "exact field name should show the field:\n{output}"
+    );
+    // Parent struct should be injected as context header
+    assert!(
+        output.contains("struct") && output.contains("PubStruct"),
+        "parent struct should appear as context:\n{output}"
+    );
+}
+
+#[test]
+fn search_collapsed_display_format() {
+    let model = fixture_model();
+    let filter = default_filter();
+    let output = search::render_search_filtered(
+        &model,
+        "PubStruct",
+        &filter,
+        None,
+        None,
+        true,
+        None,
+        None,
+        None,
+        true, // members=true
+    );
+    // Collapsed display: members after parent use -:: continuation
+    assert!(
+        output.contains("-::"),
+        "--members should produce collapsed -:: display:\n{output}"
+    );
+}
+
+#[test]
+fn search_members_sort_by_path() {
+    let model = fixture_model();
+    let filter = default_filter();
+    let output = search::render_search_filtered(
+        &model,
+        "PubStruct",
+        &filter,
+        None,
+        None,
+        true,
+        None,
+        None,
+        None,
+        true, // members=true
+    );
+    // With --members, sort is path-based: parent type comes before its members
+    let lines: Vec<&str> = output
+        .lines()
+        .filter(|l| !l.starts_with("//") && !l.starts_with("///"))
+        .collect();
+    // The first non-comment line should be the struct itself (path-sorted: struct before children)
+    assert!(
+        lines.first().map_or(false, |l| l.contains("PubStruct")),
+        "path-based sort should put parent type first:\n{output}"
+    );
+}
+
+#[test]
+fn search_members_with_limit() {
+    let model = fixture_model();
+    let filter = default_filter();
+    let output = search::render_search_filtered(
+        &model,
+        "PubStruct",
+        &filter,
+        Some("2"),
+        None,
+        true,
+        None,
+        None,
+        None,
+        true, // members=true
+    );
+    // Limit counts expanded members — at most 2 result lines
+    let result_lines: Vec<&str> = output
+        .lines()
+        .filter(|l| !l.starts_with("//") && !l.starts_with("///"))
+        .collect();
+    assert!(
+        result_lines.len() <= 2,
+        "--limit 2 should cap results to 2, got {}:\n{output}",
+        result_lines.len()
+    );
+    assert!(
+        output.contains("more results"),
+        "should indicate more results:\n{output}"
+    );
+}
+
+#[test]
+fn search_collapsed_variant_display() {
+    let model = fixture_model();
+    let filter = default_filter();
+    let output = search::render_search_filtered(
+        &model,
+        "PlainEnum",
+        &filter,
+        None,
+        None,
+        true,
+        None,
+        None,
+        None,
+        true, // members=true
+    );
+    // Enum variants should use collapsed display
+    assert!(
+        output.contains("-::"),
+        "enum variants should use collapsed -:: display:\n{output}"
+    );
+    assert!(
+        output.contains("Alpha"),
+        "variant Alpha should be present:\n{output}"
     );
 }
