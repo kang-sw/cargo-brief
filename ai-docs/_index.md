@@ -40,7 +40,7 @@ cargo brief clean [SPEC]
 ### Subcommands
 
 **`api`** — Extract and render crate API as pseudo-Rust documentation.
-Owns: `--depth`, `--recursive`, `--expand-glob`, target/module resolution.
+Owns: `--depth`, `--recursive`, `--no-expand-glob`, target/module resolution.
 
 **`search`** — Search for items by name across a crate.
 Pattern is positional. Owns: `--limit`, `--methods-of`, `--members`.
@@ -85,7 +85,7 @@ With `-C`, TARGET is the crate spec (e.g., `serde@1`, `tokio@1::net`).
 ### Api-only Options
 | `--depth <n>`           | Submodule recursion depth (default: 1)                         |
 | `--recursive`           | Recurse into all submodules                                    |
-| `--expand-glob`         | Inline full definitions from glob re-export sources            |
+| `--no-expand-glob`      | Suppress glob re-export expansion (show pub use lines instead) |
 | `--at-package` / `--at-mod` | Visibility resolution overrides                           |
 | `--manifest-path`       | Path to Cargo.toml                                             |
 
@@ -148,7 +148,7 @@ Parsed via `rustdoc-types` 0.57. Post-macro-expansion output.
 - **Cross-crate accessible paths**: Facade crates (bevy, axum) show items with user-facing paths via `CrossCrateIndex`. `build_cross_crate_index()` walks the facade root top-down, tracking accessible paths through glob/named re-exports. All three pipelines (search, api, summary) use the unified index — items appear as `render::render_resource::AsBindGroup` not `bevy_render::render_resource::bind_group::AsBindGroup`. Dedup keeps shortest non-prelude path per (crate_idx, item_id). Module targeting (`bevy ecs`) still uses the original `resolve_cross_crate_module()`.
 - **rustdoc JSON + bincode caching**: Single `generate_rustdoc_json()` with `use_cache` parameter. Primary package: `use_cache` is true for non-workspace-member targets (external deps like `bevy`), false for workspace members. Bincode parse cache always used. `cargo brief clean [SPEC]` manages disk usage. **Batch pre-warming**: `pre_warm_cross_crate_json()` uses `cargo doc` + `RUSTDOCFLAGS` to batch-generate JSON for all cross-crate deps in one invocation (recursive BFS, max depth 8). Names validated against `Cargo.lock` via `load_lockfile_packages()` → `LockfilePackages` (tracks multi-version crates, resolves to `name@latest_version` via `resolve_spec()`). `load_or_find_source_crate` also resolves specs upfront. Auto-retry on "specification is ambiguous" errors picks highest semver version. Existing per-crate calls hit cache after pre-warming.
 - Visibility auto-detection: `same_crate` inferred from cwd package context. Cross-crate views use reachability-based filtering via `ReachableInfo` (replaces `HashSet<Id>`). `ReachableInfo` carries `glob_private_modules` and `glob_inlined` metadata — private modules reached via `pub use private::*` are skipped in render/summary and their items inlined at the parent level. Search paths flattened for glob-private modules.
-- Glob re-export expansion: Phase 1 (individual `pub use` lines) + Phase 2 (`--expand-glob` inlines full definitions). **Recursive**: cross-crate glob chains followed up to depth 8 with cycle prevention. Underscore/hyphen package name fallback. **Intra-crate globs**: handled at render level via `ReachableInfo.glob_inlined`; private module contents inlined directly, no string-based post-processing needed.
+- Glob re-export expansion: Phase 1 (individual `pub use` lines) + Phase 2 (full definition inlining, on by default; `--no-expand-glob` reverts to Phase 1 only). **Recursive**: cross-crate glob chains followed up to depth 8 with cycle prevention. Underscore/hyphen package name fallback. **Intra-crate globs**: handled at render level via `ReachableInfo.glob_inlined`; private module contents inlined directly, no string-based post-processing needed.
 - Search mode: `cargo brief search <pattern>` finds leaf items with smart-case matching (all-lowercase = insensitive, any uppercase = sensitive). Comma-separated = OR groups, space-separated = AND within group. Pattern DSL operators: glob wildcards (`*`/`?`, full-path anchored), exclusion (`-term`, global post-filter), exact name match (`=term`, final `::` segment). Operators are embedded in tokens — no new CLI flags. **Member filtering**: by default, member items (fields, variants, impl methods, assoc types/consts) are suppressed unless a search token exactly matches the member's name. `--members` flag expands all members of matched types. Collapsed display: consecutive items sharing a parent path render with `-::member` continuation lines. Cross-crate search also walks struct fields and enum variants.
 - `--methods-of <TYPE>`: exact parent-type matching (shows only methods/fields of the named type, not substring matches). Bypasses member suppression. Zero-result sub-crate headers suppressed in normal mode.
 - Crate-level docs: root module `//!` comments rendered after `// crate <name>` header. `--no-crate-docs` suppresses independently.

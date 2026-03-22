@@ -216,7 +216,7 @@ All notable changes to this project will be documented in this file.
 - **Remote crate support** (`--crates <spec>`): fetch any crate from crates.io and display its API. Supports version specs: `serde`, `tokio@1`, `serde@1.0.200`.
 - **Workspace caching** for `--crates`: remote workspaces are persisted at `~/.cache/cargo-brief/crates/` so repeat calls reuse Cargo's build cache. Configurable via `$CARGO_BRIEF_CACHE_DIR` or `$XDG_CACHE_HOME`.
 - `--no-cache` flag to force a fresh temporary workspace (skips cache).
-- `--expand-glob` flag: inline full definitions from glob re-export sources instead of individual `pub use` lines.
+- Glob re-export expansion now defaults to on — facade crates (serde, clap) show full inlined definitions by default. Use `--no-expand-glob` to revert to `pub use` lines. (Breaking: replaces the previous `--expand-glob` opt-in flag.)
 - **Optional TARGET**: `cargo brief` with no arguments now defaults to `self` (current package).
 
 ## [0.2.2] - 2026-03-14

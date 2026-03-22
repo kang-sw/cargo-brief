@@ -28,7 +28,7 @@ Any non-zero exit or empty stdout is an automatic **FAIL**.
 | ID  | Command                              | Verify                                              |
 |-----|--------------------------------------|------------------------------------------------------|
 | S01 | `BRIEF --help`                       | Lists subcommands: api, search, examples, summary, clean |
-| S02 | `BRIEF api --help`                   | Shows --depth, --recursive, --expand-glob            |
+| S02 | `BRIEF api --help`                   | Shows --depth, --recursive, --no-expand-glob         |
 | S03 | `BRIEF search --help`                | Shows --limit, --methods-of, --members               |
 | S04 | `BRIEF api self`                     | Produces pseudo-Rust output                          |
 | S05 | `BRIEF search self run`              | Finds at least one item (e.g. `run_api_pipeline`)    |
@@ -52,12 +52,12 @@ Use PASS / WARN / FAIL per test.
 - Doc comments from source preserved in output
 
 ### Q02: Serde API
-**Command:** `BRIEF -C api serde --expand-glob`
+**Command:** `BRIEF -C api serde`
 **Criteria:**
-- `Serialize` and `Deserialize` traits present (with method signatures if expanded)
+- `Serialize` and `Deserialize` traits present (with method signatures — glob expansion is default)
 - Module structure visible (ser, de modules or re-exports)
 - Doc comments present on major types
-- Note: without `--expand-glob`, facade crates show `pub use` re-export lines only — this is expected default behavior, not a failure
+- Note: `--no-expand-glob` reverts to showing `pub use` re-export lines only
 
 ### Q03: Tokio Search
 **Command:** `BRIEF -C -F full search tokio@1 spawn`
@@ -69,12 +69,12 @@ Use PASS / WARN / FAIL per test.
 - Note: `-F full` is required because `spawn` lives in the `task` module which needs the `rt` feature (not in tokio's default features)
 
 ### Q04: Clap API
-**Command:** `BRIEF -C api clap --expand-glob`
+**Command:** `BRIEF -C api clap`
 **Criteria:**
-- Major types visible: `Command`, `Arg`, `ArgMatches` (may appear as re-exports or expanded definitions)
-- Builder methods present on key types when expanded
+- Major types visible: `Command`, `Arg`, `ArgMatches` (expanded definitions by default)
+- Builder methods present on key types
 - Output is navigable — not just an unsorted wall of items
-- Note: without `--expand-glob`, clap shows `pub use clap_builder::*` re-export lines — this is expected facade crate behavior
+- Note: `--no-expand-glob` reverts to showing `pub use clap_builder::*` re-export lines
 
 ### Q05: Error — Nonexistent Crate
 **Command:** `BRIEF -C api nonexistent-crate-xyz-12345`
