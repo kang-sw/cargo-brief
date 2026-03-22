@@ -294,3 +294,7 @@ pub use hidden_reexport::*;
 // --- Cross-crate glob re-export chain ---
 // test-fixture → glob-source → glob-inner (2-level chain)
 pub use glob_source::*;
+
+// --- Named cross-crate re-exports (NOT via glob) ---
+pub use named_source::NamedSourceItem;
+pub use named_source::NamedSourceTrait;

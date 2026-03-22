@@ -218,3 +218,24 @@ fn either_expand_glob_no_effect() {
         "Either enum should render normally with default expansion"
     );
 }
+
+// ============================================================
+// Named re-export expansion (serde facade)
+// ============================================================
+
+#[test]
+fn serde_named_reexports_expanded() {
+    let args = facade_args("serde");
+    let output = run_api_pipeline(&args, &RemoteOpts::default()).unwrap();
+
+    // Serialize trait should be expanded from serde_core (or serde itself)
+    assert!(
+        output.contains("trait Serialize"),
+        "Serialize should be expanded from named re-export:\n{output}"
+    );
+    // The raw pub use line should be replaced
+    assert!(
+        !output.contains("pub use serde::Serialize;"),
+        "Expanded named re-export should not show pub use line:\n{output}"
+    );
+}

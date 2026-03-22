@@ -3359,3 +3359,62 @@ fn methods_of_no_stack_overflow() {
         "should contain methods of PubStruct:\n{output}"
     );
 }
+
+// === Named Cross-Crate Re-Export Expansion ===
+
+/// Named cross-crate re-exports should be expanded inline by default.
+#[test]
+fn test_named_cross_crate_reexport_expanded() {
+    let args = default_args();
+    let output = cargo_brief::run_api_pipeline(&args, &RemoteOpts::default()).unwrap();
+
+    // NamedSourceItem is re-exported via `pub use named_source::NamedSourceItem;`
+    // With default expansion, the full struct definition should appear
+    assert!(
+        output.contains("struct NamedSourceItem"),
+        "Named re-export should be expanded to full definition:\n{output}"
+    );
+    assert!(
+        output.contains("ns_field"),
+        "Named re-export should include struct fields:\n{output}"
+    );
+    // The pub use line should be replaced (not present)
+    assert!(
+        !output.contains("pub use named_source::NamedSourceItem;"),
+        "Expanded named re-export should not show pub use line:\n{output}"
+    );
+}
+
+/// Named cross-crate trait re-exports should also be expanded.
+#[test]
+fn test_named_cross_crate_trait_reexport_expanded() {
+    let args = default_args();
+    let output = cargo_brief::run_api_pipeline(&args, &RemoteOpts::default()).unwrap();
+
+    assert!(
+        output.contains("trait NamedSourceTrait"),
+        "Named trait re-export should be expanded:\n{output}"
+    );
+    assert!(
+        output.contains("named_method"),
+        "Named trait re-export should include methods:\n{output}"
+    );
+    assert!(
+        !output.contains("pub use named_source::NamedSourceTrait;"),
+        "Expanded named trait re-export should not show pub use line:\n{output}"
+    );
+}
+
+/// Named cross-crate re-exports should NOT be expanded with --no-expand-glob.
+#[test]
+fn test_named_cross_crate_reexport_no_expand() {
+    let mut args = default_args();
+    args.no_expand_glob = true;
+    let output = cargo_brief::run_api_pipeline(&args, &RemoteOpts::default()).unwrap();
+
+    // Should show pub use line, not expanded definition
+    assert!(
+        output.contains("pub use named_source::NamedSourceItem;"),
+        "With --no-expand-glob, named re-export should stay as pub use:\n{output}"
+    );
+}
