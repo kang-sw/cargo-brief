@@ -38,7 +38,7 @@ fn either_args() -> ApiArgs {
         },
         depth: 1,
         recursive: true,
-        expand_glob: false,
+        no_expand_glob: false,
     }
 }
 

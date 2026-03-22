@@ -36,7 +36,7 @@ fn facade_args(crate_name: &str) -> ApiArgs {
         },
         depth: 1,
         recursive: true,
-        expand_glob: false,
+        no_expand_glob: false,
     }
 }
 
@@ -70,7 +70,7 @@ fn clap_facade_has_crate_header() {
 }
 
 // ============================================================
-// Glob expansion shows individual pub use items
+// Glob expansion inlines full definitions by default
 // ============================================================
 
 #[test]
@@ -78,14 +78,14 @@ fn clap_facade_expands_clap_builder_items() {
     let args = facade_args("clap");
     let output = run_api_pipeline(&args, &RemoteOpts::default()).unwrap();
 
-    // Key types from clap_builder should appear as individual pub use
+    // With default expansion on, full definitions should be inlined
     assert!(
-        output.contains("pub use clap_builder::Command;"),
-        "Command should be re-exported from clap_builder:\n{output}"
+        output.contains("pub struct Command"),
+        "Command struct definition should be inlined by default:\n{output}"
     );
     assert!(
-        output.contains("pub use clap_builder::Arg;"),
-        "Arg should be re-exported from clap_builder"
+        output.contains("pub struct Arg"),
+        "Arg struct definition should be inlined by default"
     );
 }
 
@@ -142,18 +142,12 @@ fn either_unaffected_by_glob_expansion() {
 }
 
 // ============================================================
-// --expand-glob: full definition inlining
+// Glob expansion (default): full definition inlining
 // ============================================================
-
-fn expand_glob_args(crate_name: &str) -> ApiArgs {
-    let mut args = facade_args(crate_name);
-    args.expand_glob = true;
-    args
-}
 
 #[test]
 fn clap_expand_glob_has_full_definitions() {
-    let args = expand_glob_args("clap");
+    let args = facade_args("clap");
     let output = run_api_pipeline(&args, &RemoteOpts::default()).unwrap();
 
     // Full struct definitions should appear instead of `pub use` lines
@@ -169,7 +163,7 @@ fn clap_expand_glob_has_full_definitions() {
 
 #[test]
 fn clap_expand_glob_no_pub_use_lines() {
-    let args = expand_glob_args("clap");
+    let args = facade_args("clap");
     let output = run_api_pipeline(&args, &RemoteOpts::default()).unwrap();
 
     // No `pub use clap_builder::*;` lines should remain
@@ -181,13 +175,13 @@ fn clap_expand_glob_no_pub_use_lines() {
     // No individual `pub use clap_builder::Name;` lines either
     assert!(
         !output.contains("pub use clap_builder::Command;"),
-        "individual pub use lines should not appear with --expand-glob"
+        "individual pub use lines should not appear with default expansion"
     );
 }
 
 #[test]
 fn clap_expand_glob_has_impl_blocks() {
-    let args = expand_glob_args("clap");
+    let args = facade_args("clap");
     let output = run_api_pipeline(&args, &RemoteOpts::default()).unwrap();
 
     // impl blocks from source crate should be included
@@ -199,7 +193,7 @@ fn clap_expand_glob_has_impl_blocks() {
 
 #[test]
 fn clap_expand_glob_dedup() {
-    let args = expand_glob_args("clap");
+    let args = facade_args("clap");
     let output = run_api_pipeline(&args, &RemoteOpts::default()).unwrap();
 
     // Items appearing in multiple glob sources should be deduplicated.
@@ -215,12 +209,12 @@ fn clap_expand_glob_dedup() {
 
 #[test]
 fn either_expand_glob_no_effect() {
-    let args = expand_glob_args("either");
+    let args = facade_args("either");
     let output = run_api_pipeline(&args, &RemoteOpts::default()).unwrap();
 
-    // either is not a facade crate — --expand-glob should not change output
+    // either is not a facade crate — default expansion should not change output
     assert!(
         output.contains("pub enum Either<L, R>"),
-        "Either enum should render normally with --expand-glob"
+        "Either enum should render normally with default expansion"
     );
 }

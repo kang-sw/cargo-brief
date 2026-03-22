@@ -1,6 +1,8 @@
 ---
 title: "Improve default output for facade crates (serde, clap)"
-status: todo
+status: done
+started: 2026-03-22
+completed: 2026-03-22
 ---
 
 ## Problem
@@ -30,13 +32,8 @@ the type's definition or methods.
 
 - This is a UX quality issue, not a crash/correctness bug
 - Automatically expanding all re-exports could produce very large output
-- Possible approaches:
-  - Auto-detect facade crates (few own items, many re-exports) and suggest
-    `--expand-glob` in output
-  - Default to `--expand-glob` when root module has only re-exports
-  - Show a hint like `// use --expand-glob to see full definitions`
 - Re-export paths show `serde_core::` not `serde::` — path resolution
-  could also be improved here
+  could also be improved here (tracked by cross-crate accessible paths feature)
 
 ## Found By
 
@@ -47,3 +44,23 @@ Usability test (Q02, Q04) — quality evaluation of serde and clap API output.
 - User gets actionable output from `cargo brief -C api serde` without
   needing to know about `--expand-glob`
 - Either auto-expand or clearly suggest the flag
+
+### Result (a7c84bc) - 26-03-22
+
+Flipped the CLI flag from `--expand-glob` (opt-in) to `--no-expand-glob` (opt-out).
+Glob re-export expansion now defaults to on for both local and remote modes.
+
+- `src/cli.rs`: `expand_glob: bool` → `no_expand_glob: bool`
+- `src/lib.rs`: Two call sites pass `!args.no_expand_glob` to `apply_glob_expansions()`
+- Internal `apply_glob_expansions()` function signature unchanged
+- All 7 test files updated; facade tests now exercise default expansion behavior
+- Phase 1 test tightened with assertion verifying pub use lines in opt-out mode
+
+**Deviation from plan:** The plan's Phase 1 test assertion
+`!output.contains("struct GlobSourceItem")` was incorrect — the
+`ReachableInfo.glob_inlined` path inlines definitions at render level
+independently of `--no-expand-glob`. Changed to verify presence of `pub use`
+lines instead.
+
+**Remaining concern:** Re-export path resolution (`serde_core::` vs `serde::`)
+is a separate issue handled by the cross-crate accessible paths feature.

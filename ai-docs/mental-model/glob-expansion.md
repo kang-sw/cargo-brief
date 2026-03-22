@@ -28,6 +28,6 @@
 
 ## Technical Debt
 - String-based glob detection is fragile. A marker-based or AST-aware approach would be more robust.
-- Phase 1 and Phase 2 data are always both generated regardless of `--expand-glob` flag. Minor performance cost.
+- Phase 1 and Phase 2 data are always both generated regardless of `--no-expand-glob` flag. Minor performance cost.
 - Phase 2 inlining follows re-export targets to render actual definitions, which means the rendered item type may differ from the Use item that triggered it.
 - No logging/warning when glob expansion silently skips a source crate (only depth-based recursion logs at `--verbose`).

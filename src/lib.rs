@@ -269,7 +269,7 @@ fn run_shared_api_pipeline(ctx: &PipelineContext, args: &ApiArgs) -> Result<Stri
                     ctx.verbose,
                     &ctx.workspace_members,
                 );
-                apply_glob_expansions(&mut output, &result, args.expand_glob, &args.filter);
+                apply_glob_expansions(&mut output, &result, !args.no_expand_glob, &args.filter);
                 output
             } else {
                 // Try leaf item resolution before falling through to error
@@ -406,7 +406,7 @@ fn render_and_expand_globs(
         ctx.verbose,
         &ctx.workspace_members,
     );
-    apply_glob_expansions(&mut output, &result, args.expand_glob, &args.filter);
+    apply_glob_expansions(&mut output, &result, !args.no_expand_glob, &args.filter);
     Ok(output)
 }
 
