@@ -246,6 +246,37 @@ TIPS:
   - #[derive(...)] is: (attribute_item (attribute (identifier) @a (#eq? @a \"derive\")))")]
     Ts(TsArgs),
 
+    /// Look up code definitions by kind and name using pre-crafted tree-sitter queries
+    #[command(after_help = "\
+EXAMPLES:
+  # Find a function by name (catch-all — searches all item kinds)
+  cargo brief code self spawn
+
+  # Find a specific item kind
+  cargo brief code self fn spawn
+  cargo brief code self struct Commands
+  cargo brief code self trait Plugin
+  cargo brief code self field visible_field
+  cargo brief code self impl Commands
+
+  # Smart-case: all-lowercase = case-insensitive
+  cargo brief code self pubstruct        # finds PubStruct
+  cargo brief code self PubStruct        # case-sensitive
+
+  # Remote crate
+  cargo brief -C code serde@1 struct Serializer
+
+  # Quiet mode (location only, no source text)
+  cargo brief code self fn spawn -q
+
+  # Limit results
+  cargo brief code self fn spawn --limit 5
+
+ITEM KINDS:
+  fn, struct, enum, trait, field, type, impl, macro, const, use
+  Omit KIND to search all kinds (except use, to reduce noise).")]
+    Code(CodeArgs),
+
     /// Clear cached remote crate workspaces
     #[command(after_help = "\
 EXAMPLES:
@@ -500,6 +531,49 @@ pub struct TsArgs {
     pub limit: Option<String>,
 
     /// Output only file:line locations, no source text
+    #[arg(short = 'q', long)]
+    pub quiet: bool,
+}
+
+/// Arguments for the `code` subcommand.
+#[derive(Args, Debug, Clone)]
+pub struct CodeArgs {
+    /// Target crate (use 'self' for current crate)
+    #[arg(value_name = "TARGET", default_value = "self")]
+    pub crate_name: String,
+
+    /// Item kind or name. Kinds: fn, struct, enum, trait, field, type, impl, macro, const, use
+    #[arg(value_name = "[KIND] NAME")]
+    pub kind_or_name: String,
+
+    /// Item name (required when KIND is specified)
+    #[arg(value_name = "NAME")]
+    pub name: Option<String>,
+
+    #[command(flatten)]
+    pub global: GlobalArgs,
+
+    /// Path to Cargo.toml
+    #[arg(long, help_heading = "Local Workspace")]
+    pub manifest_path: Option<String>,
+
+    /// Only search src/ directory
+    #[arg(long)]
+    pub src_only: bool,
+
+    /// Don't search dependencies (default in Phase 1)
+    #[arg(long)]
+    pub no_deps: bool,
+
+    /// Use all cargo metadata deps instead of accessible-path set
+    #[arg(long, conflicts_with = "no_deps")]
+    pub all_deps: bool,
+
+    /// Limit matches: N or OFFSET:N
+    #[arg(long, value_name = "[OFFSET:]N")]
+    pub limit: Option<String>,
+
+    /// Output only file:line + context, no source text
     #[arg(short = 'q', long)]
     pub quiet: bool,
 }

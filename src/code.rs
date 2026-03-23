@@ -1,0 +1,487 @@
+//! Pre-crafted tree-sitter code lookup by item kind and name.
+//!
+//! Bridges the gap between `search` (API shape, no source locations) and `ts`
+//! (raw S-expressions). Provides `cargo brief code <target> [kind] <name>`.
+
+use std::path::{Path, PathBuf};
+
+use anyhow::{Result, bail};
+use streaming_iterator::StreamingIterator;
+use tree_sitter::{Parser, Query, QueryCursor};
+
+use crate::cli::CodeArgs;
+use crate::examples;
+
+// ── Item kinds ───────────────────────────────────────────────────────
+
+/// Supported item kinds for code lookup.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ItemKind {
+    Fn,
+    Struct,
+    Enum,
+    Trait,
+    Field,
+    Type,
+    Impl,
+    Macro,
+    Const,
+    Use,
+}
+
+impl ItemKind {
+    /// Parse a kind keyword. Returns `None` for unrecognized strings.
+    pub fn parse(s: &str) -> Option<Self> {
+        match s {
+            "fn" => Some(Self::Fn),
+            "struct" => Some(Self::Struct),
+            "enum" => Some(Self::Enum),
+            "trait" => Some(Self::Trait),
+            "field" => Some(Self::Field),
+            "type" => Some(Self::Type),
+            "impl" => Some(Self::Impl),
+            "macro" => Some(Self::Macro),
+            "const" => Some(Self::Const),
+            "use" => Some(Self::Use),
+            _ => None,
+        }
+    }
+
+    /// Display keyword (lowercase, not Debug format).
+    pub fn keyword(self) -> &'static str {
+        match self {
+            Self::Fn => "fn",
+            Self::Struct => "struct",
+            Self::Enum => "enum",
+            Self::Trait => "trait",
+            Self::Field => "field",
+            Self::Type => "type",
+            Self::Impl => "impl",
+            Self::Macro => "macro",
+            Self::Const => "const",
+            Self::Use => "use",
+        }
+    }
+}
+
+// ── Argument resolution ──────────────────────────────────────────────
+
+/// Resolve `kind_or_name` + optional `name` into `(Option<ItemKind>, &str)`.
+///
+/// - Two positionals: first is kind, second is name.
+/// - One positional: if it matches a known kind keyword, error with guidance;
+///   otherwise treat it as the name (catch-all mode).
+pub fn resolve_kind_and_name(args: &CodeArgs) -> Result<(Option<ItemKind>, &str)> {
+    if let Some(ref name) = args.name {
+        // Two positionals: kind_or_name must be a valid kind
+        match ItemKind::parse(&args.kind_or_name) {
+            Some(kind) => Ok((Some(kind), name.as_str())),
+            None => bail!(
+                "Unknown item kind '{}'. Valid kinds: fn, struct, enum, trait, field, type, impl, macro, const, use",
+                args.kind_or_name
+            ),
+        }
+    } else {
+        // One positional: if it's a known kind, error with guidance
+        if ItemKind::parse(&args.kind_or_name).is_some() {
+            bail!(
+                "'{}' is an item kind, not a name. Usage: cargo brief code <target> {} <name>",
+                args.kind_or_name,
+                args.kind_or_name
+            );
+        }
+        Ok((None, args.kind_or_name.as_str()))
+    }
+}
+
+// ── Tree-sitter queries ──────────────────────────────────────────────
+
+/// Build a tree-sitter query string for the given item kind (or all kinds).
+/// Each pattern has `@name` (the identifier to match) and `@item` (the full node).
+fn build_query(kind: Option<ItemKind>) -> String {
+    let mut parts = Vec::new();
+
+    let add = |parts: &mut Vec<&str>, k: ItemKind| match k {
+        ItemKind::Fn => {
+            parts.push("(function_item name: (identifier) @name) @item");
+            parts.push("(function_signature_item name: (identifier) @name) @item");
+        }
+        ItemKind::Struct => {
+            parts.push("(struct_item name: (type_identifier) @name) @item");
+        }
+        ItemKind::Enum => {
+            parts.push("(enum_item name: (type_identifier) @name) @item");
+        }
+        ItemKind::Trait => {
+            parts.push("(trait_item name: (type_identifier) @name) @item");
+        }
+        ItemKind::Field => {
+            parts.push("(field_declaration name: (field_identifier) @name) @item");
+        }
+        ItemKind::Type => {
+            parts.push("(type_item name: (type_identifier) @name) @item");
+        }
+        ItemKind::Impl => {
+            parts.push("(impl_item type: (type_identifier) @name) @item");
+            parts.push("(impl_item type: (generic_type type: (type_identifier) @name)) @item");
+            parts.push(
+                "(impl_item type: (scoped_type_identifier name: (type_identifier) @name)) @item",
+            );
+        }
+        ItemKind::Macro => {
+            parts.push("(macro_definition name: (identifier) @name) @item");
+        }
+        ItemKind::Const => {
+            parts.push("(const_item name: (identifier) @name) @item");
+            parts.push("(static_item name: (identifier) @name) @item");
+        }
+        ItemKind::Use => {
+            parts.push(
+                "(use_declaration argument: (use_as_clause alias: (identifier) @name)) @item",
+            );
+            parts.push(
+                "(use_declaration argument: (scoped_identifier name: (identifier) @name)) @item",
+            );
+            parts.push("(use_declaration argument: (identifier) @name) @item");
+        }
+    };
+
+    if let Some(k) = kind {
+        add(&mut parts, k);
+    } else {
+        // Catch-all: all kinds except Use (reduces noise)
+        for k in [
+            ItemKind::Fn,
+            ItemKind::Struct,
+            ItemKind::Enum,
+            ItemKind::Trait,
+            ItemKind::Field,
+            ItemKind::Type,
+            ItemKind::Impl,
+            ItemKind::Macro,
+            ItemKind::Const,
+        ] {
+            add(&mut parts, k);
+        }
+    }
+
+    parts.join("\n")
+}
+
+// ── Name matching ────────────────────────────────────────────────────
+
+/// Smart-case: all-lowercase pattern → case-insensitive.
+fn is_case_sensitive(pattern: &str) -> bool {
+    pattern.chars().any(|c| c.is_uppercase())
+}
+
+fn name_matches(captured: &str, pattern: &str, case_sensitive: bool) -> bool {
+    if case_sensitive {
+        captured == pattern
+    } else {
+        captured.eq_ignore_ascii_case(pattern)
+    }
+}
+
+// ── File collection ──────────────────────────────────────────────────
+
+fn collect_source_files(source_root: &Path, src_only: bool) -> Vec<PathBuf> {
+    let mut files = Vec::new();
+    let dirs: &[&str] = if src_only {
+        &["src"]
+    } else {
+        &["src", "examples", "tests", "benches"]
+    };
+    for dir_name in dirs {
+        let dir = source_root.join(dir_name);
+        if dir.is_dir() {
+            files.extend(examples::collect_rs_files(&dir, 999));
+        }
+    }
+    files.sort();
+    files
+}
+
+// ── Module context derivation ────────────────────────────────────────
+
+/// Derive module path from file path relative to source root.
+/// `lib.rs`/`main.rs` → empty. `src/foo/bar.rs` → `foo::bar`.
+/// `src/foo/mod.rs` → `foo`.
+fn derive_module_path(file_path: &Path, source_root: &Path) -> String {
+    let rel = file_path.strip_prefix(source_root).unwrap_or(file_path);
+
+    // Strip leading src/ if present
+    let rel = rel.strip_prefix("src").unwrap_or(rel);
+
+    let s = rel.to_string_lossy();
+    let s = s.strip_suffix(".rs").unwrap_or(&s);
+
+    // mod.rs → use parent dir
+    let s = s
+        .strip_suffix("/mod")
+        .or_else(|| s.strip_suffix("\\mod"))
+        .unwrap_or(s);
+
+    // lib / main at root → empty
+    if s == "lib" || s == "main" || s == "/lib" || s == "/main" || s == "\\lib" || s == "\\main" {
+        return String::new();
+    }
+
+    // Strip leading separator
+    let s = s
+        .strip_prefix('/')
+        .or_else(|| s.strip_prefix('\\'))
+        .unwrap_or(s);
+
+    s.replace(['/', '\\'], "::")
+}
+
+/// Walk up from a node collecting inline `mod_item` ancestor names (reversed for top-down order).
+fn collect_inline_module_names(node: tree_sitter::Node, source: &str) -> Vec<String> {
+    let mut names = Vec::new();
+    let mut current = node.parent();
+    while let Some(parent) = current {
+        if parent.kind() == "mod_item"
+            && let Some(name_node) = parent.child_by_field_name("name")
+        {
+            names.push(source[name_node.start_byte()..name_node.end_byte()].to_string());
+        }
+        current = parent.parent();
+    }
+    names.reverse();
+    names
+}
+
+/// Build full module context: `crate_name::file_module::inline_modules`.
+fn build_module_context(
+    crate_name: &str,
+    file_path: &Path,
+    source_root: &Path,
+    node: tree_sitter::Node,
+    source: &str,
+) -> String {
+    let file_mod = derive_module_path(file_path, source_root);
+    let inline_mods = collect_inline_module_names(node, source);
+
+    let mut path = String::from(crate_name);
+    if !file_mod.is_empty() {
+        path.push_str("::");
+        path.push_str(&file_mod);
+    }
+    if !inline_mods.is_empty() {
+        path.push_str("::");
+        path.push_str(&inline_mods.join("::"));
+    }
+    path
+}
+
+// ── Parent context ───────────────────────────────────────────────────
+
+/// Walk up from node to find nearest impl/trait/struct/enum parent.
+/// Returns a display string like `impl Commands<'w, 's'>` or `trait Plugin`.
+fn find_parent_context(node: tree_sitter::Node, source: &str) -> Option<String> {
+    let mut current = node.parent();
+    while let Some(parent) = current {
+        match parent.kind() {
+            "impl_item" => {
+                // Extract: `impl [Trait for] Type`
+                let trait_part = parent
+                    .child_by_field_name("trait")
+                    .map(|t| &source[t.start_byte()..t.end_byte()]);
+                let type_part = parent
+                    .child_by_field_name("type")
+                    .map(|t| &source[t.start_byte()..t.end_byte()]);
+                return match (trait_part, type_part) {
+                    (Some(tr), Some(ty)) => Some(format!("impl {tr} for {ty}")),
+                    (None, Some(ty)) => Some(format!("impl {ty}")),
+                    _ => None,
+                };
+            }
+            "trait_item" => {
+                if let Some(name_node) = parent.child_by_field_name("name") {
+                    let name = &source[name_node.start_byte()..name_node.end_byte()];
+                    return Some(format!("trait {name}"));
+                }
+            }
+            "struct_item" => {
+                if let Some(name_node) = parent.child_by_field_name("name") {
+                    let name = &source[name_node.start_byte()..name_node.end_byte()];
+                    return Some(format!("struct {name}"));
+                }
+            }
+            "enum_item" => {
+                if let Some(name_node) = parent.child_by_field_name("name") {
+                    let name = &source[name_node.start_byte()..name_node.end_byte()];
+                    return Some(format!("enum {name}"));
+                }
+            }
+            // Skip intermediate nodes (declaration_list, etc.) and keep walking up
+            "mod_item" => return None, // stop at module boundary
+            _ => {}
+        }
+        current = parent.parent();
+    }
+    None
+}
+
+// ── Limit parsing ────────────────────────────────────────────────────
+
+fn parse_limit(raw: Option<&str>) -> (usize, Option<usize>) {
+    let Some(raw) = raw else {
+        return (0, None);
+    };
+    if let Some((offset_str, limit_str)) = raw.split_once(':') {
+        (
+            offset_str.parse().unwrap_or(0),
+            Some(limit_str.parse().unwrap_or(0)),
+        )
+    } else {
+        (0, Some(raw.parse().unwrap_or(0)))
+    }
+}
+
+// ── Main search function ─────────────────────────────────────────────
+
+/// Search source files for code definitions matching kind and name.
+///
+/// `sources`: list of `(crate_name, source_root)` pairs to scan.
+pub fn search_code(
+    sources: &[(String, PathBuf)],
+    name: &str,
+    kind: Option<ItemKind>,
+    args: &CodeArgs,
+) -> Result<String> {
+    let language: tree_sitter::Language = tree_sitter_rust::LANGUAGE.into();
+    let query_src = build_query(kind);
+    let query = Query::new(&language, &query_src)
+        .map_err(|e| anyhow::anyhow!("Failed to compile tree-sitter query: {e}"))?;
+
+    let mut parser = Parser::new();
+    parser
+        .set_language(&language)
+        .map_err(|e| anyhow::anyhow!("Failed to set tree-sitter language: {e}"))?;
+
+    let capture_names = query.capture_names().to_vec();
+    let name_idx = capture_names
+        .iter()
+        .position(|n| *n == "name")
+        .expect("query must have @name capture") as u32;
+    let item_idx = capture_names
+        .iter()
+        .position(|n| *n == "item")
+        .expect("query must have @item capture") as u32;
+
+    let case_sensitive = is_case_sensitive(name);
+    let (offset, limit) = parse_limit(args.limit.as_deref());
+
+    let mut output = String::new();
+    let mut match_count = 0usize;
+    let mut emitted = 0usize;
+
+    // Pre-compute lowercase name for insensitive grep pre-filter
+    let name_lower = name.to_ascii_lowercase();
+
+    'outer: for (crate_name, source_root) in sources {
+        let files = collect_source_files(source_root, args.src_only);
+
+        for file_path in &files {
+            let source = match std::fs::read_to_string(file_path) {
+                Ok(s) => s,
+                Err(_) => continue,
+            };
+
+            // Grep pre-filter: skip files that don't contain the name
+            let contains = if case_sensitive {
+                source.contains(name)
+            } else {
+                source.to_ascii_lowercase().contains(&name_lower)
+            };
+            if !contains {
+                continue;
+            }
+
+            let Some(tree) = parser.parse(&source, None) else {
+                continue;
+            };
+
+            let root = tree.root_node();
+            let mut cursor = QueryCursor::new();
+            let mut matches = cursor.matches(&query, root, source.as_bytes());
+
+            while let Some(query_match) = matches.next() {
+                // Find @name and @item captures
+                let name_node = query_match.captures.iter().find(|c| c.index == name_idx);
+                let item_node = query_match.captures.iter().find(|c| c.index == item_idx);
+
+                let (Some(name_cap), Some(item_cap)) = (name_node, item_node) else {
+                    continue;
+                };
+
+                let captured_name = &source[name_cap.node.start_byte()..name_cap.node.end_byte()];
+                if !name_matches(captured_name, name, case_sensitive) {
+                    continue;
+                }
+
+                match_count += 1;
+                if match_count <= offset {
+                    continue;
+                }
+                if let Some(n) = limit
+                    && emitted >= n
+                {
+                    break 'outer;
+                }
+                emitted += 1;
+
+                let item_node = item_cap.node;
+                let start_line = item_node.start_position().row + 1;
+                let rel = file_path.strip_prefix(source_root).unwrap_or(file_path);
+
+                // Module context
+                let mod_ctx =
+                    build_module_context(crate_name, file_path, source_root, item_node, &source);
+
+                // Parent context
+                let parent_ctx = find_parent_context(item_node, &source);
+
+                // Format output
+                if !output.is_empty() {
+                    output.push('\n');
+                }
+
+                output.push_str(&format!("@{}:{}\n", rel.display(), start_line));
+
+                // Context line: `  in module[, parent]`
+                output.push_str("  in ");
+                output.push_str(&mod_ctx);
+                if let Some(ref ctx) = parent_ctx {
+                    output.push_str(", ");
+                    output.push_str(ctx);
+                }
+                output.push('\n');
+
+                if !args.quiet {
+                    output.push('\n');
+                    let text = &source[item_node.start_byte()..item_node.end_byte()];
+                    output.push_str(text);
+                    if !text.ends_with('\n') {
+                        output.push('\n');
+                    }
+                }
+            }
+        }
+    }
+
+    if match_count == 0 {
+        let kind_str = kind.map_or("", |k| k.keyword());
+        if kind_str.is_empty() {
+            output.push_str(&format!("// no definitions found for '{name}'\n"));
+        } else {
+            output.push_str(&format!(
+                "// no {kind_str} definitions found for '{name}'\n"
+            ));
+        }
+    }
+
+    Ok(output)
+}

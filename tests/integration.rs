@@ -1,6 +1,6 @@
 use cargo_brief::cli::{
-    ApiArgs, ExamplesArgs, FilterArgs, GlobalArgs, RemoteOpts, SearchArgs, SummaryArgs, TargetArgs,
-    TsArgs,
+    ApiArgs, CodeArgs, ExamplesArgs, FilterArgs, GlobalArgs, RemoteOpts, SearchArgs, SummaryArgs,
+    TargetArgs, TsArgs,
 };
 use cargo_brief::model::{CrateModel, compute_reachable_set};
 use cargo_brief::render::{render_leaf_item, render_leaf_not_found, render_module_api};
@@ -3641,5 +3641,292 @@ fn test_ts_no_matches_hint() {
     assert!(
         output.contains("tree-sitter.github.io"),
         "No-match output should include playground hint:\n{output}"
+    );
+}
+
+// ── code subcommand tests ────────────────────────────────────────────
+
+fn default_code_args() -> CodeArgs {
+    CodeArgs {
+        crate_name: "test-fixture".to_string(),
+        kind_or_name: String::new(),
+        name: None,
+        global: GlobalArgs {
+            toolchain: "nightly".to_string(),
+            verbose: false,
+        },
+        manifest_path: Some("test_fixture/Cargo.toml".to_string()),
+        src_only: false,
+        no_deps: true,
+        all_deps: false,
+        limit: None,
+        quiet: false,
+    }
+}
+
+#[test]
+fn test_code_finds_fn() {
+    let mut args = default_code_args();
+    args.kind_or_name = "fn".to_string();
+    args.name = Some("free_function".to_string());
+    let output = cargo_brief::run_code_pipeline(&args, &RemoteOpts::default()).unwrap();
+    assert!(
+        output.contains("free_function"),
+        "Should find free_function:\n{output}"
+    );
+}
+
+#[test]
+fn test_code_finds_struct() {
+    let mut args = default_code_args();
+    args.kind_or_name = "struct".to_string();
+    args.name = Some("PubStruct".to_string());
+    let output = cargo_brief::run_code_pipeline(&args, &RemoteOpts::default()).unwrap();
+    assert!(
+        output.contains("PubStruct"),
+        "Should find PubStruct:\n{output}"
+    );
+}
+
+#[test]
+fn test_code_finds_enum() {
+    let mut args = default_code_args();
+    args.kind_or_name = "enum".to_string();
+    args.name = Some("PlainEnum".to_string());
+    let output = cargo_brief::run_code_pipeline(&args, &RemoteOpts::default()).unwrap();
+    assert!(
+        output.contains("PlainEnum"),
+        "Should find PlainEnum:\n{output}"
+    );
+}
+
+#[test]
+fn test_code_finds_trait() {
+    let mut args = default_code_args();
+    args.kind_or_name = "trait".to_string();
+    args.name = Some("MyTrait".to_string());
+    let output = cargo_brief::run_code_pipeline(&args, &RemoteOpts::default()).unwrap();
+    assert!(
+        output.contains("trait MyTrait"),
+        "Should find trait MyTrait:\n{output}"
+    );
+}
+
+#[test]
+fn test_code_finds_const() {
+    let mut args = default_code_args();
+    args.kind_or_name = "const".to_string();
+    args.name = Some("MY_CONST".to_string());
+    let output = cargo_brief::run_code_pipeline(&args, &RemoteOpts::default()).unwrap();
+    assert!(
+        output.contains("MY_CONST"),
+        "Should find MY_CONST:\n{output}"
+    );
+}
+
+#[test]
+fn test_code_finds_field() {
+    let mut args = default_code_args();
+    args.kind_or_name = "field".to_string();
+    args.name = Some("pub_field".to_string());
+    let output = cargo_brief::run_code_pipeline(&args, &RemoteOpts::default()).unwrap();
+    assert!(
+        output.contains("pub_field"),
+        "Should find pub_field:\n{output}"
+    );
+    assert!(
+        output.contains("struct PubStruct"),
+        "Parent context should show struct PubStruct:\n{output}"
+    );
+}
+
+#[test]
+fn test_code_finds_type_alias() {
+    let mut args = default_code_args();
+    args.kind_or_name = "type".to_string();
+    args.name = Some("Alias".to_string());
+    let output = cargo_brief::run_code_pipeline(&args, &RemoteOpts::default()).unwrap();
+    assert!(output.contains("Alias"), "Should find Alias:\n{output}");
+}
+
+#[test]
+fn test_code_finds_impl() {
+    let mut args = default_code_args();
+    args.kind_or_name = "impl".to_string();
+    args.name = Some("PubStruct".to_string());
+    let output = cargo_brief::run_code_pipeline(&args, &RemoteOpts::default()).unwrap();
+    assert!(
+        output.contains("impl PubStruct"),
+        "Should find impl PubStruct:\n{output}"
+    );
+}
+
+#[test]
+fn test_code_finds_macro() {
+    let mut args = default_code_args();
+    args.kind_or_name = "macro".to_string();
+    args.name = Some("my_macro".to_string());
+    let output = cargo_brief::run_code_pipeline(&args, &RemoteOpts::default()).unwrap();
+    assert!(
+        output.contains("my_macro"),
+        "Should find my_macro:\n{output}"
+    );
+}
+
+#[test]
+fn test_code_catch_all() {
+    let mut args = default_code_args();
+    args.kind_or_name = "PubStruct".to_string();
+    let output = cargo_brief::run_code_pipeline(&args, &RemoteOpts::default()).unwrap();
+    // Catch-all should find both struct and impl
+    assert!(
+        output.contains("struct PubStruct"),
+        "Catch-all should find struct PubStruct:\n{output}"
+    );
+    assert!(
+        output.contains("impl PubStruct"),
+        "Catch-all should find impl PubStruct:\n{output}"
+    );
+}
+
+#[test]
+fn test_code_case_insensitive() {
+    let mut args = default_code_args();
+    args.kind_or_name = "pubstruct".to_string(); // all lowercase → insensitive
+    let output = cargo_brief::run_code_pipeline(&args, &RemoteOpts::default()).unwrap();
+    assert!(
+        output.contains("PubStruct"),
+        "All-lowercase search should find PubStruct (case-insensitive):\n{output}"
+    );
+}
+
+#[test]
+fn test_code_case_sensitive() {
+    let mut args = default_code_args();
+    args.kind_or_name = "Pubstruct".to_string(); // has uppercase → sensitive
+    let output = cargo_brief::run_code_pipeline(&args, &RemoteOpts::default()).unwrap();
+    assert!(
+        output.contains("no definitions found"),
+        "Mixed-case 'Pubstruct' should not find PubStruct (case-sensitive):\n{output}"
+    );
+}
+
+#[test]
+fn test_code_no_matches() {
+    let mut args = default_code_args();
+    args.kind_or_name = "nonexistent_xyz".to_string();
+    let output = cargo_brief::run_code_pipeline(&args, &RemoteOpts::default()).unwrap();
+    assert!(
+        output.contains("no definitions found"),
+        "Nonexistent name should produce no-match message:\n{output}"
+    );
+}
+
+#[test]
+fn test_code_quiet_mode() {
+    let mut args = default_code_args();
+    args.kind_or_name = "fn".to_string();
+    args.name = Some("free_function".to_string());
+    args.quiet = true;
+    let output = cargo_brief::run_code_pipeline(&args, &RemoteOpts::default()).unwrap();
+    assert!(
+        output.contains('@'),
+        "Quiet mode should have @file:line:\n{output}"
+    );
+    // Should not contain the function body
+    assert!(
+        !output.contains("x + y"),
+        "Quiet mode should not contain function body:\n{output}"
+    );
+}
+
+#[test]
+fn test_code_limit() {
+    let mut args = default_code_args();
+    args.kind_or_name = "fn".to_string();
+    args.name = Some("free_function".to_string());
+    args.limit = Some("1".to_string());
+    let output = cargo_brief::run_code_pipeline(&args, &RemoteOpts::default()).unwrap();
+    let at_count = output.lines().filter(|l| l.starts_with('@')).count();
+    assert_eq!(
+        at_count, 1,
+        "limit=1 should produce exactly 1 @-line:\n{output}"
+    );
+}
+
+#[test]
+fn test_code_module_context() {
+    let mut args = default_code_args();
+    args.kind_or_name = "struct".to_string();
+    args.name = Some("PubStruct".to_string());
+    let output = cargo_brief::run_code_pipeline(&args, &RemoteOpts::default()).unwrap();
+    assert!(
+        output.contains("test-fixture::outer") || output.contains("test_fixture::outer"),
+        "Context should contain outer module:\n{output}"
+    );
+}
+
+#[test]
+fn test_code_parent_context_impl_method() {
+    let mut args = default_code_args();
+    args.kind_or_name = "fn".to_string();
+    args.name = Some("pub_method".to_string());
+    let output = cargo_brief::run_code_pipeline(&args, &RemoteOpts::default()).unwrap();
+    assert!(
+        output.contains("impl PubStruct"),
+        "Parent context should show impl PubStruct:\n{output}"
+    );
+}
+
+#[test]
+fn test_code_kind_without_name_errors() {
+    let mut args = default_code_args();
+    args.kind_or_name = "fn".to_string();
+    args.name = None;
+    let result = cargo_brief::run_code_pipeline(&args, &RemoteOpts::default());
+    assert!(result.is_err(), "Kind without name should error");
+    let err = result.unwrap_err().to_string();
+    assert!(
+        err.contains("item kind"),
+        "Error should mention item kind: {err}"
+    );
+}
+
+#[test]
+fn test_code_unknown_kind_errors() {
+    let mut args = default_code_args();
+    args.kind_or_name = "xyz".to_string();
+    args.name = Some("foo".to_string());
+    let result = cargo_brief::run_code_pipeline(&args, &RemoteOpts::default());
+    assert!(result.is_err(), "Unknown kind should error");
+    let err = result.unwrap_err().to_string();
+    assert!(
+        err.contains("Unknown item kind"),
+        "Error should mention unknown kind: {err}"
+    );
+}
+
+#[test]
+fn test_code_src_only() {
+    // Search for "main" which exists in examples/ but not src/
+    let mut args = default_code_args();
+    args.kind_or_name = "fn".to_string();
+    args.name = Some("main".to_string());
+
+    // Without src_only: should find main in examples
+    let output = cargo_brief::run_code_pipeline(&args, &RemoteOpts::default()).unwrap();
+    let found_without = output.contains("main");
+
+    // With src_only: should not find main
+    args.src_only = true;
+    let output_src = cargo_brief::run_code_pipeline(&args, &RemoteOpts::default()).unwrap();
+
+    assert!(
+        found_without,
+        "Without src_only should find main:\n{output}"
+    );
+    assert!(
+        output_src.contains("no fn definitions found"),
+        "With src_only should not find main from examples:\n{output_src}"
     );
 }

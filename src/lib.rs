@@ -1,4 +1,5 @@
 pub mod cli;
+pub mod code;
 pub mod cross_crate;
 pub mod examples;
 pub mod model;
@@ -22,7 +23,9 @@ use std::path::{Path, PathBuf};
 use anyhow::{Context, Result};
 use rustdoc_types::{ItemEnum, Visibility};
 
-use cli::{ApiArgs, ExamplesArgs, FilterArgs, RemoteOpts, SearchArgs, SummaryArgs, TsArgs};
+use cli::{
+    ApiArgs, CodeArgs, ExamplesArgs, FilterArgs, RemoteOpts, SearchArgs, SummaryArgs, TsArgs,
+};
 use model::{CrateModel, ReachableInfo, compute_reachable_set};
 
 /// Result of glob re-export expansion. Contains both the item names (for Phase 1
@@ -762,6 +765,90 @@ pub fn run_ts_pipeline(args: &TsArgs, remote: &RemoteOpts) -> Result<String> {
         }
 
         ts::run_query(&source_root, &args.query, args)
+    }
+}
+
+/// Run the code lookup pipeline and return the rendered output string.
+pub fn run_code_pipeline(args: &CodeArgs, remote: &RemoteOpts) -> Result<String> {
+    let (kind, name) = code::resolve_kind_and_name(args)?;
+
+    if args.all_deps && !args.no_deps {
+        eprintln!(
+            "warning: --all-deps is not yet implemented (Phase 2); searching target crate only"
+        );
+    }
+
+    if remote.crates {
+        let spec = &args.crate_name;
+        let (crate_name, _) = remote::parse_crate_spec(spec);
+        if args.global.verbose {
+            eprintln!("[cargo-brief] Resolving workspace for '{crate_name}'...");
+        }
+        let (workspace, _resolved_version) = remote::resolve_workspace(
+            spec,
+            remote.features.as_deref(),
+            remote.no_default_features,
+            remote.no_cache,
+        )
+        .with_context(|| format!("Failed to create workspace for '{crate_name}'"))?;
+
+        let manifest_path = workspace
+            .path()
+            .join("Cargo.toml")
+            .to_string_lossy()
+            .into_owned();
+
+        if args.global.verbose {
+            eprintln!("[cargo-brief] Finding source root for '{crate_name}'...");
+        }
+        let source_root = resolve::find_dep_source_root(&manifest_path, &crate_name)
+            .with_context(|| format!("Failed to find source root for '{crate_name}'"))?;
+
+        let sources = vec![(crate_name.to_string(), source_root)];
+        code::search_code(&sources, name, kind, args)
+    } else {
+        let metadata = resolve::load_cargo_metadata(args.manifest_path.as_deref())
+            .context("Failed to load cargo metadata")?;
+
+        let (pkg_name, source_root) = if args.crate_name == "self" {
+            let pkg = metadata.current_package.as_ref().ok_or_else(|| {
+                anyhow::anyhow!(
+                    "Cannot resolve 'self': no package found for the current directory."
+                )
+            })?;
+            let dir = metadata
+                .package_manifest_dirs
+                .get(pkg)
+                .cloned()
+                .or(metadata.current_package_manifest_dir.clone())
+                .ok_or_else(|| {
+                    anyhow::anyhow!("Cannot find manifest directory for package '{pkg}'")
+                })?;
+            (pkg.clone(), dir)
+        } else {
+            let normalized = args.crate_name.replace('-', "_");
+            let found = metadata
+                .package_manifest_dirs
+                .iter()
+                .find(|(k, _)| k.replace('-', "_") == normalized);
+            match found {
+                Some((name, dir)) => (name.clone(), dir.clone()),
+                None => {
+                    anyhow::bail!(
+                        "Package '{}' not found in workspace. Available: {}",
+                        args.crate_name,
+                        metadata.workspace_packages.join(", ")
+                    );
+                }
+            }
+        };
+
+        if args.global.verbose {
+            eprintln!("[cargo-brief] Searching '{pkg_name}' for code definitions...");
+        }
+
+        let sources = vec![(pkg_name, source_root)];
+        code::search_code(&sources, name, kind, args)
     }
 }
 
