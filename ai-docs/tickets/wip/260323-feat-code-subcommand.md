@@ -172,3 +172,19 @@ With `--no-deps`: skip steps 2-4, search only target crate source.
 - `--in <TYPE>` scopes to correct parent
 - Smart-case matching consistency with search subcommand
 - Pagination with `--limit`
+
+### Result (a996e92) - 26-03-23
+
+Phase 1 implemented: single-crate code lookup with all planned item kinds.
+
+- `src/code.rs`: ItemKind enum, pre-crafted tree-sitter queries (paired @name/@item captures),
+  smart-case matching, grep pre-filter, module context (file + inline mod), parent context
+  (impl/trait/struct/enum ancestor walk), limit/offset pagination, quiet mode.
+- `src/cli.rs`: CodeArgs struct with all Phase 1 fields. BriefCommand::Code variant with
+  after_help showing examples and item kinds.
+- `src/lib.rs`: run_code_pipeline() following run_ts_pipeline pattern for local/remote.
+  --all-deps prints warning (Phase 2).
+- 20 integration tests: all kinds, catch-all, smart-case, quiet, limit, module context,
+  parent context, error cases, src_only.
+- Deviation: ItemKind::from_str renamed to ItemKind::parse (clippy should_implement_trait).
+- All 365 tests pass, clippy clean for new code.
