@@ -350,6 +350,19 @@ pub fn find_dep_source_root(manifest_path: &str, crate_name: &str) -> Result<Pat
     bail!("Package '{crate_name}' not found in dependency tree of '{manifest_path}'")
 }
 
+/// Extract package name from a cargo metadata node ID.
+/// Handles both formats:
+/// - New: `"path+file:///path#name@version"` → extracts between `#` and `@`
+/// - Old: `"name version (source)"` → first whitespace-delimited token
+fn extract_package_name_from_id(id: &str) -> &str {
+    if let Some(hash_pos) = id.find('#') {
+        let after_hash = &id[hash_pos + 1..];
+        after_hash.split('@').next().unwrap_or(after_hash)
+    } else {
+        id.split_whitespace().next().unwrap_or(id)
+    }
+}
+
 /// Load all resolved package directories and direct deps from cargo metadata
 /// (WITH deps — runs full dependency resolution).
 ///
@@ -399,11 +412,11 @@ pub fn load_dep_package_dirs(
     let mut direct_dep_names = Vec::new();
 
     if let Some(nodes) = metadata["resolve"]["nodes"].as_array() {
-        // Find the node whose id starts with the root package name
+        // Find the node whose id matches root_package.
+        // ID formats: "path+file:///path#name@ver" (new) or "name ver (source)" (old).
         let root_node = nodes.iter().find(|node| {
             if let Some(id) = node["id"].as_str() {
-                // id format: "name version (source)" — match on name portion
-                let id_name = id.split_whitespace().next().unwrap_or("");
+                let id_name = extract_package_name_from_id(id);
                 id_name.replace('-', "_") == normalized_root
             } else {
                 false
