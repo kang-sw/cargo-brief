@@ -350,19 +350,6 @@ pub fn find_dep_source_root(manifest_path: &str, crate_name: &str) -> Result<Pat
     bail!("Package '{crate_name}' not found in dependency tree of '{manifest_path}'")
 }
 
-/// Extract package name from a cargo metadata node ID.
-/// Handles both formats:
-/// - New: `"path+file:///path#name@version"` → extracts between `#` and `@`
-/// - Old: `"name version (source)"` → first whitespace-delimited token
-fn extract_package_name_from_id(id: &str) -> &str {
-    if let Some(hash_pos) = id.find('#') {
-        let after_hash = &id[hash_pos + 1..];
-        after_hash.split('@').next().unwrap_or(after_hash)
-    } else {
-        id.split_whitespace().next().unwrap_or(id)
-    }
-}
-
 /// Load all resolved package directories and direct deps from cargo metadata
 /// (WITH deps — runs full dependency resolution).
 ///
@@ -391,8 +378,11 @@ pub fn load_dep_package_dirs(
     let metadata: serde_json::Value =
         serde_json::from_slice(&output.stdout).context("Failed to parse cargo metadata")?;
 
-    // Build name → manifest_dir for all packages
+    // Build name → manifest_dir and name → id maps from packages[]
     let mut all_dirs = HashMap::new();
+    let mut root_pkg_id: Option<String> = None;
+    let normalized_root = root_package.replace('-', "_");
+
     if let Some(packages) = metadata["packages"].as_array() {
         for pkg in packages {
             if let (Some(name), Some(manifest)) =
@@ -403,43 +393,44 @@ pub fn load_dep_package_dirs(
                     .unwrap_or(Path::new(""))
                     .to_path_buf();
                 all_dirs.insert(name.to_string(), dir);
+
+                // Match root package by name (with normalization)
+                if root_pkg_id.is_none() && name.replace('-', "_") == normalized_root {
+                    if let Some(id) = pkg["id"].as_str() {
+                        root_pkg_id = Some(id.to_string());
+                    }
+                }
             }
         }
     }
 
-    // Find root package's node in resolve.nodes[]
-    let normalized_root = root_package.replace('-', "_");
+    // Find root package's node in resolve.nodes[] using the exact id
     let mut direct_dep_names = Vec::new();
 
-    if let Some(nodes) = metadata["resolve"]["nodes"].as_array() {
-        // Find the node whose id matches root_package.
-        // ID formats: "path+file:///path#name@ver" (new) or "name ver (source)" (old).
-        let root_node = nodes.iter().find(|node| {
-            if let Some(id) = node["id"].as_str() {
-                let id_name = extract_package_name_from_id(id);
-                id_name.replace('-', "_") == normalized_root
-            } else {
-                false
-            }
-        });
+    if let Some(ref root_id) = root_pkg_id {
+        if let Some(nodes) = metadata["resolve"]["nodes"].as_array() {
+            let root_node = nodes
+                .iter()
+                .find(|node| node["id"].as_str() == Some(root_id.as_str()));
 
-        if let Some(node) = root_node {
-            if let Some(deps) = node["deps"].as_array() {
-                for dep in deps {
-                    if let Some(dep_name) = dep["name"].as_str() {
-                        // dep.name is Rust-identifier form (underscores).
-                        // Try exact match first, then hyphen fallback.
-                        let cargo_name = if all_dirs.contains_key(dep_name) {
-                            dep_name.to_string()
-                        } else {
-                            let hyphenated = dep_name.replace('_', "-");
-                            if all_dirs.contains_key(&hyphenated) {
-                                hyphenated
+            if let Some(node) = root_node {
+                if let Some(deps) = node["deps"].as_array() {
+                    for dep in deps {
+                        if let Some(dep_name) = dep["name"].as_str() {
+                            // dep.name is Rust-identifier form (underscores).
+                            // Try exact match first, then hyphen fallback.
+                            let cargo_name = if all_dirs.contains_key(dep_name) {
+                                dep_name.to_string()
                             } else {
-                                continue;
-                            }
-                        };
-                        direct_dep_names.push(cargo_name);
+                                let hyphenated = dep_name.replace('_', "-");
+                                if all_dirs.contains_key(&hyphenated) {
+                                    hyphenated
+                                } else {
+                                    continue;
+                                }
+                            };
+                            direct_dep_names.push(cargo_name);
+                        }
                     }
                 }
             }
