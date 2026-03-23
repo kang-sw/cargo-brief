@@ -565,7 +565,7 @@ pub struct CodeArgs {
     #[arg(long)]
     pub no_deps: bool,
 
-    /// Search all direct dependencies (no nightly needed, wider scope)
+    /// Search all direct dependencies (no nightly needed; skips accessible-path filtering)
     #[arg(long, conflicts_with = "no_deps")]
     pub all_deps: bool,
 

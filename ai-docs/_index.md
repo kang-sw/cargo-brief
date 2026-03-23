@@ -60,6 +60,12 @@ Modes: verbatim (default), `--captures` (capture name + text pairs), `--context 
 `--quiet`/`-q` outputs location-only (`@file:line`). `--limit [OFFSET:]N` paginates results.
 Capture-less queries auto-augmented with `@_match`. Remote crate support (`-C`) via disk-only pipeline (no rustdoc JSON).
 
+**`code`** — Look up code definitions by kind and name using pre-crafted tree-sitter queries.
+Positional: `[KIND] NAME` (omit KIND for catch-all). Item kinds: fn, struct, enum, trait, field, type, impl, macro, const, use.
+Dep modes: default (accessible-path BFS via rustdoc JSON), `--no-deps` (target only), `--all-deps` (cargo metadata direct deps, no nightly needed).
+Smart-case matching. `--quiet`/`-q` location-only output. `--limit [OFFSET:]N` pagination. `--src-only` restricts to src/.
+Remote crate support (`-C`) with dep recursion.
+
 **`clean`** — Clear cached remote crate workspaces. Optional `SPEC` argument for specific crate.
 
 ### Target Resolution (api subcommand)
@@ -166,6 +172,7 @@ Parsed via `rustdoc-types` 0.57. Post-macro-expansion output.
 - Re-export kind annotations: `pub use` lines show `// struct`, `// trait`, etc.
 - **Examples subcommand**: `cargo brief examples <target> [pattern]` greps example/test/bench source files. List mode (no pattern) shows files with `//!` docs; grep mode shows matches with `*` markers, dynamic line numbers, context control. `--tests [DEPTH]` / `--benches [DEPTH]` extend scope. Smart-case matching.
 - **Tree-sitter subcommand**: `cargo brief ts <target> '<query>'` runs S-expression structural queries against `.rs` source files. Supports verbatim output, `--captures` mode (capture name + text pairs), `--context N` (surrounding lines with `*` markers). Capture-less queries auto-augmented with `@_match`. Scans `src/`, `examples/`, `tests/`, `benches/`. Remote crate support (`-C`) not yet implemented.
+- **Code subcommand**: `cargo brief code <target> [kind] <name>` looks up code definitions by kind and name using pre-crafted tree-sitter queries. Three dep modes: default (accessible-path BFS via rustdoc JSON, recursive), `--no-deps` (target crate only), `--all-deps` (cargo metadata direct deps, no nightly needed). Smart-case matching. `--quiet`/`-q` for location-only, `--limit` pagination, `--src-only`. Remote crate support (`-C`) with dep recursion. `discover_accessible_deps()` is a standalone BFS separate from `pre_warm_cross_crate_json()`. `load_dep_package_dirs()` maps crate names to source dirs.
 - Dependencies: `clap` 4, `rustdoc-types` 0.57, `serde_json` 1, `anyhow` 1, `tempfile` 3, `bincode` 1, `semver` 1, `ureq` 2, `tree-sitter` 0.25, `tree-sitter-rust` 0.23, `streaming-iterator` 0.1.
 - Test fixture (`test_fixture/`) covers all supported item types. Workspace with `glob-source`/`glob-inner` sub-crates for cross-crate glob chain testing and `named-source` sub-crate for named re-export expansion testing.
 
