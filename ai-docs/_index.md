@@ -204,7 +204,7 @@ Domain-oriented operational knowledge in `ai-docs/mental-model/`:
 
 ## In Progress
 
-(none)
+- **`tickets/wip/260323-feat-code-subcommand.md`** — `code` subcommand: pre-crafted tree-sitter code lookup with recursive accessible-path dep search
 
 ## Next Up (priority order)
 
