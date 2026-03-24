@@ -539,7 +539,7 @@ pub struct TsArgs {
 #[derive(Args, Debug, Clone)]
 pub struct CodeArgs {
     /// Target crate (use 'self' for current crate)
-    #[arg(value_name = "TARGET", default_value = "self")]
+    #[arg(value_name = "TARGET")]
     pub crate_name: String,
 
     /// Item kind or name. Kinds: fn, struct, enum, trait, field, type, impl, macro, const, use
