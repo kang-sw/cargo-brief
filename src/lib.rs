@@ -947,7 +947,44 @@ pub fn run_code_pipeline(args: &CodeArgs, remote: &RemoteOpts) -> Result<String>
     }
 
     // Phase C — Search
-    code::search_code(&sources, &resolved.name, resolved.kind, args)
+    let mut output = String::new();
+
+    // Definitions (unless --refs-only)
+    if !args.refs_only {
+        output = code::search_code(
+            &sources,
+            &resolved.name,
+            resolved.kind,
+            args,
+            args.in_type.as_deref(),
+        )?;
+    }
+
+    // References (if --refs or --refs-only)
+    if args.refs || args.refs_only {
+        let ref_limit = if args.refs_only {
+            args.limit.as_deref()
+        } else {
+            None
+        };
+        let refs = code::search_references(
+            &sources,
+            &resolved.name,
+            args.src_only,
+            args.quiet,
+            ref_limit,
+        );
+        if !refs.is_empty() && !refs.starts_with("// no references") {
+            if !output.is_empty() {
+                output.push_str("\n// --- References ---\n\n");
+            }
+            output.push_str(&refs);
+        } else if args.refs_only {
+            output = refs;
+        }
+    }
+
+    Ok(output)
 }
 
 /// Collect source dirs for all direct dependencies via cargo metadata.

@@ -277,6 +277,16 @@ EXAMPLES:
   cargo brief code pubstruct              # finds PubStruct
   cargo brief code PubStruct              # case-sensitive
 
+  # Show definitions + references
+  cargo brief code fn spawn --refs
+
+  # References only
+  cargo brief code spawn --refs-only
+
+  # Scope to items inside a type
+  cargo brief code --in Commands fn new
+  cargo brief code --in PubStruct field
+
   # Quiet mode (location only, no source text)
   cargo brief code fn spawn -q
 
@@ -329,7 +339,20 @@ OUTPUT FORMAT:
 NAME MATCHING:
   Smart-case: all-lowercase pattern = case-insensitive, any uppercase =
   case-sensitive. The name must match the item's identifier exactly (not
-  a substring).")]
+  a substring).
+
+REFERENCE SEARCH (--refs, --refs-only):
+  After definitions, grep for literal name occurrences across the same
+  source files. Output uses * markers on match lines with 2 lines of
+  surrounding context. --refs-only skips definitions entirely.
+  --limit applies to definitions (--refs) or grep matches (--refs-only).
+
+PARENT SCOPING (--in <TYPE>):
+  Filter definitions to items inside a specific type, impl block, or
+  trait. Matches the type identifier with smart-case rules.
+    --in Commands    matches impl Commands, impl T for Commands, etc.
+    --in commands    case-insensitive match
+  Top-level items (not inside any type) are excluded.")]
     Code(CodeArgs),
 
     /// Clear cached remote crate workspaces
@@ -623,6 +646,18 @@ pub struct CodeArgs {
     /// Output only file:line locations and module context, no source text
     #[arg(short = 'q', long)]
     pub quiet: bool,
+
+    /// Also show grep-based references after definitions
+    #[arg(long)]
+    pub refs: bool,
+
+    /// Only show grep references, skip definitions
+    #[arg(long, conflicts_with = "refs")]
+    pub refs_only: bool,
+
+    /// Scope to items inside a specific type/impl block
+    #[arg(long, value_name = "TYPE")]
+    pub in_type: Option<String>,
 }
 
 /// Arguments for the `summary` subcommand.

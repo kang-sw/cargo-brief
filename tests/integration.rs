@@ -3659,6 +3659,9 @@ fn default_code_args() -> CodeArgs {
         all_deps: false,
         limit: None,
         quiet: false,
+        refs: false,
+        refs_only: false,
+        in_type: None,
     }
 }
 
@@ -4122,5 +4125,136 @@ fn test_code_kind_without_name_1arg() {
     assert!(
         err.contains("item kind"),
         "Error should mention item kind: {err}"
+    );
+}
+
+// ── Code subcommand: --refs, --refs-only, --in ─────────────────────
+
+#[test]
+fn test_code_refs_shows_defs_and_refs() {
+    let mut args = default_code_args();
+    args.args = vec!["test-fixture".into(), "fn".into(), "free_function".into()];
+    args.refs = true;
+    let output = cargo_brief::run_code_pipeline(&args, &RemoteOpts::default()).unwrap();
+    // Should have definition section
+    assert!(
+        output.contains("  in "),
+        "Should have definition context line:\n{output}"
+    );
+    // Should have references separator
+    assert!(
+        output.contains("// --- References ---"),
+        "Should have references separator:\n{output}"
+    );
+    // Should have grep marker lines
+    assert!(
+        output.contains('*'),
+        "Should have * marker on grep match lines:\n{output}"
+    );
+}
+
+#[test]
+fn test_code_refs_only_skips_definitions() {
+    let mut args = default_code_args();
+    args.args = vec!["test-fixture".into(), "PubStruct".into()];
+    args.refs_only = true;
+    let output = cargo_brief::run_code_pipeline(&args, &RemoteOpts::default()).unwrap();
+    // Should have grep markers
+    assert!(
+        output.contains('*'),
+        "refs-only should have * markers:\n{output}"
+    );
+    // Should NOT have definition-format context lines (indented "  in ")
+    // (grep output uses @file headers, not "  in " lines)
+    assert!(
+        !output.contains("  in "),
+        "refs-only should not contain definition context lines:\n{output}"
+    );
+}
+
+#[test]
+fn test_code_refs_only_quiet() {
+    let mut args = default_code_args();
+    args.args = vec!["test-fixture".into(), "PubStruct".into()];
+    args.refs_only = true;
+    args.quiet = true;
+    let output = cargo_brief::run_code_pipeline(&args, &RemoteOpts::default()).unwrap();
+    // Should have @file:line lines
+    assert!(
+        output.contains('@'),
+        "Quiet refs-only should have @file:line:\n{output}"
+    );
+    // Should not have * markers (quiet mode)
+    assert!(
+        !output.contains('*'),
+        "Quiet refs-only should not have * markers:\n{output}"
+    );
+}
+
+#[test]
+fn test_code_in_type_filters_to_parent() {
+    let mut args = default_code_args();
+    args.args = vec!["test-fixture".into(), "fn".into(), "pub_method".into()];
+    args.in_type = Some("PubStruct".to_string());
+    let output = cargo_brief::run_code_pipeline(&args, &RemoteOpts::default()).unwrap();
+    assert!(
+        output.contains("impl PubStruct"),
+        "Should find pub_method in impl PubStruct:\n{output}"
+    );
+}
+
+#[test]
+fn test_code_in_type_excludes_non_matching() {
+    let mut args = default_code_args();
+    args.args = vec!["test-fixture".into(), "fn".into(), "pub_method".into()];
+    args.in_type = Some("NonExistent".to_string());
+    let output = cargo_brief::run_code_pipeline(&args, &RemoteOpts::default()).unwrap();
+    assert!(
+        output.contains("no fn definitions found"),
+        "Non-matching --in should produce no-match message:\n{output}"
+    );
+}
+
+#[test]
+fn test_code_in_type_case_insensitive() {
+    let mut args = default_code_args();
+    args.args = vec!["test-fixture".into(), "fn".into(), "pub_method".into()];
+    args.in_type = Some("pubstruct".to_string()); // all lowercase → case-insensitive
+    let output = cargo_brief::run_code_pipeline(&args, &RemoteOpts::default()).unwrap();
+    assert!(
+        output.contains("impl PubStruct"),
+        "Lowercase --in should match PubStruct (case-insensitive):\n{output}"
+    );
+}
+
+#[test]
+fn test_code_in_type_with_refs() {
+    let mut args = default_code_args();
+    args.args = vec!["test-fixture".into(), "fn".into(), "pub_method".into()];
+    args.in_type = Some("PubStruct".to_string());
+    args.refs = true;
+    let output = cargo_brief::run_code_pipeline(&args, &RemoteOpts::default()).unwrap();
+    // Should have filtered definitions
+    assert!(
+        output.contains("impl PubStruct"),
+        "Defs should be filtered by --in:\n{output}"
+    );
+    // Should have refs section with grep matches
+    assert!(
+        output.contains("// --- References ---"),
+        "Should have references section:\n{output}"
+    );
+}
+
+#[test]
+fn test_code_refs_only_ignores_kind() {
+    let mut args = default_code_args();
+    args.args = vec!["test-fixture".into(), "struct".into(), "PubStruct".into()];
+    args.refs_only = true;
+    let output = cargo_brief::run_code_pipeline(&args, &RemoteOpts::default()).unwrap();
+    // Grep should find refs regardless of kind
+    assert!(
+        output.contains('*'),
+        "refs-only should find grep matches (kind ignored):\n{output}"
     );
 }

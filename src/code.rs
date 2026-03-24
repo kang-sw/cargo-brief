@@ -369,6 +369,47 @@ fn find_parent_context(node: tree_sitter::Node, source: &str) -> Option<String> 
     None
 }
 
+// ── Parent type extraction ────────────────────────────────────────────
+
+/// Extract the type name from the nearest parent impl/trait/struct/enum.
+/// Returns the bare type identifier (e.g., "Commands" from "impl Commands<'w>").
+fn parent_type_name(node: tree_sitter::Node, source: &str) -> Option<String> {
+    let mut current = node.parent();
+    while let Some(parent) = current {
+        match parent.kind() {
+            "impl_item" => {
+                let type_node = parent.child_by_field_name("type")?;
+                return extract_type_identifier(type_node, source);
+            }
+            "trait_item" | "struct_item" | "enum_item" => {
+                let name_node = parent.child_by_field_name("name")?;
+                return Some(source[name_node.start_byte()..name_node.end_byte()].to_string());
+            }
+            "mod_item" => return None,
+            _ => {}
+        }
+        current = parent.parent();
+    }
+    None
+}
+
+/// Extract the type_identifier from a type node, handling generic_type
+/// and scoped_type_identifier wrappers.
+fn extract_type_identifier(node: tree_sitter::Node, source: &str) -> Option<String> {
+    match node.kind() {
+        "type_identifier" => Some(source[node.start_byte()..node.end_byte()].to_string()),
+        "generic_type" => {
+            let type_node = node.child_by_field_name("type")?;
+            extract_type_identifier(type_node, source)
+        }
+        "scoped_type_identifier" => {
+            let name_node = node.child_by_field_name("name")?;
+            Some(source[name_node.start_byte()..name_node.end_byte()].to_string())
+        }
+        _ => None,
+    }
+}
+
 // ── Limit parsing ────────────────────────────────────────────────────
 
 fn parse_limit(raw: Option<&str>) -> (usize, Option<usize>) {
@@ -395,6 +436,7 @@ pub fn search_code(
     name: &str,
     kind: Option<ItemKind>,
     args: &CodeArgs,
+    in_type: Option<&str>,
 ) -> Result<String> {
     let language: tree_sitter::Language = tree_sitter_rust::LANGUAGE.into();
     let query_src = build_query(kind);
@@ -467,6 +509,19 @@ pub fn search_code(
                     continue;
                 }
 
+                // --in filter: only items inside matching parent type
+                if let Some(filter_type) = in_type {
+                    let filter_case_sensitive = is_case_sensitive(filter_type);
+                    match parent_type_name(item_cap.node, &source) {
+                        Some(ref parent_name) => {
+                            if !name_matches(parent_name, filter_type, filter_case_sensitive) {
+                                continue;
+                            }
+                        }
+                        None => continue,
+                    }
+                }
+
                 match_count += 1;
                 if match_count <= offset {
                     continue;
@@ -529,4 +584,166 @@ pub fn search_code(
     }
 
     Ok(output)
+}
+
+// ── Reference (grep) search ──────────────────────────────────────────
+
+fn digit_count(mut n: usize) -> usize {
+    if n == 0 {
+        return 1;
+    }
+    let mut count = 0;
+    while n > 0 {
+        count += 1;
+        n /= 10;
+    }
+    count
+}
+
+/// Grep source files for literal occurrences of `name`.
+pub fn search_references(
+    sources: &[(String, PathBuf)],
+    name: &str,
+    src_only: bool,
+    quiet: bool,
+    limit: Option<&str>,
+) -> String {
+    let case_sensitive = is_case_sensitive(name);
+    let name_lower = name.to_ascii_lowercase();
+    let (offset, limit_n) = parse_limit(limit);
+
+    let ctx_lines: usize = 2;
+    let mut output = String::new();
+    let mut total_matches = 0usize;
+    let mut emitted = 0usize;
+
+    'outer: for (_crate_name, source_root) in sources {
+        let files = collect_source_files(source_root, src_only);
+
+        for file_path in &files {
+            let content = match std::fs::read_to_string(file_path) {
+                Ok(c) => c,
+                Err(_) => continue,
+            };
+
+            let lines: Vec<&str> = content.lines().collect();
+            let total = lines.len();
+
+            // Find matching line indices (0-based)
+            let matches: Vec<usize> = lines
+                .iter()
+                .enumerate()
+                .filter(|(_, line)| {
+                    if case_sensitive {
+                        line.contains(name)
+                    } else {
+                        line.to_ascii_lowercase().contains(&name_lower)
+                    }
+                })
+                .map(|(i, _)| i)
+                .collect();
+
+            if matches.is_empty() {
+                continue;
+            }
+
+            let rel = file_path
+                .strip_prefix(source_root)
+                .unwrap_or(file_path)
+                .to_string_lossy()
+                .replace('\\', "/");
+
+            if quiet {
+                for &m in &matches {
+                    total_matches += 1;
+                    if total_matches <= offset {
+                        continue;
+                    }
+                    if let Some(n) = limit_n
+                        && emitted >= n
+                    {
+                        break 'outer;
+                    }
+                    emitted += 1;
+                    output.push_str(&format!("@{}:{}\n", rel, m + 1));
+                }
+            } else {
+                // Determine which matches survive offset/limit
+                let mut file_match_indices: Vec<usize> = Vec::new();
+                for &m in &matches {
+                    total_matches += 1;
+                    if total_matches <= offset {
+                        continue;
+                    }
+                    if let Some(n) = limit_n
+                        && emitted >= n
+                    {
+                        break;
+                    }
+                    emitted += 1;
+                    file_match_indices.push(m);
+                }
+
+                if file_match_indices.is_empty() {
+                    if let Some(n) = limit_n
+                        && emitted >= n
+                    {
+                        break 'outer;
+                    }
+                    continue;
+                }
+
+                // Compute context ranges and merge overlapping
+                let mut ranges: Vec<(usize, usize)> = Vec::new();
+                for &m in &file_match_indices {
+                    let start = m.saturating_sub(ctx_lines);
+                    let end = (m + ctx_lines).min(total.saturating_sub(1));
+                    if let Some(last) = ranges.last_mut()
+                        && start <= last.1 + 1
+                    {
+                        last.1 = last.1.max(end);
+                        continue;
+                    }
+                    ranges.push((start, end));
+                }
+
+                // Line number column width
+                let max_line_no = ranges.last().map_or(1, |r| r.1 + 1);
+                let width = digit_count(max_line_no).max(4);
+
+                output.push_str(&format!("@{rel}\n"));
+
+                let match_set: std::collections::HashSet<usize> =
+                    file_match_indices.iter().copied().collect();
+
+                for (range_idx, &(start, end)) in ranges.iter().enumerate() {
+                    if range_idx > 0 {
+                        output.push_str("  ...\n");
+                    }
+                    for (i, line) in lines.iter().enumerate().take(end + 1).skip(start) {
+                        let line_no = i + 1;
+                        let marker = if match_set.contains(&i) { '*' } else { ' ' };
+                        output.push_str(&format!(
+                            "{marker}{line_no:>width$}:  {line}\n",
+                            width = width,
+                        ));
+                    }
+                }
+
+                output.push('\n');
+
+                if let Some(n) = limit_n
+                    && emitted >= n
+                {
+                    break 'outer;
+                }
+            }
+        }
+    }
+
+    if total_matches == 0 {
+        output.push_str(&format!("// no references found for '{name}'\n"));
+    }
+
+    output
 }
