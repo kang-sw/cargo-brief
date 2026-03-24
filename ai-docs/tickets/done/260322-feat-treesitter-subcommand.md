@@ -1,7 +1,8 @@
 ---
 title: "Tree-sitter structural query subcommand"
-status: wip
+status: done
 started: 2026-03-22
+completed: 2026-03-22
 ---
 
 # Tree-sitter structural query subcommand (`ts`)

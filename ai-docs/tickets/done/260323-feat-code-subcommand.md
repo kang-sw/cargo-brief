@@ -1,7 +1,8 @@
 ---
 title: "code subcommand: pre-crafted tree-sitter code lookup with recursive dep search"
-status: wip
+status: done
 started: 2026-03-23
+completed: 2026-03-24
 ---
 
 ## Summary
@@ -235,3 +236,12 @@ Flexible positionals and workspace-wide `self` implemented.
 - Deviation: clap 4 panics when a positional with `default_value` precedes a required
   positional (debug assert in clap_builder), confirming the variadic approach was necessary.
 - 33 code tests pass (all 28 migrated + 5 new), clippy clean for new code.
+
+### Result (59c7aa5) - 26-03-24
+
+**Phase 3 — Reference search and parent scoping**
+
+Implemented `--refs` and `--refs-only` flags for searching item references, and `--in <TYPE>`
+flag for scoping results to a parent type. Added integration tests covering all new flags.
+
+No deviations from plan.

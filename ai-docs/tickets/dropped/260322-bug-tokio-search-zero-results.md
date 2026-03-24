@@ -17,7 +17,7 @@ the `rt` feature, which is not in the default feature set.
 
 This is a feature-gating issue, not a search bug. The broader UX concern
 (suggesting features when a search returns 0 results for a facade crate) is
-tracked in `tickets/todo/260322-feat-facade-crate-default-ux.md`.
+tracked in `tickets/done/260322-feat-facade-crate-default-ux.md`.
 
 ## Found By
 

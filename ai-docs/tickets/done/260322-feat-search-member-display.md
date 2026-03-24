@@ -1,7 +1,8 @@
 ---
 title: "Search: show struct fields and type members"
-status: wip
+status: done
 started: 2026-03-22
+completed: 2026-03-22
 ---
 
 # Search: show struct fields and type members

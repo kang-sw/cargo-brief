@@ -211,13 +211,8 @@ Domain-oriented operational knowledge in `ai-docs/mental-model/`:
 
 ## In Progress
 
-- **`tickets/wip/260323-feat-code-subcommand.md`** — `code` subcommand: pre-crafted tree-sitter code lookup with recursive accessible-path dep search
-
-## Next Up (priority order)
-
-1. **`tickets/idea/260316-feat-output-summary-mode.md`** — P2: `--summary` TOC mode
-   (Pipeline unification completed — `tickets/done/260320-refactor-unify-local-remote-pipeline.md`)
+No active items.
 
 ## Backlog
 
-- `tickets/idea/260316-feat-search-kind-filter.md` — P2: `--search-kind` filter
+No active items.
