@@ -2,6 +2,21 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.8.0] - 2026-03-24
+
+### Added
+
+- **`code` subcommand**: New source-level lookup command using pre-crafted tree-sitter queries. `cargo brief code fn spawn` finds function definitions by kind and name across the workspace.
+  - **Flexible positionals**: 1-arg (`code NAME`), 2-arg (`code KIND NAME` or `code TARGET NAME`), 3-arg (`code TARGET KIND NAME`) forms.
+  - **Workspace-wide self**: `code NAME` (no target) searches all workspace members, not just the current package.
+  - **Dependency recursion**: Default mode searches accessible dependencies (via rustdoc JSON reachability). `--all-deps` searches all direct deps. `--no-deps` restricts to workspace only.
+  - **Smart-case matching**: All-lowercase name → case-insensitive; any uppercase → case-sensitive.
+  - **`--quiet` / `-q`**: Location + module context only, no source text.
+  - **`--limit [OFFSET:]N`**: Paginate results.
+  - **`--src-only`**: Skip examples/tests/benches directories.
+- **`code --refs` / `--refs-only`**: Grep-based reference search. `--refs` appends literal grep matches after definitions. `--refs-only` skips definitions entirely. Output uses `*` markers on match lines with 2 lines of surrounding context.
+- **`code --in <TYPE>`**: Filter definitions to items inside a specific type, impl block, or trait. Smart-case matching on the parent type identifier. `--in Commands` matches `impl Commands`, `impl T for Commands`, etc.
+
 ## [0.7.1] - 2026-03-22
 
 ### Added
