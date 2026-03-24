@@ -1,3 +1,7 @@
+<!-- AI-maintained project state — read before work, update after -->
+<!-- - `ai-docs/_index.md` — architecture overview, conventions -->
+<!-- - `ai-docs/_memory.md` — recent work, workspace reference -->
+
 # CLAUDE.md — cargo-brief
 
 ## Project Summary
@@ -34,26 +38,30 @@ ai-docs/        — AI-maintained project docs, tickets, dependency API notes
 
 ## Project Knowledge
 
-Project state, architecture, and source layout live in **`ai-docs/_index.md`**.
-All files under `ai-docs/` are AI-maintained and serve as the primary
-cross-session context store.
+Project state and cross-session context live in `ai-docs/`.
+Read `_index.md` and `_memory.md` at session start.
+Before creating or editing tickets, load `/write-ticket` for conventions.
+Reference tickets by **stem only** (e.g., `260115-feat-foo-bar`), never by
+full path — stems stay stable across status moves.
+
+**Language:** All AI-authored artifacts — documents, plans, commit messages, ticket entries,
+`### Result` entries, and inline code comments — must be in English regardless of
+conversation language. Human-facing UI strings are exempt.
 
 ```
 ai-docs/
-  _index.md          — project state overview (load at session start)
+  _index.md          — project architecture and stable conventions
+  _memory.md         — cross-session continuity, updated each session
   mental-model/      — architecture docs, regenerable from source
   deps/              — external library API delta docs
   ref/               — static reference material (external specs, protocol docs, design notes)
   tickets/<status>/  — idea/ todo/ wip/ done/ dropped/
 ```
 
-**When to read:** Load `_index.md` at session start. Load relevant module docs before tasks.
+**When to read:** Load `_index.md` and `_memory.md` at session start. Load relevant module
+docs before tasks.
 **When to update:** After implementing changes that affect operational state or a module's
 public API. Update the specific section/doc, not everything.
-
-**Language:** All AI-authored artifacts — documents, plans, commit messages, ticket entries,
-`### Result` entries, `MEMORY` sections, and inline code comments — must be in
-English regardless of conversation language. Human-facing UI strings are exempt.
 
 **Tickets** (`ai-docs/tickets/<status>/YYMMDD-<category>-<name>.md`) track substantial features.
 `YYMMDD` is the **creation date**; it never changes when the ticket moves between statuses.
@@ -66,11 +74,6 @@ Categories: `bug`, `feat`, `refactor`, `chore`, `research`.
   `EnterPlanMode`, explore + design, get user approval, then `ExitPlanMode` to implement.
 - After completing a ticket phase, append a `### Result (<short-hash>) - YY-MM-DD` subsection
   recording what was implemented, deviations from the plan, and key findings for future phases.
-
-**MEMORY.md** (`~/.claude/projects/.../memory/MEMORY.md`) persists across sessions
-and stores user-specific preferences only (communication style, workflow habits).
-Project-specific memory (build memos, recent context, workspace ref) belongs in the
-`# MEMORY` section at the bottom of this file, keeping it git-tracked with the project.
 
 ## Code Standards
 
@@ -114,7 +117,7 @@ alternatives considered, and trade-offs — focus on _why_ this approach was cho
 
 ### Session Start
 
-- Read `ai-docs/_index.md` for project state and architecture.
+- Read `ai-docs/_index.md` and `ai-docs/_memory.md` for project context.
 - Run `git log --oneline -10` for recent changes.
 
 ### Dependency API Notes
@@ -122,7 +125,7 @@ alternatives considered, and trade-offs — focus on _why_ this approach was cho
 - **`ai-docs/deps/<package>[v<ver>].md`** stores verified API facts for libraries
   whose actual API differs from training knowledge or is too recent to be known.
 - **When to read:** Before writing code that uses a package listed in
-  `# MEMORY → Documented Dependencies`. On compile/type errors resembling wrong
+  `_memory.md → Documented Dependencies`. On compile/type errors resembling wrong
   signatures, missing types, or changed fields, consult `ai-docs/deps/` **before**
   exploring package source from scratch.
 - **When to write/update:** After discovering API drift (wrong arg count, renamed types,
@@ -144,37 +147,3 @@ alternatives considered, and trade-offs — focus on _why_ this approach was cho
 - Keep context small. Load only the module docs relevant to the current task.
 - Source code is the ground truth; docs supplement it.
 - When a module doc drifts from source, update the doc (or flag it).
-
----
-
-# MEMORY
-
-<!-- AI-maintained. Update after each non-trivial session. Prune aggressively. -->
-
-## Build & Workflow
-
-- Build: `cargo build`
-- Test: `cargo test`
-- Lint: `cargo clippy`
-- Requires nightly toolchain for rustdoc JSON generation (`cargo +nightly rustdoc`)
-
-## Recent Work
-
-- **Code subcommand Phase 2**: Three dep modes in `run_code_pipeline()`: default (accessible-path BFS via `discover_accessible_deps()`), `--no-deps` (target only), `--all-deps` (`load_dep_package_dirs()` direct deps, no nightly). Pipeline restructured into three phases: resolve target (`CodeTarget`), collect dep sources, search. `discover_accessible_deps()` is standalone BFS (intentional duplication of `pre_warm_cross_crate_json()`). `load_dep_package_dirs()` in resolve.rs uses `packages[].id` for robust node matching.
-- **Code subcommand Phase 1**: `src/code.rs` — ItemKind enum, pre-crafted tree-sitter queries, smart-case matching, grep pre-filter, module/parent context, limit/offset, quiet mode. `code::search_code(&sources, name, kind, args)` takes vec of (name, source_root) pairs.
-- **Named re-export expansion**: `expand_glob_reexports()` second pass detects non-glob cross-crate `Use` items. `render::render_single_inlined_item()` renders a single named item from source models. `apply_glob_expansions()` replaces `pub use {source};` lines. `GlobExpansionResult.named_reexports` field. Phase 2 glob loop iterates `item_names.keys()` (not `source_models`) to avoid `seen_names` poisoning. Module re-exports preserved. `--no-expand-glob` suppresses both.
-- **Search member display**: `--members` flag on `SearchArgs`. Default: member items (fields, variants, methods, assoc items) suppressed unless search token exactly matches member name. `--members` expands all members of matched types. Collapsed display: `-::member` continuation lines. `is_member()` distinguishes members from free items. Cross-crate search walks struct fields + enum variants + union fields. `render_search_filtered` and `search_cross_crate_index` have `members: bool` param.
-
-## Workspace Reference
-
-- Crate name: `cargo-brief` (binary: `cargo-brief`, lib: `cargo_brief`)
-- Entry: `src/lib.rs` → `run_api_pipeline(args, remote)` + `run_search_pipeline(args, remote)` + `run_examples_pipeline(args, remote)` + `run_summary_pipeline(args, remote)` + `run_ts_pipeline(args, remote)` + `run_code_pipeline(args, remote)`, `src/main.rs` → `BriefDirect` parsing, `RemoteOpts` extraction, subcommand dispatch
-- Pipeline: All pipelines take `(args, &RemoteOpts)`. Build `PipelineContext` (local or remote), then call shared pipeline. Remote branching: `if remote.crates { ... spec from args.target.crate_name ... }`
-- CLI types: `ApiArgs`, `SearchArgs`, `ExamplesArgs`, `SummaryArgs`, `TsArgs`, `CodeArgs`, `CleanArgs` + shared `TargetArgs`/`FilterArgs`/`GlobalArgs` + `RemoteOpts` (plain struct, not clap). `BriefDirect` has `-C`, `-F`, `--no-cache` as `global = true` flags.
-- Modules: `cli`, `code`, `cross_crate`, `examples`, `remote`, `resolve`, `rustdoc_json`, `model`, `render`, `search`, `summary`, `ts`
-- Test fixture: `test_fixture/` (workspace with `glob-source`/`glob-inner`/`named-source` sub-crates for cross-crate glob and named re-export testing)
-- Integration tests: `tests/integration.rs` (219 tests)
-
-## Documented Dependencies
-
-- (none yet — add entries here as API drift is discovered)
