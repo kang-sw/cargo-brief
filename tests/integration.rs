@@ -3648,9 +3648,7 @@ fn test_ts_no_matches_hint() {
 
 fn default_code_args() -> CodeArgs {
     CodeArgs {
-        crate_name: "test-fixture".to_string(),
-        kind_or_name: String::new(),
-        name: None,
+        args: vec!["test-fixture".to_string()],
         global: GlobalArgs {
             toolchain: "nightly".to_string(),
             verbose: false,
@@ -3667,8 +3665,7 @@ fn default_code_args() -> CodeArgs {
 #[test]
 fn test_code_finds_fn() {
     let mut args = default_code_args();
-    args.kind_or_name = "fn".to_string();
-    args.name = Some("free_function".to_string());
+    args.args = vec!["test-fixture".into(), "fn".into(), "free_function".into()];
     let output = cargo_brief::run_code_pipeline(&args, &RemoteOpts::default()).unwrap();
     assert!(
         output.contains("free_function"),
@@ -3679,8 +3676,7 @@ fn test_code_finds_fn() {
 #[test]
 fn test_code_finds_struct() {
     let mut args = default_code_args();
-    args.kind_or_name = "struct".to_string();
-    args.name = Some("PubStruct".to_string());
+    args.args = vec!["test-fixture".into(), "struct".into(), "PubStruct".into()];
     let output = cargo_brief::run_code_pipeline(&args, &RemoteOpts::default()).unwrap();
     assert!(
         output.contains("PubStruct"),
@@ -3691,8 +3687,7 @@ fn test_code_finds_struct() {
 #[test]
 fn test_code_finds_enum() {
     let mut args = default_code_args();
-    args.kind_or_name = "enum".to_string();
-    args.name = Some("PlainEnum".to_string());
+    args.args = vec!["test-fixture".into(), "enum".into(), "PlainEnum".into()];
     let output = cargo_brief::run_code_pipeline(&args, &RemoteOpts::default()).unwrap();
     assert!(
         output.contains("PlainEnum"),
@@ -3703,8 +3698,7 @@ fn test_code_finds_enum() {
 #[test]
 fn test_code_finds_trait() {
     let mut args = default_code_args();
-    args.kind_or_name = "trait".to_string();
-    args.name = Some("MyTrait".to_string());
+    args.args = vec!["test-fixture".into(), "trait".into(), "MyTrait".into()];
     let output = cargo_brief::run_code_pipeline(&args, &RemoteOpts::default()).unwrap();
     assert!(
         output.contains("trait MyTrait"),
@@ -3715,8 +3709,7 @@ fn test_code_finds_trait() {
 #[test]
 fn test_code_finds_const() {
     let mut args = default_code_args();
-    args.kind_or_name = "const".to_string();
-    args.name = Some("MY_CONST".to_string());
+    args.args = vec!["test-fixture".into(), "const".into(), "MY_CONST".into()];
     let output = cargo_brief::run_code_pipeline(&args, &RemoteOpts::default()).unwrap();
     assert!(
         output.contains("MY_CONST"),
@@ -3727,8 +3720,7 @@ fn test_code_finds_const() {
 #[test]
 fn test_code_finds_field() {
     let mut args = default_code_args();
-    args.kind_or_name = "field".to_string();
-    args.name = Some("pub_field".to_string());
+    args.args = vec!["test-fixture".into(), "field".into(), "pub_field".into()];
     let output = cargo_brief::run_code_pipeline(&args, &RemoteOpts::default()).unwrap();
     assert!(
         output.contains("pub_field"),
@@ -3743,8 +3735,7 @@ fn test_code_finds_field() {
 #[test]
 fn test_code_finds_type_alias() {
     let mut args = default_code_args();
-    args.kind_or_name = "type".to_string();
-    args.name = Some("Alias".to_string());
+    args.args = vec!["test-fixture".into(), "type".into(), "Alias".into()];
     let output = cargo_brief::run_code_pipeline(&args, &RemoteOpts::default()).unwrap();
     assert!(output.contains("Alias"), "Should find Alias:\n{output}");
 }
@@ -3752,8 +3743,7 @@ fn test_code_finds_type_alias() {
 #[test]
 fn test_code_finds_impl() {
     let mut args = default_code_args();
-    args.kind_or_name = "impl".to_string();
-    args.name = Some("PubStruct".to_string());
+    args.args = vec!["test-fixture".into(), "impl".into(), "PubStruct".into()];
     let output = cargo_brief::run_code_pipeline(&args, &RemoteOpts::default()).unwrap();
     assert!(
         output.contains("impl PubStruct"),
@@ -3764,8 +3754,7 @@ fn test_code_finds_impl() {
 #[test]
 fn test_code_finds_macro() {
     let mut args = default_code_args();
-    args.kind_or_name = "macro".to_string();
-    args.name = Some("my_macro".to_string());
+    args.args = vec!["test-fixture".into(), "macro".into(), "my_macro".into()];
     let output = cargo_brief::run_code_pipeline(&args, &RemoteOpts::default()).unwrap();
     assert!(
         output.contains("my_macro"),
@@ -3776,7 +3765,7 @@ fn test_code_finds_macro() {
 #[test]
 fn test_code_catch_all() {
     let mut args = default_code_args();
-    args.kind_or_name = "PubStruct".to_string();
+    args.args = vec!["test-fixture".into(), "PubStruct".into()];
     let output = cargo_brief::run_code_pipeline(&args, &RemoteOpts::default()).unwrap();
     // Catch-all should find both struct and impl
     assert!(
@@ -3792,7 +3781,7 @@ fn test_code_catch_all() {
 #[test]
 fn test_code_case_insensitive() {
     let mut args = default_code_args();
-    args.kind_or_name = "pubstruct".to_string(); // all lowercase → insensitive
+    args.args = vec!["test-fixture".into(), "pubstruct".into()]; // all lowercase → insensitive
     let output = cargo_brief::run_code_pipeline(&args, &RemoteOpts::default()).unwrap();
     assert!(
         output.contains("PubStruct"),
@@ -3803,7 +3792,7 @@ fn test_code_case_insensitive() {
 #[test]
 fn test_code_case_sensitive() {
     let mut args = default_code_args();
-    args.kind_or_name = "Pubstruct".to_string(); // has uppercase → sensitive
+    args.args = vec!["test-fixture".into(), "Pubstruct".into()]; // has uppercase → sensitive
     let output = cargo_brief::run_code_pipeline(&args, &RemoteOpts::default()).unwrap();
     assert!(
         output.contains("no definitions found"),
@@ -3814,7 +3803,7 @@ fn test_code_case_sensitive() {
 #[test]
 fn test_code_no_matches() {
     let mut args = default_code_args();
-    args.kind_or_name = "nonexistent_xyz".to_string();
+    args.args = vec!["test-fixture".into(), "nonexistent_xyz".into()];
     let output = cargo_brief::run_code_pipeline(&args, &RemoteOpts::default()).unwrap();
     assert!(
         output.contains("no definitions found"),
@@ -3825,8 +3814,7 @@ fn test_code_no_matches() {
 #[test]
 fn test_code_quiet_mode() {
     let mut args = default_code_args();
-    args.kind_or_name = "fn".to_string();
-    args.name = Some("free_function".to_string());
+    args.args = vec!["test-fixture".into(), "fn".into(), "free_function".into()];
     args.quiet = true;
     let output = cargo_brief::run_code_pipeline(&args, &RemoteOpts::default()).unwrap();
     assert!(
@@ -3843,8 +3831,7 @@ fn test_code_quiet_mode() {
 #[test]
 fn test_code_limit() {
     let mut args = default_code_args();
-    args.kind_or_name = "fn".to_string();
-    args.name = Some("free_function".to_string());
+    args.args = vec!["test-fixture".into(), "fn".into(), "free_function".into()];
     args.limit = Some("1".to_string());
     let output = cargo_brief::run_code_pipeline(&args, &RemoteOpts::default()).unwrap();
     let at_count = output.lines().filter(|l| l.starts_with('@')).count();
@@ -3857,8 +3844,7 @@ fn test_code_limit() {
 #[test]
 fn test_code_module_context() {
     let mut args = default_code_args();
-    args.kind_or_name = "struct".to_string();
-    args.name = Some("PubStruct".to_string());
+    args.args = vec!["test-fixture".into(), "struct".into(), "PubStruct".into()];
     let output = cargo_brief::run_code_pipeline(&args, &RemoteOpts::default()).unwrap();
     assert!(
         output.contains("test-fixture::outer") || output.contains("test_fixture::outer"),
@@ -3869,8 +3855,7 @@ fn test_code_module_context() {
 #[test]
 fn test_code_parent_context_impl_method() {
     let mut args = default_code_args();
-    args.kind_or_name = "fn".to_string();
-    args.name = Some("pub_method".to_string());
+    args.args = vec!["test-fixture".into(), "fn".into(), "pub_method".into()];
     let output = cargo_brief::run_code_pipeline(&args, &RemoteOpts::default()).unwrap();
     assert!(
         output.contains("impl PubStruct"),
@@ -3881,8 +3866,7 @@ fn test_code_parent_context_impl_method() {
 #[test]
 fn test_code_kind_without_name_errors() {
     let mut args = default_code_args();
-    args.kind_or_name = "fn".to_string();
-    args.name = None;
+    args.args = vec!["fn".into()];
     let result = cargo_brief::run_code_pipeline(&args, &RemoteOpts::default());
     assert!(result.is_err(), "Kind without name should error");
     let err = result.unwrap_err().to_string();
@@ -3895,8 +3879,7 @@ fn test_code_kind_without_name_errors() {
 #[test]
 fn test_code_unknown_kind_errors() {
     let mut args = default_code_args();
-    args.kind_or_name = "xyz".to_string();
-    args.name = Some("foo".to_string());
+    args.args = vec!["test-fixture".into(), "xyz".into(), "foo".into()];
     let result = cargo_brief::run_code_pipeline(&args, &RemoteOpts::default());
     assert!(result.is_err(), "Unknown kind should error");
     let err = result.unwrap_err().to_string();
@@ -3910,8 +3893,7 @@ fn test_code_unknown_kind_errors() {
 fn test_code_src_only() {
     // Search for "main" which exists in examples/ but not src/
     let mut args = default_code_args();
-    args.kind_or_name = "fn".to_string();
-    args.name = Some("main".to_string());
+    args.args = vec!["test-fixture".into(), "fn".into(), "main".into()];
 
     // Without src_only: should find main in examples
     let output = cargo_brief::run_code_pipeline(&args, &RemoteOpts::default()).unwrap();
@@ -3938,8 +3920,11 @@ fn test_code_all_deps_finds_dep_struct() {
     let mut args = default_code_args();
     args.no_deps = false;
     args.all_deps = true;
-    args.kind_or_name = "struct".to_string();
-    args.name = Some("GlobSourceItem".to_string());
+    args.args = vec![
+        "test-fixture".into(),
+        "struct".into(),
+        "GlobSourceItem".into(),
+    ];
     let output = cargo_brief::run_code_pipeline(&args, &RemoteOpts::default()).unwrap();
     assert!(
         output.contains("GlobSourceItem"),
@@ -3952,8 +3937,11 @@ fn test_code_all_deps_finds_named_dep() {
     let mut args = default_code_args();
     args.no_deps = false;
     args.all_deps = true;
-    args.kind_or_name = "struct".to_string();
-    args.name = Some("NamedSourceItem".to_string());
+    args.args = vec![
+        "test-fixture".into(),
+        "struct".into(),
+        "NamedSourceItem".into(),
+    ];
     let output = cargo_brief::run_code_pipeline(&args, &RemoteOpts::default()).unwrap();
     assert!(
         output.contains("NamedSourceItem"),
@@ -3965,8 +3953,11 @@ fn test_code_all_deps_finds_named_dep() {
 fn test_code_no_deps_excludes_dep_items() {
     let mut args = default_code_args();
     args.no_deps = true;
-    args.kind_or_name = "struct".to_string();
-    args.name = Some("GlobSourceItem".to_string());
+    args.args = vec![
+        "test-fixture".into(),
+        "struct".into(),
+        "GlobSourceItem".into(),
+    ];
     let output = cargo_brief::run_code_pipeline(&args, &RemoteOpts::default()).unwrap();
     assert!(
         output.contains("no struct definitions found"),
@@ -3979,8 +3970,11 @@ fn test_code_default_finds_accessible_deps() {
     let mut args = default_code_args();
     args.no_deps = false;
     args.all_deps = false;
-    args.kind_or_name = "struct".to_string();
-    args.name = Some("GlobSourceItem".to_string());
+    args.args = vec![
+        "test-fixture".into(),
+        "struct".into(),
+        "GlobSourceItem".into(),
+    ];
     let output = cargo_brief::run_code_pipeline(&args, &RemoteOpts::default()).unwrap();
     assert!(
         output.contains("GlobSourceItem"),
@@ -3993,8 +3987,11 @@ fn test_code_default_finds_transitive_accessible() {
     let mut args = default_code_args();
     args.no_deps = false;
     args.all_deps = false;
-    args.kind_or_name = "struct".to_string();
-    args.name = Some("GlobInnerItem".to_string());
+    args.args = vec![
+        "test-fixture".into(),
+        "struct".into(),
+        "GlobInnerItem".into(),
+    ];
     let output = cargo_brief::run_code_pipeline(&args, &RemoteOpts::default()).unwrap();
     assert!(
         output.contains("GlobInnerItem"),
@@ -4007,8 +4004,11 @@ fn test_code_all_deps_module_context() {
     let mut args = default_code_args();
     args.no_deps = false;
     args.all_deps = true;
-    args.kind_or_name = "struct".to_string();
-    args.name = Some("GlobSourceItem".to_string());
+    args.args = vec![
+        "test-fixture".into(),
+        "struct".into(),
+        "GlobSourceItem".into(),
+    ];
     let output = cargo_brief::run_code_pipeline(&args, &RemoteOpts::default()).unwrap();
     assert!(
         output.contains("glob")
@@ -4023,7 +4023,7 @@ fn test_code_dep_search_with_limit() {
     let mut args = default_code_args();
     args.no_deps = false;
     args.all_deps = true;
-    args.kind_or_name = "GlobSourceItem".to_string();
+    args.args = vec!["test-fixture".into(), "GlobSourceItem".into()];
     args.limit = Some("1".to_string());
     let output = cargo_brief::run_code_pipeline(&args, &RemoteOpts::default()).unwrap();
     let at_count = output.lines().filter(|l| l.starts_with('@')).count();
@@ -4039,8 +4039,11 @@ fn test_code_all_deps_quiet() {
     args.no_deps = false;
     args.all_deps = true;
     args.quiet = true;
-    args.kind_or_name = "struct".to_string();
-    args.name = Some("GlobSourceItem".to_string());
+    args.args = vec![
+        "test-fixture".into(),
+        "struct".into(),
+        "GlobSourceItem".into(),
+    ];
     let output = cargo_brief::run_code_pipeline(&args, &RemoteOpts::default()).unwrap();
     assert!(
         output.contains('@'),
@@ -4049,5 +4052,75 @@ fn test_code_all_deps_quiet() {
     assert!(
         !output.contains("pub struct"),
         "Quiet mode should not contain struct body:\n{output}"
+    );
+}
+
+// ── Code subcommand: flexible positionals & workspace-wide self ─────
+
+#[test]
+fn test_code_one_arg_catch_all() {
+    // 1-arg form: target defaults to "self" → workspace members
+    let mut args = default_code_args();
+    args.args = vec!["PubStruct".into()];
+    let output = cargo_brief::run_code_pipeline(&args, &RemoteOpts::default()).unwrap();
+    assert!(
+        output.contains("PubStruct"),
+        "1-arg catch-all should find PubStruct:\n{output}"
+    );
+}
+
+#[test]
+fn test_code_two_arg_kind_implicit_self() {
+    // 2-arg form: first arg is a kind keyword → target defaults to "self"
+    let mut args = default_code_args();
+    args.args = vec!["struct".into(), "PubStruct".into()];
+    let output = cargo_brief::run_code_pipeline(&args, &RemoteOpts::default()).unwrap();
+    assert!(
+        output.contains("PubStruct"),
+        "2-arg kind form should find PubStruct with implicit self:\n{output}"
+    );
+}
+
+#[test]
+fn test_code_self_searches_workspace_members() {
+    // "self" should search all workspace members, finding items in glob-source
+    let mut args = default_code_args();
+    args.args = vec!["self".into(), "GlobSourceItem".into()];
+    args.no_deps = true;
+    let output = cargo_brief::run_code_pipeline(&args, &RemoteOpts::default()).unwrap();
+    assert!(
+        output.contains("GlobSourceItem"),
+        "self with no_deps should find GlobSourceItem in workspace member:\n{output}"
+    );
+}
+
+#[test]
+fn test_code_named_target_no_workspace_expansion() {
+    // Named target should only search that crate, not other workspace members
+    let mut args = default_code_args();
+    args.args = vec![
+        "test-fixture".into(),
+        "struct".into(),
+        "GlobSourceItem".into(),
+    ];
+    args.no_deps = true;
+    let output = cargo_brief::run_code_pipeline(&args, &RemoteOpts::default()).unwrap();
+    assert!(
+        output.contains("no struct definitions found"),
+        "Named target should not find GlobSourceItem from other workspace members:\n{output}"
+    );
+}
+
+#[test]
+fn test_code_kind_without_name_1arg() {
+    // Single arg that is a kind keyword → helpful error
+    let mut args = default_code_args();
+    args.args = vec!["struct".into()];
+    let result = cargo_brief::run_code_pipeline(&args, &RemoteOpts::default());
+    assert!(result.is_err(), "Kind-only 1-arg should error");
+    let err = result.unwrap_err().to_string();
+    assert!(
+        err.contains("item kind"),
+        "Error should mention item kind: {err}"
     );
 }

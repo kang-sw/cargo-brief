@@ -249,28 +249,32 @@ TIPS:
     /// Look up code definitions by kind and name using pre-crafted tree-sitter queries
     #[command(after_help = "\
 EXAMPLES:
-  # Find a function by name (catch-all — searches all item kinds)
-  cargo brief code self spawn
+  # Search current workspace (TARGET omitted)
+  cargo brief code spawn
+  cargo brief code struct Commands
 
-  # Find a specific item kind
+  # Search a specific crate
   cargo brief code self fn spawn
-  cargo brief code self struct Commands
-  cargo brief code self trait Plugin
-  cargo brief code self field visible_field
-  cargo brief code self impl Commands
+  cargo brief code my-crate struct Commands
 
-  # Smart-case: all-lowercase = case-insensitive
-  cargo brief code self pubstruct        # finds PubStruct
-  cargo brief code self PubStruct        # case-sensitive
-
-  # Remote crate
+  # Remote crate (TARGET required with -C)
   cargo brief -C code serde@1 struct Serializer
 
+  # Smart-case: all-lowercase = case-insensitive
+  cargo brief code pubstruct              # finds PubStruct
+  cargo brief code PubStruct              # case-sensitive
+
   # Quiet mode (location only, no source text)
-  cargo brief code self fn spawn -q
+  cargo brief code fn spawn -q
 
   # Limit results
-  cargo brief code self fn spawn --limit 5
+  cargo brief code fn spawn --limit 5
+
+POSITIONAL ARGS:
+  cargo brief code NAME                   # search all workspace members
+  cargo brief code KIND NAME              # search all workspace members, filter by kind
+  cargo brief code TARGET NAME            # search specific crate
+  cargo brief code TARGET KIND NAME       # search specific crate, filter by kind
 
 ITEM KINDS:
   fn, struct, enum, trait, field, type, impl, macro, const, use
@@ -538,17 +542,9 @@ pub struct TsArgs {
 /// Arguments for the `code` subcommand.
 #[derive(Args, Debug, Clone)]
 pub struct CodeArgs {
-    /// Target crate (use 'self' for current crate)
-    #[arg(value_name = "TARGET")]
-    pub crate_name: String,
-
-    /// Item kind or name. Kinds: fn, struct, enum, trait, field, type, impl, macro, const, use
-    #[arg(value_name = "[KIND] NAME")]
-    pub kind_or_name: String,
-
-    /// Item name (required when KIND is specified)
-    #[arg(value_name = "NAME")]
-    pub name: Option<String>,
+    /// Positional arguments: [TARGET] [KIND] NAME
+    #[arg(value_name = "ARGS", num_args = 1..=3)]
+    pub args: Vec<String>,
 
     #[command(flatten)]
     pub global: GlobalArgs,

@@ -20,7 +20,7 @@ use rustdoc_json::LockfilePackages;
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
-use anyhow::{Context, Result};
+use anyhow::{Context, Result, bail};
 use rustdoc_types::{ItemEnum, Visibility};
 
 use cli::{
@@ -770,20 +770,26 @@ pub fn run_ts_pipeline(args: &TsArgs, remote: &RemoteOpts) -> Result<String> {
 
 /// Run the code lookup pipeline and return the rendered output string.
 pub fn run_code_pipeline(args: &CodeArgs, remote: &RemoteOpts) -> Result<String> {
-    let (kind, name) = code::resolve_kind_and_name(args)?;
+    let resolved = code::resolve_code_args(args)?;
 
-    // Phase A — Resolve target (pkg_name, source_root, manifest for dep resolution)
+    // Phase A — Resolve target into primary sources + dep-resolution info
     struct CodeTarget {
-        pkg_name: String,
-        source_root: PathBuf,
+        /// Primary source roots to search (pkg_name, dir).
+        primary_sources: Vec<(String, PathBuf)>,
         effective_manifest: String,
         target_dir: PathBuf,
         is_workspace_member: bool,
+        /// Root package name for dep resolution.
+        dep_root_pkg: String,
         _workspace: Option<remote::WorkspaceDir>,
     }
 
     let target = if remote.crates {
-        let spec = &args.crate_name;
+        // Remote mode — "self" is invalid
+        if resolved.target == "self" {
+            bail!("-C (remote) mode requires an explicit crate spec as TARGET");
+        }
+        let spec = &resolved.target;
         let (crate_name, _) = remote::parse_crate_spec(spec);
         if args.global.verbose {
             eprintln!("[cargo-brief] Resolving workspace for '{crate_name}'...");
@@ -818,84 +824,105 @@ pub fn run_code_pipeline(args: &CodeArgs, remote: &RemoteOpts) -> Result<String>
         };
 
         CodeTarget {
-            pkg_name: crate_name.to_string(),
-            source_root,
+            primary_sources: vec![(crate_name.to_string(), source_root)],
             effective_manifest: manifest_path,
             target_dir,
             is_workspace_member: false,
+            dep_root_pkg: crate_name.to_string(),
             _workspace: Some(workspace),
         }
     } else {
         let metadata = resolve::load_cargo_metadata(args.manifest_path.as_deref())
             .context("Failed to load cargo metadata")?;
 
-        let (pkg_name, source_root) = if args.crate_name == "self" {
-            let pkg = metadata.current_package.as_ref().ok_or_else(|| {
-                anyhow::anyhow!(
-                    "Cannot resolve 'self': no package found for the current directory."
-                )
-            })?;
-            let dir = metadata
-                .package_manifest_dirs
-                .get(pkg)
-                .cloned()
-                .or(metadata.current_package_manifest_dir.clone())
-                .ok_or_else(|| {
-                    anyhow::anyhow!("Cannot find manifest directory for package '{pkg}'")
-                })?;
-            (pkg.clone(), dir)
+        if resolved.target == "self" {
+            // "self" → all workspace members
+            let mut primary_sources = Vec::new();
+            for pkg in &metadata.workspace_packages {
+                if let Some(dir) = metadata.package_manifest_dirs.get(pkg) {
+                    primary_sources.push((pkg.clone(), dir.clone()));
+                }
+            }
+            if primary_sources.is_empty() {
+                bail!("No workspace packages found. Run from inside a Cargo project.");
+            }
+
+            let effective_manifest = args
+                .manifest_path
+                .clone()
+                .unwrap_or_else(|| "Cargo.toml".to_string());
+
+            let dep_root_pkg = metadata
+                .current_package
+                .clone()
+                .or_else(|| metadata.workspace_packages.first().cloned())
+                .unwrap_or_default();
+
+            CodeTarget {
+                primary_sources,
+                effective_manifest,
+                target_dir: metadata.target_dir,
+                is_workspace_member: true,
+                dep_root_pkg,
+                _workspace: None,
+            }
         } else {
-            let normalized = args.crate_name.replace('-', "_");
+            // Named target — single crate
+            let normalized = resolved.target.replace('-', "_");
             let found = metadata
                 .package_manifest_dirs
                 .iter()
                 .find(|(k, _)| k.replace('-', "_") == normalized);
-            match found {
+            let (pkg_name, source_root) = match found {
                 Some((name, dir)) => (name.clone(), dir.clone()),
                 None => {
                     anyhow::bail!(
                         "Package '{}' not found in workspace. Available: {}",
-                        args.crate_name,
+                        resolved.target,
                         metadata.workspace_packages.join(", ")
                     );
                 }
+            };
+
+            let effective_manifest = metadata
+                .package_manifest_dirs
+                .get(&pkg_name)
+                .map(|d| d.join("Cargo.toml").to_string_lossy().into_owned())
+                .or_else(|| args.manifest_path.clone())
+                .unwrap_or_else(|| "Cargo.toml".to_string());
+
+            CodeTarget {
+                primary_sources: vec![(pkg_name.clone(), source_root)],
+                effective_manifest,
+                target_dir: metadata.target_dir,
+                is_workspace_member: true,
+                dep_root_pkg: pkg_name,
+                _workspace: None,
             }
-        };
-
-        // Determine effective manifest for dep resolution
-        let effective_manifest = metadata
-            .package_manifest_dirs
-            .get(&pkg_name)
-            .map(|d| d.join("Cargo.toml").to_string_lossy().into_owned())
-            .or_else(|| args.manifest_path.clone())
-            .unwrap_or_else(|| "Cargo.toml".to_string());
-
-        CodeTarget {
-            pkg_name,
-            source_root,
-            effective_manifest,
-            target_dir: metadata.target_dir,
-            is_workspace_member: true,
-            _workspace: None,
         }
     };
 
     if args.global.verbose {
+        let names: Vec<&str> = target
+            .primary_sources
+            .iter()
+            .map(|(n, _)| n.as_str())
+            .collect();
         eprintln!(
-            "[cargo-brief] Searching '{}' for code definitions...",
-            target.pkg_name
+            "[cargo-brief] Searching {} for code definitions...",
+            names.join(", ")
         );
     }
 
     // Phase B — Collect dep sources
-    let mut sources = vec![(target.pkg_name.clone(), target.source_root.clone())];
+    let mut sources = target.primary_sources.clone();
 
     if !args.no_deps {
         let dep_sources = if args.all_deps {
-            collect_all_deps_sources(&target.effective_manifest, &target.pkg_name)?
+            collect_all_deps_sources(&target.effective_manifest, &target.dep_root_pkg)?
         } else {
             collect_accessible_deps_sources(
-                &target.pkg_name,
+                &target.dep_root_pkg,
                 &target.effective_manifest,
                 &target.target_dir,
                 &args.global.toolchain,
@@ -903,14 +930,24 @@ pub fn run_code_pipeline(args: &CodeArgs, remote: &RemoteOpts) -> Result<String>
                 !target.is_workspace_member,
             )?
         };
-        sources.extend(dep_sources);
+        // Filter out deps that are already in primary sources
+        let primary_names: std::collections::HashSet<&str> = target
+            .primary_sources
+            .iter()
+            .map(|(n, _)| n.as_str())
+            .collect();
+        sources.extend(
+            dep_sources
+                .into_iter()
+                .filter(|(n, _)| !primary_names.contains(n.as_str())),
+        );
         if args.global.verbose {
             eprintln!("[cargo-brief] Searching {} crate(s)...", sources.len());
         }
     }
 
     // Phase C — Search
-    code::search_code(&sources, name, kind, args)
+    code::search_code(&sources, &resolved.name, resolved.kind, args)
 }
 
 /// Collect source dirs for all direct dependencies via cargo metadata.

@@ -66,31 +66,76 @@ impl ItemKind {
 
 // ── Argument resolution ──────────────────────────────────────────────
 
-/// Resolve `kind_or_name` + optional `name` into `(Option<ItemKind>, &str)`.
+/// Resolved positional arguments for the `code` subcommand.
+pub struct ResolvedCodeArgs {
+    /// `"self"` or a crate name / spec.
+    pub target: String,
+    pub kind: Option<ItemKind>,
+    pub name: String,
+}
+
+/// Parse the variadic positional args (`1..=3`) into target, kind, and name.
 ///
-/// - Two positionals: first is kind, second is name.
-/// - One positional: if it matches a known kind keyword, error with guidance;
-///   otherwise treat it as the name (catch-all mode).
-pub fn resolve_kind_and_name(args: &CodeArgs) -> Result<(Option<ItemKind>, &str)> {
-    if let Some(ref name) = args.name {
-        // Two positionals: kind_or_name must be a valid kind
-        match ItemKind::parse(&args.kind_or_name) {
-            Some(kind) => Ok((Some(kind), name.as_str())),
-            None => bail!(
-                "Unknown item kind '{}'. Valid kinds: fn, struct, enum, trait, field, type, impl, macro, const, use",
-                args.kind_or_name
-            ),
+/// - **1 arg:** `code NAME` → target=`"self"`, catch-all. Errors if the single
+///   arg is a kind keyword (ambiguous).
+/// - **2 args:** `code KIND NAME` if arg[0] is a kind keyword, else
+///   `code TARGET NAME` (catch-all).
+/// - **3 args:** `code TARGET KIND NAME` — arg[1] must be a valid kind.
+/// - **0 or 4+ args:** error with usage.
+pub fn resolve_code_args(args: &CodeArgs) -> Result<ResolvedCodeArgs> {
+    match args.args.len() {
+        1 => {
+            let a = &args.args[0];
+            if ItemKind::parse(a).is_some() {
+                bail!(
+                    "'{}' is an item kind. Usage: cargo brief code [TARGET] {} <name>",
+                    a,
+                    a
+                );
+            }
+            Ok(ResolvedCodeArgs {
+                target: "self".to_string(),
+                kind: None,
+                name: a.clone(),
+            })
         }
-    } else {
-        // One positional: if it's a known kind, error with guidance
-        if ItemKind::parse(&args.kind_or_name).is_some() {
-            bail!(
-                "'{}' is an item kind, not a name. Usage: cargo brief code <target> {} <name>",
-                args.kind_or_name,
-                args.kind_or_name
-            );
+        2 => {
+            let a0 = &args.args[0];
+            let a1 = &args.args[1];
+            if let Some(kind) = ItemKind::parse(a0) {
+                Ok(ResolvedCodeArgs {
+                    target: "self".to_string(),
+                    kind: Some(kind),
+                    name: a1.clone(),
+                })
+            } else {
+                Ok(ResolvedCodeArgs {
+                    target: a0.clone(),
+                    kind: None,
+                    name: a1.clone(),
+                })
+            }
         }
-        Ok((None, args.kind_or_name.as_str()))
+        3 => {
+            let target = &args.args[0];
+            let kind_str = &args.args[1];
+            let name = &args.args[2];
+            match ItemKind::parse(kind_str) {
+                Some(kind) => Ok(ResolvedCodeArgs {
+                    target: target.clone(),
+                    kind: Some(kind),
+                    name: name.clone(),
+                }),
+                None => bail!(
+                    "Unknown item kind '{}'. Valid kinds: fn, struct, enum, trait, field, type, impl, macro, const, use",
+                    kind_str
+                ),
+            }
+        }
+        _ => bail!(
+            "Expected 1–3 positional arguments: [TARGET] [KIND] NAME\n\
+             Usage: cargo brief code [TARGET] [KIND] NAME"
+        ),
     }
 }
 
