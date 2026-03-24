@@ -21,10 +21,15 @@ locations) and `ts` (raw S-expressions agents struggle to write).
 ## CLI Design
 
 ```
-cargo brief code <TARGET> [KIND] <NAME> [OPTIONS]
+cargo brief code [TARGET] [KIND] <NAME> [OPTIONS]
 
-Positional:
-  TARGET          Crate to search (same resolution as other subcommands)
+Positional (1–3 variadic args):
+  1 arg:  NAME              → target="self" (all workspace members), catch-all
+  2 args: KIND NAME         → target="self", filtered by kind (if arg[0] is kind keyword)
+          TARGET NAME       → named target, catch-all
+  3 args: TARGET KIND NAME  → named target, filtered by kind
+
+  TARGET          Crate to search ("self" = all workspace members)
   KIND            Optional: fn, struct, enum, trait, field, type, impl,
                   macro, const, use. Omit for catch-all across all kinds.
   NAME            Item name to search for
@@ -208,3 +213,25 @@ Phase 2 implemented: multi-crate dependency search with three modes.
   `path+file:///path#ver`); initial fragment-parsing approach replaced with exact
   `packages[].id` matching after code review caught the bug.
 - All 219 integration tests pass (373 total), clippy clean for new code.
+
+### Result (af24d1e) - 26-03-24
+
+Flexible positionals and workspace-wide `self` implemented.
+
+- **`src/cli.rs`**: Replaced three typed positionals (`TARGET`, `KIND_OR_NAME`, `NAME`) with
+  single variadic `args: Vec<String>` (`num_args = 1..=3`). Updated `after_help` with new
+  syntax examples showing positional arg layout.
+- **`src/code.rs`**: Replaced `resolve_kind_and_name()` with `resolve_code_args()` returning
+  `ResolvedCodeArgs { target, kind, name }`. 1/2/3 arg dispatch with kind-keyword detection:
+  1-arg = self catch-all, 2-arg = kind+name (if arg[0] is kind) or target+name, 3-arg =
+  target+kind+name. Single-arg kind keyword produces helpful error.
+- **`src/lib.rs`**: `run_code_pipeline()` restructured — `self` collects ALL workspace members
+  via `metadata.workspace_packages`, named target searches single crate (unchanged). Remote
+  mode (-C) errors on implicit self. Dep sources deduplicated against primary sources to avoid
+  double-scanning workspace members that are also deps.
+- **`tests/integration.rs`**: All 28 existing tests migrated to new args format. 5 new tests:
+  1-arg catch-all, 2-arg kind with implicit self, workspace-wide self finding cross-member
+  items, named target no workspace expansion, kind-without-name 1-arg error.
+- Deviation: clap 4 panics when a positional with `default_value` precedes a required
+  positional (debug assert in clap_builder), confirming the variadic approach was necessary.
+- 33 code tests pass (all 28 migrated + 5 new), clippy clean for new code.
