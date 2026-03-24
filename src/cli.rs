@@ -169,7 +169,20 @@ EXAMPLES:
   cargo brief -C -F full summary tokio@1
 
   # Summarize a specific module
-  cargo brief -C summary bevy bevy::ecs")]
+  cargo brief -C summary bevy bevy::ecs
+
+RESOLUTION RULES:
+  The <TARGET> argument is resolved as follows:
+    1. \"self\"           → current package (cwd-based detection)
+    2. \"self::mod\"      → current package, specific module
+    3. \"crate::mod\"     → named crate + module in one argument
+    4. \"src/foo.rs\"     → file path auto-converted to module path
+    5. \"crate_name\"     → workspace package (hyphen/underscore normalized)
+    6. \"unknown_name\"   → treated as package name
+
+  With -C, TARGET is the crate spec (e.g., serde@1, tokio@1.0).
+
+  The [MODULE_PATH] argument also accepts file paths (e.g., src/foo.rs).")]
     Summary(SummaryArgs),
 
     /// Run a tree-sitter structural query against crate source files
@@ -249,12 +262,12 @@ TIPS:
     /// Look up code definitions by kind and name using pre-crafted tree-sitter queries
     #[command(after_help = "\
 EXAMPLES:
-  # Search current workspace (TARGET omitted)
+  # Search current workspace (TARGET omitted — defaults to \"self\")
   cargo brief code spawn
   cargo brief code struct Commands
 
-  # Search a specific crate
-  cargo brief code self fn spawn
+  # Search a specific crate in the workspace
+  cargo brief code my-crate fn spawn
   cargo brief code my-crate struct Commands
 
   # Remote crate (TARGET required with -C)
@@ -271,14 +284,52 @@ EXAMPLES:
   cargo brief code fn spawn --limit 5
 
 POSITIONAL ARGS:
-  cargo brief code NAME                   # search all workspace members
-  cargo brief code KIND NAME              # search all workspace members, filter by kind
-  cargo brief code TARGET NAME            # search specific crate
-  cargo brief code TARGET KIND NAME       # search specific crate, filter by kind
+  1 arg:   code NAME                  search all workspace members, all kinds
+           (error if NAME is a kind keyword — use 2-arg form instead)
+  2 args:  code KIND NAME             if first arg is a kind keyword (see below)
+           code TARGET NAME           otherwise: search named crate, all kinds
+  3 args:  code TARGET KIND NAME      search named crate, filter by kind
+
+  Disambiguation: if the first of two args matches a kind keyword, it is
+  treated as KIND (not TARGET). Use the 3-arg form to force a target that
+  happens to shadow a kind keyword.
+
+TARGET RESOLUTION:
+  \"self\" (default when TARGET omitted):
+    Searches ALL workspace members — not just the current package.
+    This differs from other subcommands where \"self\" = current package,
+    because code is a source-level lookup tool where project-wide search
+    is the common case.
+  Named crate:
+    Searches only that specific package (hyphen/underscore normalized).
+  With -C (remote):
+    TARGET is a crates.io spec (e.g., serde@1). Implicit \"self\" is not
+    allowed — you must provide an explicit TARGET.
+
+DEPENDENCY SEARCH:
+  Default:    workspace members + accessible dependencies (via rustdoc JSON
+              reachability analysis; requires nightly).
+  --no-deps:  workspace members (or named target) only.
+  --all-deps: workspace members + all direct dependencies (via cargo
+              metadata; no nightly needed, wider but noisier).
 
 ITEM KINDS:
   fn, struct, enum, trait, field, type, impl, macro, const, use
-  Omit KIND to search all kinds (except use, to reduce noise).")]
+  Omit KIND to search all kinds (except use, to reduce noise).
+
+OUTPUT FORMAT:
+  Each match is printed as:
+    @<file>:<line>                          — source location
+      in <crate>::<module>[, <parent>]      — module path + parent context
+                                              (e.g., impl Type, trait Trait)
+    <source text>                           — full item definition
+
+  With --quiet (-q), only the location and module-path lines are shown.
+
+NAME MATCHING:
+  Smart-case: all-lowercase pattern = case-insensitive, any uppercase =
+  case-sensitive. The name must match the item's identifier exactly (not
+  a substring).")]
     Code(CodeArgs),
 
     /// Clear cached remote crate workspaces
@@ -472,7 +523,7 @@ impl SearchArgs {
 /// Arguments for the `examples` subcommand.
 #[derive(Args, Debug, Clone)]
 pub struct ExamplesArgs {
-    /// Target crate
+    /// Target crate: crate name, "self", or crates.io spec (with -C)
     #[arg(value_name = "TARGET", default_value = "self")]
     pub crate_name: String,
 
@@ -553,7 +604,7 @@ pub struct CodeArgs {
     #[arg(long, help_heading = "Local Workspace")]
     pub manifest_path: Option<String>,
 
-    /// Only search src/ directory
+    /// Only search src/ directory (skip examples, tests, benches)
     #[arg(long)]
     pub src_only: bool,
 
@@ -565,11 +616,11 @@ pub struct CodeArgs {
     #[arg(long, conflicts_with = "no_deps")]
     pub all_deps: bool,
 
-    /// Limit matches: N or OFFSET:N
+    /// Limit matches: N (first N) or OFFSET:N (skip OFFSET, show N)
     #[arg(long, value_name = "[OFFSET:]N")]
     pub limit: Option<String>,
 
-    /// Output only file:line + context, no source text
+    /// Output only file:line locations and module context, no source text
     #[arg(short = 'q', long)]
     pub quiet: bool,
 }
