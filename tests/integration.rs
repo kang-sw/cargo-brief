@@ -3930,3 +3930,124 @@ fn test_code_src_only() {
         "With src_only should not find main from examples:\n{output_src}"
     );
 }
+
+// ── Code subcommand: dependency recursion (Phase 2) ─────────────────
+
+#[test]
+fn test_code_all_deps_finds_dep_struct() {
+    let mut args = default_code_args();
+    args.no_deps = false;
+    args.all_deps = true;
+    args.kind_or_name = "struct".to_string();
+    args.name = Some("GlobSourceItem".to_string());
+    let output = cargo_brief::run_code_pipeline(&args, &RemoteOpts::default()).unwrap();
+    assert!(
+        output.contains("GlobSourceItem"),
+        "all_deps should find GlobSourceItem in dep:\n{output}"
+    );
+}
+
+#[test]
+fn test_code_all_deps_finds_named_dep() {
+    let mut args = default_code_args();
+    args.no_deps = false;
+    args.all_deps = true;
+    args.kind_or_name = "struct".to_string();
+    args.name = Some("NamedSourceItem".to_string());
+    let output = cargo_brief::run_code_pipeline(&args, &RemoteOpts::default()).unwrap();
+    assert!(
+        output.contains("NamedSourceItem"),
+        "all_deps should find NamedSourceItem in named-source dep:\n{output}"
+    );
+}
+
+#[test]
+fn test_code_no_deps_excludes_dep_items() {
+    let mut args = default_code_args();
+    args.no_deps = true;
+    args.kind_or_name = "struct".to_string();
+    args.name = Some("GlobSourceItem".to_string());
+    let output = cargo_brief::run_code_pipeline(&args, &RemoteOpts::default()).unwrap();
+    assert!(
+        output.contains("no struct definitions found"),
+        "no_deps should not find GlobSourceItem:\n{output}"
+    );
+}
+
+#[test]
+fn test_code_default_finds_accessible_deps() {
+    let mut args = default_code_args();
+    args.no_deps = false;
+    args.all_deps = false;
+    args.kind_or_name = "struct".to_string();
+    args.name = Some("GlobSourceItem".to_string());
+    let output = cargo_brief::run_code_pipeline(&args, &RemoteOpts::default()).unwrap();
+    assert!(
+        output.contains("GlobSourceItem"),
+        "Default mode should find GlobSourceItem (accessible via glob re-export):\n{output}"
+    );
+}
+
+#[test]
+fn test_code_default_finds_transitive_accessible() {
+    let mut args = default_code_args();
+    args.no_deps = false;
+    args.all_deps = false;
+    args.kind_or_name = "struct".to_string();
+    args.name = Some("GlobInnerItem".to_string());
+    let output = cargo_brief::run_code_pipeline(&args, &RemoteOpts::default()).unwrap();
+    assert!(
+        output.contains("GlobInnerItem"),
+        "Default mode should find GlobInnerItem (transitive via glob-source→glob-inner):\n{output}"
+    );
+}
+
+#[test]
+fn test_code_all_deps_module_context() {
+    let mut args = default_code_args();
+    args.no_deps = false;
+    args.all_deps = true;
+    args.kind_or_name = "struct".to_string();
+    args.name = Some("GlobSourceItem".to_string());
+    let output = cargo_brief::run_code_pipeline(&args, &RemoteOpts::default()).unwrap();
+    assert!(
+        output.contains("glob")
+            && !output.contains("test-fixture::")
+            && !output.contains("test_fixture::"),
+        "Context should reference glob dep crate, not test_fixture:\n{output}"
+    );
+}
+
+#[test]
+fn test_code_dep_search_with_limit() {
+    let mut args = default_code_args();
+    args.no_deps = false;
+    args.all_deps = true;
+    args.kind_or_name = "GlobSourceItem".to_string();
+    args.limit = Some("1".to_string());
+    let output = cargo_brief::run_code_pipeline(&args, &RemoteOpts::default()).unwrap();
+    let at_count = output.lines().filter(|l| l.starts_with('@')).count();
+    assert_eq!(
+        at_count, 1,
+        "limit=1 should produce exactly 1 @-line:\n{output}"
+    );
+}
+
+#[test]
+fn test_code_all_deps_quiet() {
+    let mut args = default_code_args();
+    args.no_deps = false;
+    args.all_deps = true;
+    args.quiet = true;
+    args.kind_or_name = "struct".to_string();
+    args.name = Some("GlobSourceItem".to_string());
+    let output = cargo_brief::run_code_pipeline(&args, &RemoteOpts::default()).unwrap();
+    assert!(
+        output.contains('@'),
+        "Quiet mode should have @file:line:\n{output}"
+    );
+    assert!(
+        !output.contains("pub struct"),
+        "Quiet mode should not contain struct body:\n{output}"
+    );
+}

@@ -188,3 +188,23 @@ Phase 1 implemented: single-crate code lookup with all planned item kinds.
   parent context, error cases, src_only.
 - Deviation: ItemKind::from_str renamed to ItemKind::parse (clippy should_implement_trait).
 - All 365 tests pass, clippy clean for new code.
+
+### Result (6e7e168) - 26-03-24
+
+Phase 2 implemented: multi-crate dependency search with three modes.
+
+- `src/resolve.rs`: `load_dep_package_dirs()` — runs cargo metadata (with deps), returns
+  all package dirs + direct dep names. Uses `packages[].id` for robust node matching
+  (handles both old and new cargo metadata ID formats).
+- `src/lib.rs`: Restructured `run_code_pipeline()` into three phases: (A) resolve target
+  via `CodeTarget` struct, (B) collect dep sources via mode-specific helpers, (C) search.
+  `discover_accessible_deps()` — standalone BFS replicating `pre_warm_cross_crate_json()`
+  with explicit params. `collect_all_deps_sources()` and `collect_accessible_deps_sources()`
+  private helpers.
+- `src/cli.rs`: Updated `--no-deps` and `--all-deps` help text.
+- 8 new integration tests: all_deps (struct, named dep, module context, limit, quiet),
+  no_deps exclusion, default accessible-path (direct + transitive).
+- Deviation: cargo metadata node ID format changed (`path+file:///path#name@ver` vs
+  `path+file:///path#ver`); initial fragment-parsing approach replaced with exact
+  `packages[].id` matching after code review caught the bug.
+- All 219 integration tests pass (373 total), clippy clean for new code.

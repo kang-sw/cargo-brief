@@ -772,13 +772,17 @@ pub fn run_ts_pipeline(args: &TsArgs, remote: &RemoteOpts) -> Result<String> {
 pub fn run_code_pipeline(args: &CodeArgs, remote: &RemoteOpts) -> Result<String> {
     let (kind, name) = code::resolve_kind_and_name(args)?;
 
-    if args.all_deps && !args.no_deps {
-        eprintln!(
-            "warning: --all-deps is not yet implemented (Phase 2); searching target crate only"
-        );
+    // Phase A — Resolve target (pkg_name, source_root, manifest for dep resolution)
+    struct CodeTarget {
+        pkg_name: String,
+        source_root: PathBuf,
+        effective_manifest: String,
+        target_dir: PathBuf,
+        is_workspace_member: bool,
+        _workspace: Option<remote::WorkspaceDir>,
     }
 
-    if remote.crates {
+    let target = if remote.crates {
         let spec = &args.crate_name;
         let (crate_name, _) = remote::parse_crate_spec(spec);
         if args.global.verbose {
@@ -804,8 +808,23 @@ pub fn run_code_pipeline(args: &CodeArgs, remote: &RemoteOpts) -> Result<String>
         let source_root = resolve::find_dep_source_root(&manifest_path, &crate_name)
             .with_context(|| format!("Failed to find source root for '{crate_name}'"))?;
 
-        let sources = vec![(crate_name.to_string(), source_root)];
-        code::search_code(&sources, name, kind, args)
+        // For remote crates, target_dir is needed only when searching deps
+        let target_dir = if !args.no_deps {
+            let meta = resolve::load_cargo_metadata(Some(&manifest_path))
+                .context("Failed to load cargo metadata for remote crate")?;
+            meta.target_dir
+        } else {
+            PathBuf::new()
+        };
+
+        CodeTarget {
+            pkg_name: crate_name.to_string(),
+            source_root,
+            effective_manifest: manifest_path,
+            target_dir,
+            is_workspace_member: false,
+            _workspace: Some(workspace),
+        }
     } else {
         let metadata = resolve::load_cargo_metadata(args.manifest_path.as_deref())
             .context("Failed to load cargo metadata")?;
@@ -843,13 +862,125 @@ pub fn run_code_pipeline(args: &CodeArgs, remote: &RemoteOpts) -> Result<String>
             }
         };
 
-        if args.global.verbose {
-            eprintln!("[cargo-brief] Searching '{pkg_name}' for code definitions...");
-        }
+        // Determine effective manifest for dep resolution
+        let effective_manifest = metadata
+            .package_manifest_dirs
+            .get(&pkg_name)
+            .map(|d| d.join("Cargo.toml").to_string_lossy().into_owned())
+            .or_else(|| args.manifest_path.clone())
+            .unwrap_or_else(|| "Cargo.toml".to_string());
 
-        let sources = vec![(pkg_name, source_root)];
-        code::search_code(&sources, name, kind, args)
+        CodeTarget {
+            pkg_name,
+            source_root,
+            effective_manifest,
+            target_dir: metadata.target_dir,
+            is_workspace_member: true,
+            _workspace: None,
+        }
+    };
+
+    if args.global.verbose {
+        eprintln!(
+            "[cargo-brief] Searching '{}' for code definitions...",
+            target.pkg_name
+        );
     }
+
+    // Phase B — Collect dep sources
+    let mut sources = vec![(target.pkg_name.clone(), target.source_root.clone())];
+
+    if !args.no_deps {
+        let dep_sources = if args.all_deps {
+            collect_all_deps_sources(&target.effective_manifest, &target.pkg_name)?
+        } else {
+            collect_accessible_deps_sources(
+                &target.pkg_name,
+                &target.effective_manifest,
+                &target.target_dir,
+                &args.global.toolchain,
+                args.global.verbose,
+                !target.is_workspace_member,
+            )?
+        };
+        sources.extend(dep_sources);
+        if args.global.verbose {
+            eprintln!("[cargo-brief] Searching {} crate(s)...", sources.len());
+        }
+    }
+
+    // Phase C — Search
+    code::search_code(&sources, name, kind, args)
+}
+
+/// Collect source dirs for all direct dependencies via cargo metadata.
+fn collect_all_deps_sources(
+    manifest_path: &str,
+    root_package: &str,
+) -> Result<Vec<(String, PathBuf)>> {
+    let (all_dirs, direct_deps) =
+        resolve::load_dep_package_dirs(Some(manifest_path), root_package)?;
+
+    let mut result = Vec::new();
+    for dep_name in &direct_deps {
+        if let Some(dir) = all_dirs.get(dep_name) {
+            result.push((dep_name.clone(), dir.clone()));
+        }
+    }
+    Ok(result)
+}
+
+/// Collect source dirs for accessible dependencies via rustdoc JSON BFS.
+fn collect_accessible_deps_sources(
+    pkg_name: &str,
+    manifest_path: &str,
+    target_dir: &Path,
+    toolchain: &str,
+    verbose: bool,
+    use_cache: bool,
+) -> Result<Vec<(String, PathBuf)>> {
+    // Generate rustdoc JSON for the target crate
+    let json_path = rustdoc_json::generate_rustdoc_json(
+        pkg_name,
+        toolchain,
+        Some(manifest_path),
+        true, // document_private_items
+        target_dir,
+        verbose,
+        use_cache,
+    )
+    .with_context(|| format!("Failed to generate rustdoc JSON for '{pkg_name}'"))?;
+
+    let krate = rustdoc_json::parse_rustdoc_json_cached(&json_path)
+        .with_context(|| format!("Failed to parse rustdoc JSON for '{pkg_name}'"))?;
+
+    let model = CrateModel::from_crate(krate);
+
+    // BFS discover accessible deps
+    let accessible =
+        discover_accessible_deps(&model, toolchain, Some(manifest_path), target_dir, verbose);
+
+    if accessible.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    // Map accessible dep names to source directories
+    let (all_dirs, _) = resolve::load_dep_package_dirs(Some(manifest_path), pkg_name)?;
+
+    let mut result = Vec::new();
+    for dep_name in &accessible {
+        let base = dep_name.split('@').next().unwrap_or(dep_name);
+        if let Some(dir) = all_dirs.get(base) {
+            result.push((base.to_string(), dir.clone()));
+        } else {
+            // Try hyphen/underscore normalization
+            let alt = base.replace('_', "-");
+            if let Some(dir) = all_dirs.get(&alt) {
+                result.push((alt, dir.clone()));
+            }
+        }
+    }
+    Ok(result)
 }
 
 /// Run the summary pipeline and return the rendered output string.
@@ -1074,6 +1205,71 @@ fn pre_warm_cross_crate_json(model: &CrateModel, ctx: &PipelineContext) {
         next_batch.dedup();
         batch = next_batch;
     }
+}
+
+/// BFS-discover accessible dependency crate names via rustdoc JSON.
+/// Standalone version — takes explicit params instead of PipelineContext.
+/// Returns cargo-compatible package names (possibly with @version suffix).
+fn discover_accessible_deps(
+    model: &CrateModel,
+    toolchain: &str,
+    manifest_path: Option<&str>,
+    target_dir: &Path,
+    verbose: bool,
+) -> HashSet<String> {
+    let packages = rustdoc_json::load_lockfile_packages(manifest_path);
+
+    // Seed: collect external crate names from the primary model.
+    let mut batch: Vec<String> = cross_crate::collect_external_crate_names(model)
+        .into_iter()
+        .filter_map(|n| normalize_to_lockfile_name(&n, &packages))
+        .collect();
+    batch.sort();
+    batch.dedup();
+    let mut seen: HashSet<String> = batch.iter().cloned().collect();
+
+    const MAX_DEPTH: usize = 8;
+    for _ in 0..MAX_DEPTH {
+        if batch.is_empty() {
+            break;
+        }
+
+        let refs: Vec<&str> = batch.iter().map(|s| s.as_str()).collect();
+        rustdoc_json::batch_generate_rustdoc_json(
+            &refs,
+            toolchain,
+            manifest_path,
+            target_dir,
+            verbose,
+        );
+
+        let mut next_batch = Vec::new();
+        for name in &batch {
+            let base = name.split('@').next().unwrap_or(name);
+            let json_name = base.replace('-', "_");
+            let json_path = target_dir.join("doc").join(format!("{json_name}.json"));
+            if !json_path.exists() {
+                continue;
+            }
+            let Ok(krate) = rustdoc_json::parse_rustdoc_json_cached(&json_path) else {
+                continue;
+            };
+            let sub_model = CrateModel::from_crate(krate);
+            for sub_name in cross_crate::collect_external_crate_names(&sub_model) {
+                if let Some(pkg_name) = normalize_to_lockfile_name(&sub_name, &packages) {
+                    if !seen.contains(&pkg_name) {
+                        seen.insert(pkg_name.clone());
+                        next_batch.push(pkg_name);
+                    }
+                }
+            }
+        }
+        next_batch.sort();
+        next_batch.dedup();
+        batch = next_batch;
+    }
+
+    seen
 }
 
 /// Normalize a rustdoc crate name (underscores) to the Cargo.lock package spec.

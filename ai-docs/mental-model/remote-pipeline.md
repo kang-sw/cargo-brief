@@ -30,6 +30,7 @@
 - **Increase cross-crate hop depth**: Change the `for _ in 0..5` loop limit in `follow_use_chain()` in `cross_crate.rs`.
 
 ## Common Mistakes
+- `discover_accessible_deps()` (used by `run_code_pipeline`) and `pre_warm_cross_crate_json()` (used by api/search/summary pipelines) implement the same BFS logic independently. Changes to the BFS algorithm, depth limit, or `normalize_to_lockfile_name` behavior in one function do not propagate to the other. This is the only place in the codebase where intentional logic duplication exists.
 - No timeout on `cargo rustdoc` subprocess. Large crates (e.g., `bevy`) can hang for minutes on first build. User must Ctrl-C manually.
 - `generate_rustdoc_json(..., use_cache=true)` only checks if the `.json` file exists — it does not validate the file corresponds to the requested crate version. Manually placing a `.json` file in the cache dir would be returned silently.
 - Cross-crate module path not found after >5 re-export hops → `resolve_cross_crate_module` returns `None`, falls through to normal render, which then fails with "module not found". No hint that cross-crate resolution was attempted.

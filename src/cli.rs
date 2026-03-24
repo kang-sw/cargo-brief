@@ -561,11 +561,11 @@ pub struct CodeArgs {
     #[arg(long)]
     pub src_only: bool,
 
-    /// Don't search dependencies (default in Phase 1)
+    /// Don't search dependencies (target crate only)
     #[arg(long)]
     pub no_deps: bool,
 
-    /// Use all cargo metadata deps instead of accessible-path set
+    /// Search all direct dependencies (no nightly needed; skips accessible-path filtering)
     #[arg(long, conflicts_with = "no_deps")]
     pub all_deps: bool,
 

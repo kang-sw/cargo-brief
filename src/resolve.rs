@@ -350,6 +350,96 @@ pub fn find_dep_source_root(manifest_path: &str, crate_name: &str) -> Result<Pat
     bail!("Package '{crate_name}' not found in dependency tree of '{manifest_path}'")
 }
 
+/// Load all resolved package directories and direct deps from cargo metadata
+/// (WITH deps — runs full dependency resolution).
+///
+/// Returns `(all_package_dirs, direct_dep_names_of_root)`.
+/// `all_package_dirs`: package name → manifest dir for every resolved package.
+/// `direct_dep_names`: cargo package names that `root_package` directly depends on.
+pub fn load_dep_package_dirs(
+    manifest_path: Option<&str>,
+    root_package: &str,
+) -> Result<(HashMap<String, PathBuf>, Vec<String>)> {
+    let mut cmd = Command::new("cargo");
+    cmd.args(["metadata", "--format-version=1"]);
+    if let Some(mp) = manifest_path {
+        cmd.args(["--manifest-path", mp]);
+    }
+
+    let output = cmd
+        .output()
+        .context("Failed to run cargo metadata (with deps)")?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        bail!("cargo metadata failed:\n{stderr}");
+    }
+
+    let metadata: serde_json::Value =
+        serde_json::from_slice(&output.stdout).context("Failed to parse cargo metadata")?;
+
+    // Build name → manifest_dir and name → id maps from packages[]
+    let mut all_dirs = HashMap::new();
+    let mut root_pkg_id: Option<String> = None;
+    let normalized_root = root_package.replace('-', "_");
+
+    if let Some(packages) = metadata["packages"].as_array() {
+        for pkg in packages {
+            if let (Some(name), Some(manifest)) =
+                (pkg["name"].as_str(), pkg["manifest_path"].as_str())
+            {
+                let dir = Path::new(manifest)
+                    .parent()
+                    .unwrap_or(Path::new(""))
+                    .to_path_buf();
+                all_dirs.insert(name.to_string(), dir);
+
+                // Match root package by name (with normalization)
+                if root_pkg_id.is_none() && name.replace('-', "_") == normalized_root {
+                    if let Some(id) = pkg["id"].as_str() {
+                        root_pkg_id = Some(id.to_string());
+                    }
+                }
+            }
+        }
+    }
+
+    // Find root package's node in resolve.nodes[] using the exact id
+    let mut direct_dep_names = Vec::new();
+
+    if let Some(ref root_id) = root_pkg_id {
+        if let Some(nodes) = metadata["resolve"]["nodes"].as_array() {
+            let root_node = nodes
+                .iter()
+                .find(|node| node["id"].as_str() == Some(root_id.as_str()));
+
+            if let Some(node) = root_node {
+                if let Some(deps) = node["deps"].as_array() {
+                    for dep in deps {
+                        if let Some(dep_name) = dep["name"].as_str() {
+                            // dep.name is Rust-identifier form (underscores).
+                            // Try exact match first, then hyphen fallback.
+                            let cargo_name = if all_dirs.contains_key(dep_name) {
+                                dep_name.to_string()
+                            } else {
+                                let hyphenated = dep_name.replace('_', "-");
+                                if all_dirs.contains_key(&hyphenated) {
+                                    hyphenated
+                                } else {
+                                    continue;
+                                }
+                            };
+                            direct_dep_names.push(cargo_name);
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    Ok((all_dirs, direct_dep_names))
+}
+
 /// Find a package in the workspace, normalizing hyphens/underscores.
 fn find_workspace_package(packages: &[String], query: &str) -> Option<String> {
     let normalized = query.replace('-', "_");
