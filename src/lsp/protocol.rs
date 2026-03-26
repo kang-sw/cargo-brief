@@ -13,6 +13,7 @@ pub enum DaemonRequest {
     Ping,
     Stop,
     Status,
+    References { symbol: String, quiet: bool },
 }
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -27,6 +28,9 @@ pub enum DaemonResponse {
     },
     Error {
         message: String,
+    },
+    QueryResult {
+        output: String,
     },
 }
 
@@ -113,6 +117,40 @@ mod tests {
                 assert_eq!(pid, 42);
                 assert_eq!(ra_status, RaStatus::Ready);
                 assert_eq!(uptime_secs, 120);
+            }
+            _ => panic!("unexpected response variant"),
+        }
+    }
+
+    #[test]
+    fn roundtrip_references_request() {
+        let (mut a, mut b) = UnixStream::pair().unwrap();
+        let req = DaemonRequest::References {
+            symbol: "Foo::bar".to_string(),
+            quiet: true,
+        };
+        write_message(&mut a, &req).unwrap();
+        let got: DaemonRequest = read_message(&mut b).unwrap();
+        match got {
+            DaemonRequest::References { symbol, quiet } => {
+                assert_eq!(symbol, "Foo::bar");
+                assert!(quiet);
+            }
+            _ => panic!("unexpected request variant"),
+        }
+    }
+
+    #[test]
+    fn roundtrip_query_result_response() {
+        let (mut a, mut b) = UnixStream::pair().unwrap();
+        let resp = DaemonResponse::QueryResult {
+            output: "// 2 references to Foo\n".to_string(),
+        };
+        write_message(&mut a, &resp).unwrap();
+        let got: DaemonResponse = read_message(&mut b).unwrap();
+        match got {
+            DaemonResponse::QueryResult { output } => {
+                assert_eq!(output, "// 2 references to Foo\n");
             }
             _ => panic!("unexpected response variant"),
         }

@@ -1,5 +1,6 @@
 ---
 title: "LSP daemon: query commands (references, blast-radius, call-hierarchy)"
+started: 2026-03-26
 related:
   - 260326-feat-lsp-daemon             # parent
   - 260326-feat-lsp-daemon-bootstrap   # prerequisite
@@ -130,3 +131,26 @@ pub enum LspCommand {
 ## Estimated scope
 
 ~600-800 lines total. Phase 1 ~350-450, Phase 2 ~250-350.
+
+### Result (d309020) - 26-03-26
+
+**Phase 1 complete.** `cargo brief lsp references <symbol> [-q]` implemented.
+
+- New `src/lsp/query.rs` (~250 lines): `resolve_symbol` (workspace/symbol with
+  exact name filtering), `find_references` (textDocument/references),
+  `format_references` (grouped by file with source lines), `format_disambiguation`
+  (relative paths), `handle_references` orchestrator.
+- `protocol.rs`: `DaemonRequest::References`, `DaemonResponse::QueryResult`.
+- `daemon.rs`: `handle_client` extended with `&mut RaTransport` + `&Path` params.
+- `mod.rs`: `cmd_references()` with fresh UDS connection, 30s timeout.
+- `cli.rs`: `LspCommand::References { symbol, quiet }`.
+- 8 unit tests (formatting + protocol roundtrip). All 317+ tests pass.
+
+**Deviations:** None. Implementation matched plan exactly.
+
+**Key findings for Phase 2:**
+- `handle_client` now accepts transport, so adding blast-radius/call-hierarchy
+  follows the same pattern (add DaemonRequest variant + query function).
+- `resolve_symbol` is reusable as-is for Phase 2 commands.
+- Container name filtering uses substring match (`contains`) — may need
+  tightening if false positives appear in practice.

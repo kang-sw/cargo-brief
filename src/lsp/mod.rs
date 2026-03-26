@@ -1,12 +1,13 @@
 //! LSP daemon management for semantic code analysis via rust-analyzer.
 //!
-//! Provides `cargo brief lsp` subcommands: `touch`, `stop`, `status`.
+//! Provides `cargo brief lsp` subcommands: `touch`, `stop`, `status`, `references`.
 //! The daemon spawns rust-analyzer as a background process, communicates
 //! via LSP over stdio, and accepts client queries via Unix domain socket.
 
 pub(crate) mod client;
 pub mod daemon;
 mod protocol;
+mod query;
 mod transport;
 mod watcher;
 
@@ -30,6 +31,12 @@ pub fn run_lsp_command(args: &LspArgs, remote: &RemoteOpts) -> Result<()> {
         LspCommand::Touch => cmd_touch(&metadata.workspace_root, args.global.verbose),
         LspCommand::Stop => cmd_stop(&metadata.workspace_root, args.global.verbose),
         LspCommand::Status => cmd_status(&metadata.workspace_root),
+        LspCommand::References { symbol, quiet } => cmd_references(
+            &metadata.workspace_root,
+            symbol.clone(),
+            *quiet,
+            args.global.verbose,
+        ),
     }
 }
 
@@ -53,6 +60,7 @@ fn cmd_touch(workspace_root: &std::path::Path, verbose: bool) -> Result<()> {
         DaemonResponse::Error { message } => {
             eprintln!("[lsp] daemon error: {message}");
         }
+        DaemonResponse::QueryResult { .. } => {}
     }
     Ok(())
 }
@@ -87,6 +95,32 @@ fn cmd_stop(workspace_root: &std::path::Path, verbose: bool) -> Result<()> {
     Ok(())
 }
 
+/// Find all references to a symbol via the daemon's rust-analyzer instance.
+fn cmd_references(
+    workspace_root: &std::path::Path,
+    symbol: String,
+    quiet: bool,
+    verbose: bool,
+) -> Result<()> {
+    ensure_daemon(workspace_root, verbose)?;
+
+    let dir = daemon_dir(workspace_root);
+    let sock = dir.join("lsp.sock");
+    let mut stream = std::os::unix::net::UnixStream::connect(&sock)
+        .context("Failed to connect to LSP daemon")?;
+    stream.set_read_timeout(Some(std::time::Duration::from_secs(30)))?;
+
+    let resp = send_command(&mut stream, DaemonRequest::References { symbol, quiet })?;
+    match resp {
+        DaemonResponse::QueryResult { output } => {
+            print!("{output}");
+            Ok(())
+        }
+        DaemonResponse::Error { message } => anyhow::bail!("{message}"),
+        _ => anyhow::bail!("Unexpected response from daemon"),
+    }
+}
+
 /// Show daemon status.
 fn cmd_status(workspace_root: &std::path::Path) -> Result<()> {
     let dir = daemon_dir(workspace_root);
@@ -119,6 +153,9 @@ fn cmd_status(workspace_root: &std::path::Path) -> Result<()> {
                 }
                 DaemonResponse::Ok { message } => {
                     println!("LSP daemon: {message}");
+                }
+                DaemonResponse::QueryResult { .. } => {
+                    println!("LSP daemon: unexpected response");
                 }
             }
         }

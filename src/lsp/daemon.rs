@@ -9,6 +9,7 @@ use std::time::{Duration, Instant};
 use anyhow::{Context, Result, bail};
 
 use super::protocol::{DaemonRequest, DaemonResponse, RaStatus, read_message, write_message};
+use super::query;
 use super::transport::RaTransport;
 use super::watcher::{self, DebounceBuffer};
 
@@ -118,6 +119,8 @@ fn handle_client(
     ra_status: RaStatus,
     start_time: Instant,
     shutdown: &mut bool,
+    transport: &mut RaTransport,
+    workspace_root: &Path,
 ) -> Result<()> {
     // Set a read timeout to avoid blocking forever on malformed clients
     stream.set_read_timeout(Some(Duration::from_secs(5)))?;
@@ -139,6 +142,14 @@ fn handle_client(
             ra_status,
             uptime_secs: start_time.elapsed().as_secs(),
         },
+        DaemonRequest::References { symbol, quiet } => {
+            match query::handle_references(transport, workspace_root, &symbol, quiet) {
+                Ok(output) => DaemonResponse::QueryResult { output },
+                Err(e) => DaemonResponse::Error {
+                    message: format!("{e}"),
+                },
+            }
+        }
     };
 
     write_message(&mut stream, &response)?;
@@ -250,7 +261,14 @@ pub fn run_daemon(workspace_root: &Path, socket_path: &Path, pid_path: &Path) ->
     loop {
         match listener.accept() {
             Ok((stream, _)) => {
-                if let Err(e) = handle_client(stream, ra_status, start_time, &mut shutdown) {
+                if let Err(e) = handle_client(
+                    stream,
+                    ra_status,
+                    start_time,
+                    &mut shutdown,
+                    &mut transport,
+                    workspace_root,
+                ) {
                     eprintln!("[lsp-daemon] client error: {e}");
                 }
                 last_activity = Instant::now();

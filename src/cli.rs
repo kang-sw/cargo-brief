@@ -713,6 +713,14 @@ pub enum LspCommand {
     Stop,
     /// Show LSP daemon status
     Status,
+    /// Find all references to a symbol via rust-analyzer
+    References {
+        /// Symbol to find references for (e.g., "Foo::bar", "CrateModel")
+        symbol: String,
+        /// Location-only output format
+        #[arg(long, short)]
+        quiet: bool,
+    },
 }
 
 impl ExamplesArgs {

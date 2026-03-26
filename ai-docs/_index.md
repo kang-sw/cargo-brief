@@ -70,7 +70,8 @@ Remote crate support (`-C`) with dep recursion.
 **`clean`** — Clear cached remote crate workspaces. Optional `SPEC` argument for specific crate.
 
 **`lsp`** — Manage persistent rust-analyzer daemon. Subcommands: `touch` (ensure running),
-`stop` (graceful shutdown), `status` (show PID/ra state/uptime). Unix-only. Rejects `-C`.
+`stop` (graceful shutdown), `status` (show PID/ra state/uptime), `references <symbol> [-q]`
+(find all references via ra). Unix-only. Rejects `-C`.
 Daemon per workspace root; idle timeout 10min (override: `CARGO_BRIEF_LSP_TIMEOUT`).
 
 ### Target Resolution (api subcommand)
@@ -123,7 +124,7 @@ src/
   main.rs          — CLI arg parsing, subcommand dispatch, RemoteOpts extraction from BriefDirect, __lsp-daemon early-exit
   cli.rs           — Subcommand types: ApiArgs, SearchArgs, ExamplesArgs, SummaryArgs, CleanArgs, LspArgs + shared TargetArgs/FilterArgs/GlobalArgs + RemoteOpts (plain struct)
   cross_crate.rs   — cross-crate module following for facade crates
-  lsp/             — LSP daemon management (unix-only): mod.rs (entry), daemon.rs (process), client.rs (connect/spawn), protocol.rs (UDS framing), transport.rs (LSP JSON-RPC framing), watcher.rs (filesystem watching)
+  lsp/             — LSP daemon management (unix-only): mod.rs (entry), daemon.rs (process), client.rs (connect/spawn), protocol.rs (UDS framing), transport.rs (LSP JSON-RPC framing), watcher.rs (filesystem watching), query.rs (symbol resolution + references)
   remote.rs        — temp workspace creation for --crates (crates.io fetch) + cache management
   resolve.rs       — flexible target resolution (self, crate::module, fallback) + cargo metadata
   rustdoc_json.rs  — JSON generation (with use_cache param) + parsing (bincode-cached)
