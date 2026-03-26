@@ -237,7 +237,7 @@ pub fn run_daemon(workspace_root: &Path, socket_path: &Path, pid_path: &Path) ->
 
     eprintln!("[lsp-daemon] listening on {}", socket_path.display());
 
-    // 6. Main loop
+    // 7. Main loop
     let idle_timeout = Duration::from_secs(
         std::env::var("CARGO_BRIEF_LSP_TIMEOUT")
             .ok()
@@ -300,7 +300,7 @@ pub fn run_daemon(workspace_root: &Path, socket_path: &Path, pid_path: &Path) ->
         }
     }
 
-    // 7. Cleanup
+    // 8. Cleanup
     if ra_status != RaStatus::Stopped {
         shutdown_ra(&mut transport);
     }
