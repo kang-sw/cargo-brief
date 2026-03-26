@@ -198,17 +198,21 @@ fn format_references_quiet(refs: &[ReferenceLocation], workspace_root: &Path) ->
 }
 
 /// Format disambiguation list for ambiguous symbol matches.
-pub fn format_disambiguation(matches: &[SymbolMatch], query: &str) -> String {
+pub fn format_disambiguation(
+    matches: &[SymbolMatch],
+    query: &str,
+    workspace_root: &Path,
+) -> String {
     let mut out = format!("Multiple symbols match \"{query}\":\n");
     for (i, m) in matches.iter().enumerate() {
         let qualified = match &m.container_name {
             Some(c) => format!("{c}::{}", m.name),
             None => m.name.clone(),
         };
-        let rel_display = m.uri.rsplit('/').next().unwrap_or(&m.uri);
+        let rel_path = uri_to_relative(workspace_root, &m.uri);
         let display_line = m.line + 1;
         out.push_str(&format!(
-            "  {}. {} {qualified}  {rel_display}:{display_line}\n",
+            "  {}. {} {qualified}  {rel_path}:{display_line}\n",
             i + 1,
             m.kind
         ));
@@ -227,7 +231,9 @@ pub fn handle_references(
         ResolveResult::NotFound => {
             bail!("Symbol not found: {symbol}")
         }
-        ResolveResult::Ambiguous(matches) => Ok(format_disambiguation(&matches, symbol)),
+        ResolveResult::Ambiguous(matches) => {
+            Ok(format_disambiguation(&matches, symbol, workspace_root))
+        }
         ResolveResult::Ok(m) => {
             let refs = find_references(transport, &m.uri, m.line, m.col)?;
             Ok(format_references(&refs, workspace_root, &m.name, quiet))
@@ -347,10 +353,10 @@ mod tests {
                 kind: "fn".to_string(),
             },
         ];
-        let result = format_disambiguation(&matches, "bar");
+        let result = format_disambiguation(&matches, "bar", Path::new("/project"));
         assert!(result.starts_with("Multiple symbols match \"bar\":\n"));
-        assert!(result.contains("1. fn Foo::bar  foo.rs:42"));
-        assert!(result.contains("2. fn Baz::bar  baz.rs:10"));
+        assert!(result.contains("1. fn Foo::bar  src/foo.rs:42"));
+        assert!(result.contains("2. fn Baz::bar  src/baz.rs:10"));
     }
 
     #[test]
@@ -373,8 +379,8 @@ mod tests {
                 kind: "struct".to_string(),
             },
         ];
-        let result = format_disambiguation(&matches, "Config");
-        assert!(result.contains("1. struct Config  config.rs:1"));
-        assert!(result.contains("2. struct app::Config  app.rs:6"));
+        let result = format_disambiguation(&matches, "Config", Path::new("/project"));
+        assert!(result.contains("1. struct Config  src/config.rs:1"));
+        assert!(result.contains("2. struct app::Config  src/app.rs:6"));
     }
 }

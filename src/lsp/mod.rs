@@ -60,7 +60,7 @@ fn cmd_touch(workspace_root: &std::path::Path, verbose: bool) -> Result<()> {
         DaemonResponse::Error { message } => {
             eprintln!("[lsp] daemon error: {message}");
         }
-        _ => {}
+        DaemonResponse::QueryResult { .. } => {}
     }
     Ok(())
 }
@@ -154,7 +154,7 @@ fn cmd_status(workspace_root: &std::path::Path) -> Result<()> {
                 DaemonResponse::Ok { message } => {
                     println!("LSP daemon: {message}");
                 }
-                _ => {
+                DaemonResponse::QueryResult { .. } => {
                     println!("LSP daemon: unexpected response");
                 }
             }
