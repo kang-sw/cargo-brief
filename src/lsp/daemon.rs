@@ -327,6 +327,7 @@ pub fn run_daemon(workspace_root: &Path, socket_path: &Path, pid_path: &Path) ->
 
     std::fs::remove_file(pid_path).ok();
     std::fs::remove_file(socket_path).ok();
+    std::fs::remove_file(socket_path.with_file_name("lsp.log")).ok();
     // Try to remove the parent directory (only succeeds if empty)
     if let Some(parent) = socket_path.parent() {
         std::fs::remove_dir(parent).ok();
