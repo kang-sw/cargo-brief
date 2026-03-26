@@ -16,6 +16,8 @@ pub struct CargoMetadataInfo {
     pub target_dir: PathBuf,
     /// Manifest directory for each workspace package (name → dir).
     pub package_manifest_dirs: HashMap<String, PathBuf>,
+    /// The workspace root directory (from `workspace_root` in cargo metadata).
+    pub workspace_root: PathBuf,
 }
 
 /// A resolved target for the pipeline.
@@ -47,6 +49,10 @@ pub fn load_cargo_metadata(manifest_path: Option<&str>) -> Result<CargoMetadataI
     let target_dir = metadata["target_directory"]
         .as_str()
         .context("No target_directory in cargo metadata")?;
+
+    let workspace_root = metadata["workspace_root"]
+        .as_str()
+        .context("No workspace_root in cargo metadata")?;
 
     let cwd = std::env::current_dir().context("Failed to get current directory")?;
     let cwd_canonical = cwd.canonicalize().unwrap_or(cwd);
@@ -85,6 +91,7 @@ pub fn load_cargo_metadata(manifest_path: Option<&str>) -> Result<CargoMetadataI
         current_package_manifest_dir,
         target_dir: PathBuf::from(target_dir),
         package_manifest_dirs,
+        workspace_root: PathBuf::from(workspace_root),
     })
 }
 
@@ -460,6 +467,7 @@ mod tests {
             current_package_manifest_dir: None,
             target_dir: PathBuf::from("/tmp/target"),
             package_manifest_dirs: HashMap::new(),
+            workspace_root: PathBuf::from("/tmp"),
         }
     }
 
@@ -474,6 +482,7 @@ mod tests {
             current_package_manifest_dir: Some(manifest_dir.to_path_buf()),
             target_dir: PathBuf::from("/tmp/target"),
             package_manifest_dirs: HashMap::new(),
+            workspace_root: PathBuf::from("/tmp"),
         }
     }
 

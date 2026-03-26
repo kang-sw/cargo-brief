@@ -36,6 +36,7 @@ cargo brief [-C] examples [target] [pattern] [OPTIONS]
 cargo brief [-C] summary [target] [module_path] [OPTIONS]
 cargo brief [-C] ts [target] '<query>' [OPTIONS]
 cargo brief clean [SPEC]
+cargo brief lsp {touch|stop|status} [OPTIONS]
 ```
 
 ### Subcommands
@@ -67,6 +68,10 @@ Smart-case matching. `--quiet`/`-q` location-only output. `--limit [OFFSET:]N` p
 Remote crate support (`-C`) with dep recursion.
 
 **`clean`** — Clear cached remote crate workspaces. Optional `SPEC` argument for specific crate.
+
+**`lsp`** — Manage persistent rust-analyzer daemon. Subcommands: `touch` (ensure running),
+`stop` (graceful shutdown), `status` (show PID/ra state/uptime). Unix-only. Rejects `-C`.
+Daemon per workspace root; idle timeout 10min (override: `CARGO_BRIEF_LSP_TIMEOUT`).
 
 ### Target Resolution (api subcommand)
 | Syntax              | Resolves to                                     |
@@ -115,9 +120,10 @@ With `-C`, TARGET is the crate spec (e.g., `serde@1`, `tokio@1::net`).
 src/
   lib.rs           — re-exports all modules, pipeline orchestration via PipelineContext → shared api/search functions
   examples.rs      — example/test/bench file scanning, list mode and grep mode rendering
-  main.rs          — CLI arg parsing, subcommand dispatch, RemoteOpts extraction from BriefDirect
-  cli.rs           — Subcommand types: ApiArgs, SearchArgs, ExamplesArgs, SummaryArgs, CleanArgs + shared TargetArgs/FilterArgs/GlobalArgs + RemoteOpts (plain struct)
+  main.rs          — CLI arg parsing, subcommand dispatch, RemoteOpts extraction from BriefDirect, __lsp-daemon early-exit
+  cli.rs           — Subcommand types: ApiArgs, SearchArgs, ExamplesArgs, SummaryArgs, CleanArgs, LspArgs + shared TargetArgs/FilterArgs/GlobalArgs + RemoteOpts (plain struct)
   cross_crate.rs   — cross-crate module following for facade crates
+  lsp/             — LSP daemon management (unix-only): mod.rs (entry), daemon.rs (process), client.rs (connect/spawn), protocol.rs (UDS framing), transport.rs (LSP JSON-RPC framing)
   remote.rs        — temp workspace creation for --crates (crates.io fetch) + cache management
   resolve.rs       — flexible target resolution (self, crate::module, fallback) + cargo metadata
   rustdoc_json.rs  — JSON generation (with use_cache param) + parsing (bincode-cached)
@@ -173,7 +179,7 @@ Parsed via `rustdoc-types` 0.57. Post-macro-expansion output.
 - **Examples subcommand**: `cargo brief examples <target> [pattern]` greps example/test/bench source files. List mode (no pattern) shows files with `//!` docs; grep mode shows matches with `*` markers, dynamic line numbers, context control. `--tests [DEPTH]` / `--benches [DEPTH]` extend scope. Smart-case matching.
 - **Tree-sitter subcommand**: `cargo brief ts <target> '<query>'` runs S-expression structural queries against `.rs` source files. Supports verbatim output, `--captures` mode (capture name + text pairs), `--context N` (surrounding lines with `*` markers). Capture-less queries auto-augmented with `@_match`. Scans `src/`, `examples/`, `tests/`, `benches/`. Remote crate support (`-C`) not yet implemented.
 - **Code subcommand**: `cargo brief code <target> [kind] <name>` looks up code definitions by kind and name using pre-crafted tree-sitter queries. Three dep modes: default (accessible-path BFS via rustdoc JSON, recursive), `--no-deps` (target crate only), `--all-deps` (cargo metadata direct deps, no nightly needed). Smart-case matching. `--quiet`/`-q` for location-only, `--limit` pagination, `--src-only`. Remote crate support (`-C`) with dep recursion. `discover_accessible_deps()` is a standalone BFS separate from `pre_warm_cross_crate_json()`. `load_dep_package_dirs()` maps crate names to source dirs.
-- Dependencies: `clap` 4, `rustdoc-types` 0.57, `serde_json` 1, `anyhow` 1, `tempfile` 3, `bincode` 1, `semver` 1, `ureq` 2, `tree-sitter` 0.25, `tree-sitter-rust` 0.23, `streaming-iterator` 0.1.
+- Dependencies: `clap` 4, `rustdoc-types` 0.57, `serde_json` 1, `anyhow` 1, `tempfile` 3, `bincode` 1, `semver` 1, `ureq` 2, `tree-sitter` 0.25, `tree-sitter-rust` 0.23, `streaming-iterator` 0.1, `libc` 0.2.
 - Test fixture (`test_fixture/`) covers all supported item types. Workspace with `glob-source`/`glob-inner` sub-crates for cross-crate glob chain testing and `named-source` sub-crate for named re-export expansion testing.
 
 ## Mental Model Documents
@@ -188,6 +194,7 @@ Domain-oriented operational knowledge in `ai-docs/mental-model/`:
 | `remote-pipeline.md` | `--crates` lifecycle: TempDir borrow chain, version semantics, remote-only constraints |
 | `glob-expansion.md` | Glob re-export expansion: string-based detection, Phase 1/2 inlining, coupling with render |
 | `testing.md` | Test infrastructure: BriefArgs coupling, fixture contracts, visibility test patterns |
+| `lsp-daemon.md` | LSP daemon: re-exec contract, UDS framing, PID ordering, idle timeout |
 
 ---
 

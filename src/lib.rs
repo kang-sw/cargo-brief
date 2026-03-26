@@ -2,6 +2,8 @@ pub mod cli;
 pub mod code;
 pub mod cross_crate;
 pub mod examples;
+#[cfg(unix)]
+pub mod lsp;
 pub mod model;
 pub mod remote;
 pub mod render;
@@ -14,6 +16,12 @@ pub mod ts;
 /// Clean cached remote crate workspaces. Empty spec = all.
 pub fn clean_cache(spec: &str) -> anyhow::Result<()> {
     remote::clean_cache(spec)
+}
+
+/// Run an LSP daemon management command (touch/stop/status).
+#[cfg(unix)]
+pub fn run_lsp_command(args: &cli::LspArgs, remote: &cli::RemoteOpts) -> anyhow::Result<()> {
+    lsp::run_lsp_command(args, remote)
 }
 
 use rustdoc_json::LockfilePackages;
