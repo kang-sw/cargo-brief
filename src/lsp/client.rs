@@ -1,8 +1,9 @@
 //! Client-side logic: ensure daemon is running, connect, send commands.
 
+use std::fs::File;
 use std::os::unix::net::UnixStream;
 use std::path::{Path, PathBuf};
-use std::process::{Command, Stdio};
+use std::process::{Child, Command, Stdio};
 use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result, bail};
@@ -50,13 +51,15 @@ pub fn ensure_daemon(workspace_root: &Path, verbose: bool) -> Result<UnixStream>
     std::fs::create_dir_all(&dir)
         .with_context(|| format!("Failed to create daemon dir: {}", dir.display()))?;
 
+    let log_path = dir.join("lsp.log");
+
     if verbose {
         eprintln!("[lsp] spawning daemon for {}", workspace_root.display());
     }
-    spawn_daemon(workspace_root, &sock, &pid_file)?;
+    let mut child = spawn_daemon(workspace_root, &sock, &pid_file, &log_path)?;
 
     // Wait for socket to become available (poll with backoff)
-    wait_for_socket(&sock, Duration::from_secs(120))
+    wait_for_socket(&sock, Duration::from_secs(120), &mut child, &log_path)
 }
 
 /// Send a request to the daemon and return the response.
@@ -80,8 +83,9 @@ fn try_connect(sock: &Path) -> Option<UnixStream> {
     }
 }
 
-/// Spawn the daemon via re-exec.
-fn spawn_daemon(workspace_root: &Path, sock: &Path, pid: &Path) -> Result<()> {
+/// Spawn the daemon via re-exec. Returns the Child handle (caller must hold it
+/// to avoid zombie processes — `try_wait()` is used for death detection).
+fn spawn_daemon(workspace_root: &Path, sock: &Path, pid: &Path, log_path: &Path) -> Result<Child> {
     use std::os::unix::process::CommandExt;
 
     let exe = std::env::current_exe().context("Failed to get current executable path")?;
@@ -92,7 +96,10 @@ fn spawn_daemon(workspace_root: &Path, sock: &Path, pid: &Path) -> Result<()> {
     let sock_str = sock.to_str().context("Non-UTF8 socket path")?;
     let pid_str = pid.to_str().context("Non-UTF8 pid file path")?;
 
-    Command::new(exe)
+    let log_file = File::create(log_path)
+        .with_context(|| format!("Failed to create daemon log: {}", log_path.display()))?;
+
+    let child = Command::new(exe)
         .args([
             "__lsp-daemon",
             "--workspace-root",
@@ -104,34 +111,74 @@ fn spawn_daemon(workspace_root: &Path, sock: &Path, pid: &Path) -> Result<()> {
         ])
         .stdin(Stdio::null())
         .stdout(Stdio::null())
-        .stderr(Stdio::null())
+        .stderr(Stdio::from(log_file))
         .process_group(0)
         .spawn()
         .context("Failed to spawn LSP daemon process")?;
 
-    Ok(())
+    Ok(child)
 }
 
 /// Wait for the socket file to appear and be connectable.
-fn wait_for_socket(sock: &Path, timeout: Duration) -> Result<UnixStream> {
+/// Uses `child.try_wait()` each iteration for fast failure detection (also reaps
+/// zombies — `kill(pid, 0)` alone cannot detect exited children of this process).
+fn wait_for_socket(
+    sock: &Path,
+    timeout: Duration,
+    child: &mut Child,
+    log_path: &Path,
+) -> Result<UnixStream> {
     let start = Instant::now();
     let mut interval = Duration::from_millis(50);
+    let pid = child.id();
 
     while start.elapsed() < timeout {
         if let Some(stream) = try_connect(sock) {
             return Ok(stream);
         }
+
+        // Check if daemon died before we could connect (try_wait reaps zombies)
+        if let Ok(Some(_status)) = child.try_wait() {
+            let tail = read_log_tail(log_path, 20);
+            let log_section = if tail.is_empty() {
+                "(no log output)".to_string()
+            } else {
+                tail
+            };
+            bail!(
+                "LSP daemon (PID {pid}) died during startup.\n\
+                 Daemon log:\n{log_section}"
+            );
+        }
+
         std::thread::sleep(interval);
         // Exponential backoff up to 500ms
         interval = (interval * 2).min(Duration::from_millis(500));
     }
 
+    let tail = read_log_tail(log_path, 20);
+    let log_section = if tail.is_empty() {
+        "(no log output)".to_string()
+    } else {
+        tail
+    };
     bail!(
         "Timed out waiting for LSP daemon socket after {}s.\n\
-         Socket path: {}",
+         Socket path: {}\n\
+         Daemon log:\n{log_section}",
         timeout.as_secs(),
         sock.display()
     )
+}
+
+/// Read the last `max_lines` lines from a file. Returns empty string on any error.
+fn read_log_tail(path: &Path, max_lines: usize) -> String {
+    let Ok(content) = std::fs::read_to_string(path) else {
+        return String::new();
+    };
+    let lines: Vec<&str> = content.lines().collect();
+    let start = lines.len().saturating_sub(max_lines);
+    lines[start..].join("\n")
 }
 
 /// Check if a process is alive via kill(pid, 0).
@@ -184,5 +231,44 @@ mod tests {
         let h = short_hash(Path::new("/some/path"));
         assert_eq!(h.len(), 16);
         assert!(h.chars().all(|c| c.is_ascii_hexdigit()));
+    }
+
+    #[test]
+    fn log_tail_more_than_max() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("test.log");
+        let content: String = (1..=30).map(|i| format!("line {i}\n")).collect();
+        std::fs::write(&path, &content).unwrap();
+        let tail = read_log_tail(&path, 20);
+        let lines: Vec<&str> = tail.lines().collect();
+        assert_eq!(lines.len(), 20);
+        assert_eq!(lines[0], "line 11");
+        assert_eq!(lines[19], "line 30");
+    }
+
+    #[test]
+    fn log_tail_fewer_than_max() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("test.log");
+        std::fs::write(&path, "line 1\nline 2\nline 3\n").unwrap();
+        let tail = read_log_tail(&path, 20);
+        let lines: Vec<&str> = tail.lines().collect();
+        assert_eq!(lines.len(), 3);
+        assert_eq!(lines[0], "line 1");
+    }
+
+    #[test]
+    fn log_tail_nonexistent_file() {
+        let tail = read_log_tail(Path::new("/nonexistent/file.log"), 20);
+        assert!(tail.is_empty());
+    }
+
+    #[test]
+    fn log_tail_empty_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("empty.log");
+        std::fs::write(&path, "").unwrap();
+        let tail = read_log_tail(&path, 20);
+        assert!(tail.is_empty());
     }
 }

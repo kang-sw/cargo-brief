@@ -90,6 +90,7 @@ fn cmd_stop(workspace_root: &std::path::Path, verbose: bool) -> Result<()> {
     let pid_file = dir.join("lsp.pid");
     std::fs::remove_file(&sock).ok();
     std::fs::remove_file(&pid_file).ok();
+    std::fs::remove_file(dir.join("lsp.log")).ok();
     std::fs::remove_dir(&dir).ok();
 
     Ok(())
