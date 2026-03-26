@@ -42,7 +42,14 @@ pub fn run_lsp_command(args: &LspArgs, remote: &RemoteOpts) -> Result<()> {
 
 /// Ensure daemon is running (start if needed).
 fn cmd_touch(workspace_root: &std::path::Path, verbose: bool) -> Result<()> {
-    let mut stream = ensure_daemon(workspace_root, verbose)?;
+    // ensure_daemon's stream was consumed by the ping handshake — open a fresh one.
+    ensure_daemon(workspace_root, verbose)?;
+
+    let dir = daemon_dir(workspace_root);
+    let sock = dir.join("lsp.sock");
+    let mut stream = std::os::unix::net::UnixStream::connect(&sock)
+        .context("Failed to connect to LSP daemon")?;
+    stream.set_read_timeout(Some(std::time::Duration::from_secs(5)))?;
 
     // Query status to report to user
     let resp = send_command(&mut stream, DaemonRequest::Status)?;
