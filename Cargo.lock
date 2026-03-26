@@ -101,6 +101,7 @@ dependencies = [
  "anyhow",
  "bincode",
  "clap",
+ "libc",
  "rustdoc-types",
  "semver",
  "serde",

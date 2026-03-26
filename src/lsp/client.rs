@@ -9,9 +9,13 @@ use anyhow::{Context, Result, bail};
 
 use super::protocol::{DaemonRequest, DaemonResponse, read_message, write_message};
 
-/// Socket/PID directory for a workspace.
+/// Socket/PID directory for a workspace. Canonicalizes the root to avoid
+/// duplicate daemons from symlinks or `..` path components.
 pub fn daemon_dir(workspace_root: &Path) -> PathBuf {
-    let hash = short_hash(workspace_root);
+    let canonical = workspace_root
+        .canonicalize()
+        .unwrap_or_else(|_| workspace_root.to_path_buf());
+    let hash = short_hash(&canonical);
     runtime_dir().join("cargo-brief").join(hash)
 }
 
@@ -100,7 +104,7 @@ fn spawn_daemon(workspace_root: &Path, sock: &Path, pid: &Path) -> Result<()> {
         ])
         .stdin(Stdio::null())
         .stdout(Stdio::null())
-        .stderr(Stdio::inherit())
+        .stderr(Stdio::null())
         .process_group(0)
         .spawn()
         .context("Failed to spawn LSP daemon process")?;
@@ -132,8 +136,11 @@ fn wait_for_socket(sock: &Path, timeout: Duration) -> Result<UnixStream> {
 
 /// Check if a process is alive via kill(pid, 0).
 fn process_alive(pid: u32) -> bool {
+    let Ok(pid) = libc::pid_t::try_from(pid) else {
+        return false;
+    };
     // SAFETY: kill(pid, 0) with signal 0 only checks process existence.
-    unsafe { libc::kill(pid as i32, 0) == 0 }
+    unsafe { libc::kill(pid, 0) == 0 }
 }
 
 /// Get the runtime directory for daemon sockets.

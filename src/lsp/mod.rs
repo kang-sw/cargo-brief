@@ -4,7 +4,7 @@
 //! The daemon spawns rust-analyzer as a background process, communicates
 //! via LSP over stdio, and accepts client queries via Unix domain socket.
 
-pub mod client;
+pub(crate) mod client;
 pub mod daemon;
 mod protocol;
 mod transport;

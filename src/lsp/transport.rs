@@ -59,6 +59,7 @@ impl RaTransport {
     }
 
     /// Send a request and wait for the matching response, skipping notifications.
+    /// Gives up after reading 10,000 messages without a matching response.
     pub fn send_request_and_wait(
         &mut self,
         method: &str,
@@ -66,7 +67,7 @@ impl RaTransport {
     ) -> Result<serde_json::Value> {
         let id = self.send_request(method, params)?;
 
-        loop {
+        for _ in 0..10_000 {
             let msg = self.read_message()?;
 
             // Notifications have no "id" field — skip them
@@ -85,10 +86,9 @@ impl RaTransport {
                 }
                 return Ok(msg);
             }
-
-            // Response for a different ID — shouldn't happen with serial requests,
-            // but skip gracefully
         }
+
+        bail!("Timed out waiting for LSP response to {method} (id={id})")
     }
 
     fn write_lsp_message(&mut self, msg: &serde_json::Value) -> Result<()> {

@@ -25,17 +25,18 @@ pub fn run_daemon_from_args() -> Result<()> {
     let mut i = 2; // skip binary name and "__lsp-daemon"
     while i < args.len() {
         match args[i].as_str() {
-            "--workspace-root" => {
+            "--workspace-root" | "--socket" | "--pid-file" => {
+                let flag = &args[i];
                 i += 1;
-                workspace_root = Some(PathBuf::from(&args[i]));
-            }
-            "--socket" => {
-                i += 1;
-                socket = Some(PathBuf::from(&args[i]));
-            }
-            "--pid-file" => {
-                i += 1;
-                pid_file = Some(PathBuf::from(&args[i]));
+                let value = args
+                    .get(i)
+                    .with_context(|| format!("Missing value for {flag}"))?;
+                match flag.as_str() {
+                    "--workspace-root" => workspace_root = Some(PathBuf::from(value)),
+                    "--socket" => socket = Some(PathBuf::from(value)),
+                    "--pid-file" => pid_file = Some(PathBuf::from(value)),
+                    _ => unreachable!(),
+                }
             }
             other => bail!("Unknown daemon argument: {other}"),
         }
@@ -82,10 +83,13 @@ fn discover_ra_binary() -> Result<PathBuf> {
 
 /// Send LSP `initialize` request and `initialized` notification.
 fn send_initialize(transport: &mut RaTransport, workspace_root: &Path) -> Result<()> {
-    let root_uri = format!(
-        "file://{}",
-        workspace_root.to_str().context("Non-UTF8 workspace root")?
-    );
+    let path_str = workspace_root.to_str().context("Non-UTF8 workspace root")?;
+    // file:// URIs require three slashes for absolute paths: file:///path
+    let root_uri = if path_str.starts_with('/') {
+        format!("file://{path_str}")
+    } else {
+        format!("file:///{path_str}")
+    };
 
     let params = serde_json::json!({
         "processId": std::process::id(),
@@ -141,23 +145,19 @@ fn handle_client(
 }
 
 /// Shutdown rust-analyzer gracefully via LSP shutdown/exit.
+/// Bounded read loop: reads at most 10 messages waiting for shutdown response.
+/// If ra is already dead, read_message() returns Err immediately (broken pipe).
 fn shutdown_ra(transport: &mut RaTransport) {
-    // Send shutdown request (response expected)
     if let Ok(id) = transport.send_request("shutdown", serde_json::Value::Null) {
-        // Try to read the response, but don't block forever
-        // Read messages until we get our response or timeout
-        for _ in 0..100 {
-            if let Ok(msg) = transport.read_message() {
-                if msg["id"].as_i64() == Some(id as i64) {
-                    break;
-                }
-            } else {
-                break;
+        for _ in 0..10 {
+            match transport.read_message() {
+                Ok(msg) if msg["id"].as_i64() == Some(id as i64) => break,
+                Ok(_) => continue,
+                Err(_) => break,
             }
         }
     }
 
-    // Send exit notification
     let _ = transport.send_notification("exit", serde_json::Value::Null);
 }
 
@@ -170,11 +170,14 @@ pub fn run_daemon(workspace_root: &Path, socket_path: &Path, pid_path: &Path) ->
         std::fs::remove_file(socket_path).ok();
     }
 
-    // 1. Discover ra binary
+    // 1. Write PID file early to prevent double-spawn race
+    std::fs::write(pid_path, std::process::id().to_string()).context("Failed to write PID file")?;
+
+    // 2. Discover ra binary
     let ra_bin = discover_ra_binary()?;
     eprintln!("[lsp-daemon] using rust-analyzer: {}", ra_bin.display());
 
-    // 2. Spawn ra subprocess
+    // 3. Spawn ra subprocess
     let mut ra_child = Command::new(&ra_bin)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
@@ -187,11 +190,10 @@ pub fn run_daemon(workspace_root: &Path, socket_path: &Path, pid_path: &Path) ->
     let ra_stdout = ra_child.stdout.take().context("No stdout on ra process")?;
 
     // Drain ra stderr in a background thread to prevent pipe blocking
-    let ra_stderr = ra_child.stderr.take();
-    if let Some(stderr) = ra_stderr {
+    if let Some(stderr) = ra_child.stderr.take() {
         std::thread::spawn(move || {
             let reader = std::io::BufReader::new(stderr);
-            for line in reader.lines().flatten() {
+            for line in reader.lines().map_while(Result::ok) {
                 eprintln!("[ra-stderr] {line}");
             }
         });
@@ -199,7 +201,7 @@ pub fn run_daemon(workspace_root: &Path, socket_path: &Path, pid_path: &Path) ->
 
     let mut transport = RaTransport::new(ra_stdin, ra_stdout);
 
-    // 3. LSP initialize
+    // 4. LSP initialize
     let mut ra_status = RaStatus::Initializing;
     eprintln!("[lsp-daemon] sending LSP initialize...");
     match send_initialize(&mut transport, workspace_root) {
@@ -212,9 +214,6 @@ pub fn run_daemon(workspace_root: &Path, socket_path: &Path, pid_path: &Path) ->
             // Continue running — ra might still become ready
         }
     }
-
-    // 4. Write PID file
-    std::fs::write(pid_path, std::process::id().to_string()).context("Failed to write PID file")?;
 
     // 5. Bind UDS listener
     let listener = UnixListener::bind(socket_path).context("Failed to bind UDS listener socket")?;
