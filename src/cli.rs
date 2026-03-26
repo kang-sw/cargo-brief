@@ -721,6 +721,28 @@ pub enum LspCommand {
         #[arg(long, short)]
         quiet: bool,
     },
+    /// Show direct and transitive callers of a symbol (blast radius)
+    BlastRadius {
+        /// Symbol to analyze (e.g., "resolve_symbol", "Foo::bar")
+        symbol: String,
+        /// Depth of transitive caller search (1 = direct only, max 10)
+        #[arg(long, default_value = "1")]
+        depth: u32,
+        /// Location-only output format
+        #[arg(long, short)]
+        quiet: bool,
+    },
+    /// Show incoming or outgoing call hierarchy for a symbol
+    CallHierarchy {
+        /// Symbol to analyze (e.g., "resolve_symbol", "Foo::bar")
+        symbol: String,
+        /// Show outgoing calls instead of incoming
+        #[arg(long)]
+        outgoing: bool,
+        /// Location-only output format
+        #[arg(long, short)]
+        quiet: bool,
+    },
 }
 
 impl ExamplesArgs {

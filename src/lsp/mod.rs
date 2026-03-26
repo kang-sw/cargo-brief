@@ -37,6 +37,28 @@ pub fn run_lsp_command(args: &LspArgs, remote: &RemoteOpts) -> Result<()> {
             *quiet,
             args.global.verbose,
         ),
+        LspCommand::BlastRadius {
+            symbol,
+            depth,
+            quiet,
+        } => cmd_blast_radius(
+            &metadata.workspace_root,
+            symbol.clone(),
+            *depth,
+            *quiet,
+            args.global.verbose,
+        ),
+        LspCommand::CallHierarchy {
+            symbol,
+            outgoing,
+            quiet,
+        } => cmd_call_hierarchy(
+            &metadata.workspace_root,
+            symbol.clone(),
+            *outgoing,
+            *quiet,
+            args.global.verbose,
+        ),
     }
 }
 
@@ -119,6 +141,74 @@ fn cmd_references(
     stream.set_read_timeout(Some(std::time::Duration::from_secs(30)))?;
 
     let resp = send_command(&mut stream, DaemonRequest::References { symbol, quiet })?;
+    match resp {
+        DaemonResponse::QueryResult { output } => {
+            print!("{output}");
+            Ok(())
+        }
+        DaemonResponse::Error { message } => anyhow::bail!("{message}"),
+        _ => anyhow::bail!("Unexpected response from daemon"),
+    }
+}
+
+/// Show direct and transitive callers of a symbol.
+fn cmd_blast_radius(
+    workspace_root: &std::path::Path,
+    symbol: String,
+    depth: u32,
+    quiet: bool,
+    verbose: bool,
+) -> Result<()> {
+    ensure_daemon(workspace_root, verbose)?;
+
+    let dir = daemon_dir(workspace_root);
+    let sock = dir.join("lsp.sock");
+    let mut stream = std::os::unix::net::UnixStream::connect(&sock)
+        .context("Failed to connect to LSP daemon")?;
+    stream.set_read_timeout(Some(std::time::Duration::from_secs(30)))?;
+
+    let resp = send_command(
+        &mut stream,
+        DaemonRequest::BlastRadius {
+            symbol,
+            depth,
+            quiet,
+        },
+    )?;
+    match resp {
+        DaemonResponse::QueryResult { output } => {
+            print!("{output}");
+            Ok(())
+        }
+        DaemonResponse::Error { message } => anyhow::bail!("{message}"),
+        _ => anyhow::bail!("Unexpected response from daemon"),
+    }
+}
+
+/// Show incoming or outgoing call hierarchy for a symbol.
+fn cmd_call_hierarchy(
+    workspace_root: &std::path::Path,
+    symbol: String,
+    outgoing: bool,
+    quiet: bool,
+    verbose: bool,
+) -> Result<()> {
+    ensure_daemon(workspace_root, verbose)?;
+
+    let dir = daemon_dir(workspace_root);
+    let sock = dir.join("lsp.sock");
+    let mut stream = std::os::unix::net::UnixStream::connect(&sock)
+        .context("Failed to connect to LSP daemon")?;
+    stream.set_read_timeout(Some(std::time::Duration::from_secs(30)))?;
+
+    let resp = send_command(
+        &mut stream,
+        DaemonRequest::CallHierarchy {
+            symbol,
+            outgoing,
+            quiet,
+        },
+    )?;
     match resp {
         DaemonResponse::QueryResult { output } => {
             print!("{output}");

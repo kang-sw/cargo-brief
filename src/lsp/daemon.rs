@@ -150,6 +150,29 @@ fn handle_client(
                 },
             }
         }
+        DaemonRequest::BlastRadius {
+            symbol,
+            depth,
+            quiet,
+        } => match query::handle_blast_radius(transport, workspace_root, &symbol, depth, quiet) {
+            Ok(output) => DaemonResponse::QueryResult { output },
+            Err(e) => DaemonResponse::Error {
+                message: format!("{e}"),
+            },
+        },
+        DaemonRequest::CallHierarchy {
+            symbol,
+            outgoing,
+            quiet,
+        } => {
+            match query::handle_call_hierarchy(transport, workspace_root, &symbol, outgoing, quiet)
+            {
+                Ok(output) => DaemonResponse::QueryResult { output },
+                Err(e) => DaemonResponse::Error {
+                    message: format!("{e}"),
+                },
+            }
+        }
     };
 
     write_message(&mut stream, &response)?;
