@@ -1,6 +1,7 @@
 ---
 title: "LSP daemon: query commands (references, blast-radius, call-hierarchy)"
 started: 2026-03-26
+completed: 2026-03-26
 related:
   - 260326-feat-lsp-daemon             # parent
   - 260326-feat-lsp-daemon-bootstrap   # prerequisite
