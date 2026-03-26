@@ -86,3 +86,24 @@ src/lsp/
 ## Estimated scope
 
 ~1000-1200 lines
+
+### Result (b185ced) - 26-03-26
+
+Implemented all deliverables: `cargo brief lsp {touch,stop,status}`, daemon process with
+UDS communication, ra spawn + LSP initialize, idle timeout, stale PID cleanup.
+
+**Deviations from plan:**
+- Used FNV-1a hash (not SHA-256) for workspace path hashing — simpler, no crypto dep
+- `lsp-types` dependency NOT added (unused in Phase 1) — deferred to query ticket
+- No SIGTERM handler — stale PID/socket cleanup on next launch is sufficient
+- `process_group(0)` for daemon detach instead of double-fork
+- Daemon stderr goes to `/dev/null` (not log file) to survive client terminal close
+- `#[cfg(unix)]` gate on entire lsp module (plan didn't mention cross-platform)
+- PID file written before ra initialization (code review fix: prevents double-spawn race)
+- `libc` dep added for `kill(pid, 0)` stale PID detection
+
+**Key findings for future phases:**
+- `lsp-types` should be added when query commands are implemented (next ticket)
+- `RaTransport.send_request_and_wait()` has a 10k message iteration limit
+- Daemon stderr is silenced — consider adding log file support if debugging is needed
+- `CARGO_BRIEF_LSP_TIMEOUT` env var overrides idle timeout for testing
