@@ -105,26 +105,9 @@ pub enum LspCommand {
     Touch,
     Stop,
     Status,
-    /// Find all references to a symbol
-    References {
-        symbol: String,
-        #[arg(long, short)]
-        quiet: bool,
-    },
-    /// Show edit impact of changing a symbol
-    BlastRadius {
-        symbol: String,
-        /// Transitive depth (default: 1)
-        #[arg(long, default_value = "1")]
-        depth: u32,
-    },
-    /// Show call hierarchy for a symbol
-    CallHierarchy {
-        symbol: String,
-        /// Show outgoing calls instead of incoming
-        #[arg(long)]
-        outgoing: bool,
-    },
+    References { symbol: String, quiet: bool },
+    BlastRadius { symbol: String, depth: u32, quiet: bool },
+    CallHierarchy { symbol: String, outgoing: bool, quiet: bool },
 }
 ```
 
@@ -154,3 +137,31 @@ pub enum LspCommand {
 - `resolve_symbol` is reusable as-is for Phase 2 commands.
 - Container name filtering uses substring match (`contains`) — may need
   tightening if false positives appear in practice.
+
+### Result (fd6aff7) - 26-03-26
+
+**Phase 2 complete.** `blast-radius` and `call-hierarchy` commands implemented.
+
+- `query.rs` (+210 lines): `prepare_call_hierarchy()`, `incoming_calls()`,
+  `outgoing_calls()` LSP wrappers using `serde_json::Value`. `handle_call_hierarchy()`
+  orchestrator with incoming/outgoing toggle. `handle_blast_radius()` with BFS
+  incoming calls, depth-controlled (1..=10), dedup via `HashSet<(uri, line)>`.
+  `format_call_hierarchy()` (arrow-based, column-aligned) and `format_blast_radius()`
+  (depth-sectioned with via annotations). Both have quiet mode formatters.
+- `protocol.rs`: `DaemonRequest::BlastRadius { symbol, depth, quiet }`,
+  `DaemonRequest::CallHierarchy { symbol, outgoing, quiet }`.
+- `daemon.rs`: match arms following References pattern.
+- `mod.rs`: `cmd_blast_radius()`, `cmd_call_hierarchy()`, dispatch arms.
+- `cli.rs`: `LspCommand::BlastRadius`, `LspCommand::CallHierarchy` (both with `-q`).
+- 10 new tests (8 formatting + 2 protocol roundtrip). All 121 unit tests pass.
+
+**Deviations from ticket spec:**
+- `-q` flag added to both commands (ticket didn't specify, plan added it for
+  consistency with `references`).
+- `blast-radius` uses only `callHierarchy/incomingCalls` (not `textDocument/references`
+  as the ticket originally suggested) — the call hierarchy protocol gives
+  function-level granularity directly.
+- Output format uses `// comment` style throughout (matching cargo-brief conventions),
+  not the indented tree style the ticket sketched.
+
+**All phases complete.** Ticket can be moved to `done/`.
