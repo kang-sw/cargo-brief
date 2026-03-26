@@ -7,7 +7,7 @@
 ## Project Summary
 
 **cargo-brief** — A visibility-aware Rust API extractor that outputs pseudo-Rust documentation
-for AI agent consumption. Cargo subcommand (`cargo brief`). Solo dev.
+for AI agent consumption. Cargo subcommand (`cargo brief`).
 Target: **Stable external-crate support and same_crate auto-detection (v0.2).**
 
 ## Tech Stack
