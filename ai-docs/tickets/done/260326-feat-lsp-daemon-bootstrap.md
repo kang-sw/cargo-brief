@@ -1,5 +1,6 @@
 ---
 title: "LSP daemon: process lifecycle, UDS, ra bootstrap"
+completed: 2026-03-26
 ---
 
 # LSP daemon: process lifecycle, UDS, ra bootstrap
