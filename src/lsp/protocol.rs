@@ -13,6 +13,7 @@ pub enum DaemonRequest {
     Ping,
     Stop,
     Status,
+    References { symbol: String, quiet: bool },
 }
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -27,6 +28,9 @@ pub enum DaemonResponse {
     },
     Error {
         message: String,
+    },
+    QueryResult {
+        output: String,
     },
 }
 
