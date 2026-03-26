@@ -1,6 +1,5 @@
 ---
 title: "Canonical path dedup for named re-export expansion"
-status: idea
 ---
 
 ## Problem

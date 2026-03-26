@@ -1,20 +1,17 @@
 ---
 title: "LSP daemon: file watcher integration"
+related:
+  - 260326-feat-lsp-daemon             # parent
+  - 260326-feat-lsp-daemon-bootstrap   # prerequisite
 ---
 
 # LSP daemon: file watcher integration
-
-**Parent:** `260326-feat-lsp-daemon`
 
 ## Goal
 
 Add filesystem watching to the LSP daemon so that rust-analyzer's VFS stays
 current without manual refresh. File changes made by the AI agent (or user)
 between queries are automatically reflected in subsequent analysis results.
-
-## Dependencies
-
-- `260326-feat-lsp-daemon-bootstrap` (daemon must exist)
 
 ## Design
 

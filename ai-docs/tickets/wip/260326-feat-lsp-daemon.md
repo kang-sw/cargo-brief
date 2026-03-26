@@ -1,5 +1,9 @@
 ---
 title: "LSP daemon integration via rust-analyzer"
+related:
+  - 260326-feat-lsp-daemon-bootstrap  # sub-ticket: daemon bootstrap (done)
+  - 260326-feat-lsp-file-watcher      # sub-ticket: file watcher
+  - 260326-feat-lsp-query-commands    # sub-ticket: query commands
 started: 2026-03-26
 ---
 
