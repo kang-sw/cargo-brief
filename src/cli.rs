@@ -364,6 +364,19 @@ EXAMPLES:
   # Clear caches for a specific crate
   cargo brief clean serde")]
     Clean(CleanArgs),
+
+    /// Manage LSP daemon (persistent rust-analyzer)
+    #[command(after_help = "\
+EXAMPLES:
+  # Start or pre-warm the LSP daemon
+  cargo brief lsp touch
+
+  # Check daemon status
+  cargo brief lsp status
+
+  # Stop the daemon
+  cargo brief lsp stop")]
+    Lsp(LspArgs),
 }
 
 // === Shared Args Groups ===
@@ -676,6 +689,30 @@ pub struct CleanArgs {
     /// Crate spec to clean (omit to clean all)
     #[arg(value_name = "SPEC")]
     pub spec: Option<String>,
+}
+
+/// Arguments for the `lsp` subcommand.
+#[derive(Args, Debug, Clone)]
+pub struct LspArgs {
+    #[command(subcommand)]
+    pub command: LspCommand,
+
+    #[command(flatten)]
+    pub global: GlobalArgs,
+
+    /// Path to Cargo.toml
+    #[arg(long, help_heading = "Local Workspace")]
+    pub manifest_path: Option<String>,
+}
+
+#[derive(Subcommand, Debug, Clone)]
+pub enum LspCommand {
+    /// Ensure LSP daemon is running (pre-warm rust-analyzer)
+    Touch,
+    /// Stop the LSP daemon
+    Stop,
+    /// Show LSP daemon status
+    Status,
 }
 
 impl ExamplesArgs {

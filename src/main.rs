@@ -4,6 +4,12 @@ use clap::Parser;
 use cargo_brief::cli::{BriefCommand, BriefDirect, Cargo, CargoCommand};
 
 fn main() -> Result<()> {
+    // Hidden daemon entry point (not a clap subcommand).
+    // Check only args[1] to avoid false positives from workspace paths.
+    if std::env::args().nth(1).as_deref() == Some("__lsp-daemon") {
+        return cargo_brief::lsp::daemon::run_daemon_from_args();
+    }
+
     let direct = parse_command();
     let remote = direct.remote_opts();
 
@@ -34,6 +40,9 @@ fn main() -> Result<()> {
         }
         BriefCommand::Clean(args) => {
             cargo_brief::clean_cache(args.spec.as_deref().unwrap_or(""))?;
+        }
+        BriefCommand::Lsp(args) => {
+            cargo_brief::run_lsp_command(args, &remote)?;
         }
     }
     Ok(())
