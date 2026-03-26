@@ -432,10 +432,10 @@ pub fn handle_blast_radius(
     Ok(format_blast_radius(&levels, symbol, quiet))
 }
 
-pub struct CallerEntry {
-    pub name: String,
-    pub location: String,
-    pub via: Option<String>,
+pub(crate) struct CallerEntry {
+    pub(crate) name: String,
+    pub(crate) location: String,
+    pub(crate) via: Option<String>,
 }
 
 /// Format blast radius results.
