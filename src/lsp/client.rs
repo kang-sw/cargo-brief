@@ -3,7 +3,7 @@
 use std::fs::File;
 use std::os::unix::net::UnixStream;
 use std::path::{Path, PathBuf};
-use std::process::{Command, Stdio};
+use std::process::{Child, Command, Stdio};
 use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result, bail};
@@ -56,10 +56,10 @@ pub fn ensure_daemon(workspace_root: &Path, verbose: bool) -> Result<UnixStream>
     if verbose {
         eprintln!("[lsp] spawning daemon for {}", workspace_root.display());
     }
-    let child_pid = spawn_daemon(workspace_root, &sock, &pid_file, &log_path)?;
+    let mut child = spawn_daemon(workspace_root, &sock, &pid_file, &log_path)?;
 
     // Wait for socket to become available (poll with backoff)
-    wait_for_socket(&sock, Duration::from_secs(120), child_pid, &log_path)
+    wait_for_socket(&sock, Duration::from_secs(120), &mut child, &log_path)
 }
 
 /// Send a request to the daemon and return the response.
@@ -83,8 +83,9 @@ fn try_connect(sock: &Path) -> Option<UnixStream> {
     }
 }
 
-/// Spawn the daemon via re-exec. Returns the child PID.
-fn spawn_daemon(workspace_root: &Path, sock: &Path, pid: &Path, log_path: &Path) -> Result<u32> {
+/// Spawn the daemon via re-exec. Returns the Child handle (caller must hold it
+/// to avoid zombie processes — `try_wait()` is used for death detection).
+fn spawn_daemon(workspace_root: &Path, sock: &Path, pid: &Path, log_path: &Path) -> Result<Child> {
     use std::os::unix::process::CommandExt;
 
     let exe = std::env::current_exe().context("Failed to get current executable path")?;
@@ -115,27 +116,29 @@ fn spawn_daemon(workspace_root: &Path, sock: &Path, pid: &Path, log_path: &Path)
         .spawn()
         .context("Failed to spawn LSP daemon process")?;
 
-    Ok(child.id())
+    Ok(child)
 }
 
 /// Wait for the socket file to appear and be connectable.
-/// Checks daemon PID liveness each iteration for fast failure detection.
+/// Uses `child.try_wait()` each iteration for fast failure detection (also reaps
+/// zombies — `kill(pid, 0)` alone cannot detect exited children of this process).
 fn wait_for_socket(
     sock: &Path,
     timeout: Duration,
-    pid: u32,
+    child: &mut Child,
     log_path: &Path,
 ) -> Result<UnixStream> {
     let start = Instant::now();
     let mut interval = Duration::from_millis(50);
+    let pid = child.id();
 
     while start.elapsed() < timeout {
         if let Some(stream) = try_connect(sock) {
             return Ok(stream);
         }
 
-        // Check if daemon died before we could connect
-        if !process_alive(pid) {
+        // Check if daemon died before we could connect (try_wait reaps zombies)
+        if let Ok(Some(_status)) = child.try_wait() {
             let tail = read_log_tail(log_path, 20);
             let log_section = if tail.is_empty() {
                 "(no log output)".to_string()
