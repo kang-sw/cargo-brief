@@ -12,6 +12,8 @@ mod query;
 mod transport;
 mod watcher;
 
+use std::path::Path;
+
 use anyhow::{Context, Result};
 
 use crate::cli::{LspArgs, LspCommand, RemoteOpts};
@@ -28,53 +30,64 @@ pub fn run_lsp_command(args: &LspArgs, remote: &RemoteOpts) -> Result<()> {
     let metadata = resolve::load_cargo_metadata(args.manifest_path.as_deref())
         .context("Failed to load cargo metadata")?;
 
+    let td = &metadata.target_dir;
+    let wr = &metadata.workspace_root;
+    let verbose = args.global.verbose;
+
     match &args.command {
-        LspCommand::Touch => cmd_touch(&metadata.workspace_root, args.global.verbose),
-        LspCommand::Stop => cmd_stop(&metadata.workspace_root, args.global.verbose),
-        LspCommand::Status => cmd_status(&metadata.workspace_root),
-        LspCommand::References { symbol, quiet } => cmd_references(
-            &metadata.workspace_root,
-            symbol.clone(),
-            *quiet,
-            args.global.verbose,
+        LspCommand::Touch => cmd_touch(td, wr, verbose),
+        LspCommand::Stop => cmd_stop(td, wr, verbose),
+        LspCommand::Status => cmd_status(td, wr),
+        LspCommand::References { symbol, quiet } => cmd_query(
+            td,
+            wr,
+            verbose,
+            DaemonRequest::References {
+                symbol: symbol.clone(),
+                quiet: *quiet,
+            },
         ),
         LspCommand::BlastRadius {
             symbol,
             depth,
             quiet,
-        } => cmd_blast_radius(
-            &metadata.workspace_root,
-            symbol.clone(),
-            *depth,
-            *quiet,
-            args.global.verbose,
+        } => cmd_query(
+            td,
+            wr,
+            verbose,
+            DaemonRequest::BlastRadius {
+                symbol: symbol.clone(),
+                depth: *depth,
+                quiet: *quiet,
+            },
         ),
         LspCommand::CallHierarchy {
             symbol,
             outgoing,
             quiet,
-        } => cmd_call_hierarchy(
-            &metadata.workspace_root,
-            symbol.clone(),
-            *outgoing,
-            *quiet,
-            args.global.verbose,
+        } => cmd_query(
+            td,
+            wr,
+            verbose,
+            DaemonRequest::CallHierarchy {
+                symbol: symbol.clone(),
+                outgoing: *outgoing,
+                quiet: *quiet,
+            },
         ),
     }
 }
 
 /// Ensure daemon is running (start if needed).
-fn cmd_touch(workspace_root: &std::path::Path, verbose: bool) -> Result<()> {
-    // ensure_daemon's stream was consumed by the ping handshake — open a fresh one.
-    ensure_daemon(workspace_root, verbose)?;
+fn cmd_touch(target_dir: &Path, workspace_root: &Path, verbose: bool) -> Result<()> {
+    ensure_daemon(target_dir, workspace_root, verbose)?;
 
-    let dir = daemon_dir(workspace_root);
+    let dir = daemon_dir(target_dir, workspace_root);
     let sock = dir.join("lsp.sock");
     let mut stream = std::os::unix::net::UnixStream::connect(&sock)
         .context("Failed to connect to LSP daemon")?;
     stream.set_read_timeout(Some(std::time::Duration::from_secs(5)))?;
 
-    // Query status to report to user
     let resp = send_command(&mut stream, DaemonRequest::Status)?;
     match resp {
         DaemonResponse::Status {
@@ -96,11 +109,10 @@ fn cmd_touch(workspace_root: &std::path::Path, verbose: bool) -> Result<()> {
 }
 
 /// Stop the daemon.
-fn cmd_stop(workspace_root: &std::path::Path, verbose: bool) -> Result<()> {
-    let dir = daemon_dir(workspace_root);
+fn cmd_stop(target_dir: &Path, workspace_root: &Path, verbose: bool) -> Result<()> {
+    let dir = daemon_dir(target_dir, workspace_root);
     let sock = dir.join("lsp.sock");
 
-    // Try to connect and send stop command
     if let Ok(mut stream) = std::os::unix::net::UnixStream::connect(&sock) {
         stream
             .set_read_timeout(Some(std::time::Duration::from_secs(5)))
@@ -116,7 +128,6 @@ fn cmd_stop(workspace_root: &std::path::Path, verbose: bool) -> Result<()> {
         eprintln!("[lsp] no daemon running");
     }
 
-    // Clean up socket/pid files in case daemon didn't clean up
     let pid_file = dir.join("lsp.pid");
     std::fs::remove_file(&sock).ok();
     std::fs::remove_file(&pid_file).ok();
@@ -126,90 +137,22 @@ fn cmd_stop(workspace_root: &std::path::Path, verbose: bool) -> Result<()> {
     Ok(())
 }
 
-/// Find all references to a symbol via the daemon's rust-analyzer instance.
-fn cmd_references(
-    workspace_root: &std::path::Path,
-    symbol: String,
-    quiet: bool,
+/// Send a query request to the daemon and print the result.
+fn cmd_query(
+    target_dir: &Path,
+    workspace_root: &Path,
     verbose: bool,
+    request: DaemonRequest,
 ) -> Result<()> {
-    ensure_daemon(workspace_root, verbose)?;
+    ensure_daemon(target_dir, workspace_root, verbose)?;
 
-    let dir = daemon_dir(workspace_root);
+    let dir = daemon_dir(target_dir, workspace_root);
     let sock = dir.join("lsp.sock");
     let mut stream = std::os::unix::net::UnixStream::connect(&sock)
         .context("Failed to connect to LSP daemon")?;
     stream.set_read_timeout(Some(std::time::Duration::from_secs(30)))?;
 
-    let resp = send_command(&mut stream, DaemonRequest::References { symbol, quiet })?;
-    match resp {
-        DaemonResponse::QueryResult { output } => {
-            print!("{output}");
-            Ok(())
-        }
-        DaemonResponse::Error { message } => anyhow::bail!("{message}"),
-        _ => anyhow::bail!("Unexpected response from daemon"),
-    }
-}
-
-/// Show direct and transitive callers of a symbol.
-fn cmd_blast_radius(
-    workspace_root: &std::path::Path,
-    symbol: String,
-    depth: u32,
-    quiet: bool,
-    verbose: bool,
-) -> Result<()> {
-    ensure_daemon(workspace_root, verbose)?;
-
-    let dir = daemon_dir(workspace_root);
-    let sock = dir.join("lsp.sock");
-    let mut stream = std::os::unix::net::UnixStream::connect(&sock)
-        .context("Failed to connect to LSP daemon")?;
-    stream.set_read_timeout(Some(std::time::Duration::from_secs(30)))?;
-
-    let resp = send_command(
-        &mut stream,
-        DaemonRequest::BlastRadius {
-            symbol,
-            depth,
-            quiet,
-        },
-    )?;
-    match resp {
-        DaemonResponse::QueryResult { output } => {
-            print!("{output}");
-            Ok(())
-        }
-        DaemonResponse::Error { message } => anyhow::bail!("{message}"),
-        _ => anyhow::bail!("Unexpected response from daemon"),
-    }
-}
-
-/// Show incoming or outgoing call hierarchy for a symbol.
-fn cmd_call_hierarchy(
-    workspace_root: &std::path::Path,
-    symbol: String,
-    outgoing: bool,
-    quiet: bool,
-    verbose: bool,
-) -> Result<()> {
-    ensure_daemon(workspace_root, verbose)?;
-
-    let dir = daemon_dir(workspace_root);
-    let sock = dir.join("lsp.sock");
-    let mut stream = std::os::unix::net::UnixStream::connect(&sock)
-        .context("Failed to connect to LSP daemon")?;
-    stream.set_read_timeout(Some(std::time::Duration::from_secs(30)))?;
-
-    let resp = send_command(
-        &mut stream,
-        DaemonRequest::CallHierarchy {
-            symbol,
-            outgoing,
-            quiet,
-        },
-    )?;
+    let resp = send_command(&mut stream, request)?;
     match resp {
         DaemonResponse::QueryResult { output } => {
             print!("{output}");
@@ -221,8 +164,8 @@ fn cmd_call_hierarchy(
 }
 
 /// Show daemon status.
-fn cmd_status(workspace_root: &std::path::Path) -> Result<()> {
-    let dir = daemon_dir(workspace_root);
+fn cmd_status(target_dir: &Path, workspace_root: &Path) -> Result<()> {
+    let dir = daemon_dir(target_dir, workspace_root);
     let sock = dir.join("lsp.sock");
 
     match std::os::unix::net::UnixStream::connect(&sock) {

@@ -10,19 +10,24 @@ use anyhow::{Context, Result, bail};
 
 use super::protocol::{DaemonRequest, DaemonResponse, read_message, write_message};
 
-/// Socket/PID directory for a workspace. Canonicalizes the root to avoid
-/// duplicate daemons from symlinks or `..` path components.
-pub fn daemon_dir(workspace_root: &Path) -> PathBuf {
+/// Socket/PID directory for a workspace. Uses `<target_dir>/cargo-brief-lsp/<hash>`
+/// so the socket lives inside the project's target directory (sandbox-friendly).
+/// Canonicalizes the workspace root to avoid duplicate daemons from symlinks.
+pub fn daemon_dir(target_dir: &Path, workspace_root: &Path) -> PathBuf {
     let canonical = workspace_root
         .canonicalize()
         .unwrap_or_else(|_| workspace_root.to_path_buf());
     let hash = short_hash(&canonical);
-    runtime_dir().join("cargo-brief").join(hash)
+    target_dir.join("cargo-brief-lsp").join(hash)
 }
 
 /// Ensure daemon is running and return a connected UDS stream.
-pub fn ensure_daemon(workspace_root: &Path, verbose: bool) -> Result<UnixStream> {
-    let dir = daemon_dir(workspace_root);
+pub fn ensure_daemon(
+    target_dir: &Path,
+    workspace_root: &Path,
+    verbose: bool,
+) -> Result<UnixStream> {
+    let dir = daemon_dir(target_dir, workspace_root);
     let sock = dir.join("lsp.sock");
     let pid_file = dir.join("lsp.pid");
 
@@ -188,13 +193,6 @@ fn process_alive(pid: u32) -> bool {
     };
     // SAFETY: kill(pid, 0) with signal 0 only checks process existence.
     unsafe { libc::kill(pid, 0) == 0 }
-}
-
-/// Get the runtime directory for daemon sockets.
-fn runtime_dir() -> PathBuf {
-    std::env::var("XDG_RUNTIME_DIR")
-        .map(PathBuf::from)
-        .unwrap_or_else(|_| std::env::temp_dir())
 }
 
 /// FNV-1a 64-bit hash of a path, hex-encoded. Deterministic across Rust versions.
