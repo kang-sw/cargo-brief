@@ -659,6 +659,146 @@ mod tests {
         assert!(result.contains("2. fn Baz::bar  src/baz.rs:10"));
     }
 
+    fn mock_call_hierarchy_item(name: &str, uri: &str, line: u64) -> serde_json::Value {
+        serde_json::json!({
+            "name": name,
+            "kind": 12,
+            "uri": uri,
+            "range": { "start": { "line": line, "character": 0 }, "end": { "line": line + 10, "character": 0 } },
+            "selectionRange": { "start": { "line": line, "character": 4 }, "end": { "line": line, "character": 4 + name.len() } }
+        })
+    }
+
+    fn mock_incoming_call(from_name: &str, uri: &str, line: u64) -> serde_json::Value {
+        serde_json::json!({
+            "from": mock_call_hierarchy_item(from_name, uri, line),
+            "fromRanges": [{ "start": { "line": line + 5, "character": 8 }, "end": { "line": line + 5, "character": 20 } }]
+        })
+    }
+
+    fn mock_outgoing_call(to_name: &str, uri: &str, line: u64) -> serde_json::Value {
+        serde_json::json!({
+            "to": mock_call_hierarchy_item(to_name, uri, line),
+            "fromRanges": [{ "start": { "line": 10, "character": 8 }, "end": { "line": 10, "character": 20 } }]
+        })
+    }
+
+    #[test]
+    fn format_call_hierarchy_incoming() {
+        let calls = vec![
+            mock_incoming_call("run_pipeline", "file:///project/src/pipeline.rs", 41),
+            mock_incoming_call("render_item", "file:///project/src/render.rs", 114),
+        ];
+        let result = format_call_hierarchy(&calls, Path::new("/project"), "Foo::bar", false, false);
+        assert!(result.starts_with("// Incoming calls to Foo::bar\n"));
+        assert!(result.contains("← run_pipeline()"));
+        assert!(result.contains("src/pipeline.rs:42"));
+        assert!(result.contains("← render_item()"));
+        assert!(result.contains("src/render.rs:115"));
+    }
+
+    #[test]
+    fn format_call_hierarchy_outgoing() {
+        let calls = vec![
+            mock_outgoing_call("resolve_path", "file:///project/src/resolve.rs", 22),
+            mock_outgoing_call("lookup", "file:///project/src/model.rs", 155),
+        ];
+        let result = format_call_hierarchy(&calls, Path::new("/project"), "Foo::bar", true, false);
+        assert!(result.starts_with("// Outgoing calls from Foo::bar\n"));
+        assert!(result.contains("→ resolve_path()"));
+        assert!(result.contains("→ lookup()"));
+    }
+
+    #[test]
+    fn format_call_hierarchy_empty() {
+        let result = format_call_hierarchy(&[], Path::new("/project"), "Foo::bar", false, false);
+        assert!(result.contains("Incoming calls to Foo::bar"));
+        assert!(result.contains("(none)"));
+    }
+
+    #[test]
+    fn format_call_hierarchy_quiet() {
+        let calls = vec![
+            mock_incoming_call("run_pipeline", "file:///project/src/pipeline.rs", 41),
+            mock_incoming_call("render_item", "file:///project/src/render.rs", 114),
+        ];
+        let result = format_call_hierarchy(&calls, Path::new("/project"), "X", false, true);
+        assert_eq!(
+            result,
+            "@src/pipeline.rs:42  run_pipeline\n@src/render.rs:115  render_item\n"
+        );
+    }
+
+    #[test]
+    fn format_blast_radius_depth_one() {
+        let levels = vec![vec![
+            CallerEntry {
+                name: "run_pipeline".to_string(),
+                location: "src/pipeline.rs:42".to_string(),
+                via: None,
+            },
+            CallerEntry {
+                name: "search_index".to_string(),
+                location: "src/search.rs:67".to_string(),
+                via: None,
+            },
+        ]];
+        let result = format_blast_radius(&levels, "Foo::bar", false);
+        assert!(result.contains("Blast radius for Foo::bar (2 direct)"));
+        assert!(result.contains("Direct:"));
+        assert!(result.contains("run_pipeline()"));
+        assert!(result.contains("search_index()"));
+    }
+
+    #[test]
+    fn format_blast_radius_depth_two() {
+        let levels = vec![
+            vec![CallerEntry {
+                name: "run_pipeline".to_string(),
+                location: "src/pipeline.rs:42".to_string(),
+                via: None,
+            }],
+            vec![CallerEntry {
+                name: "run_api_pipeline".to_string(),
+                location: "src/lib.rs:89".to_string(),
+                via: Some("run_pipeline".to_string()),
+            }],
+        ];
+        let result = format_blast_radius(&levels, "Foo::bar", false);
+        assert!(result.contains("1 direct, 1 transitive"));
+        assert!(result.contains("Direct:"));
+        assert!(result.contains("Depth 2:"));
+        assert!(result.contains("→ run_pipeline()"));
+    }
+
+    #[test]
+    fn format_blast_radius_empty() {
+        let levels: Vec<Vec<CallerEntry>> = vec![];
+        let result = format_blast_radius(&levels, "Foo::bar", false);
+        assert!(result.contains("(no callers found)"));
+    }
+
+    #[test]
+    fn format_blast_radius_quiet() {
+        let levels = vec![
+            vec![CallerEntry {
+                name: "run_pipeline".to_string(),
+                location: "src/pipeline.rs:42".to_string(),
+                via: None,
+            }],
+            vec![CallerEntry {
+                name: "run_api".to_string(),
+                location: "src/lib.rs:89".to_string(),
+                via: Some("run_pipeline".to_string()),
+            }],
+        ];
+        let result = format_blast_radius(&levels, "X", true);
+        assert_eq!(
+            result,
+            "@src/pipeline.rs:42  run_pipeline  [depth=1]\n@src/lib.rs:89  run_api  [depth=2]\n"
+        );
+    }
+
     #[test]
     fn format_disambiguation_no_container() {
         let matches = vec![
