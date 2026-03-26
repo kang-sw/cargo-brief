@@ -13,7 +13,20 @@ pub enum DaemonRequest {
     Ping,
     Stop,
     Status,
-    References { symbol: String, quiet: bool },
+    References {
+        symbol: String,
+        quiet: bool,
+    },
+    BlastRadius {
+        symbol: String,
+        depth: u32,
+        quiet: bool,
+    },
+    CallHierarchy {
+        symbol: String,
+        outgoing: bool,
+        quiet: bool,
+    },
 }
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -134,6 +147,54 @@ mod tests {
         match got {
             DaemonRequest::References { symbol, quiet } => {
                 assert_eq!(symbol, "Foo::bar");
+                assert!(quiet);
+            }
+            _ => panic!("unexpected request variant"),
+        }
+    }
+
+    #[test]
+    fn roundtrip_blast_radius_request() {
+        let (mut a, mut b) = UnixStream::pair().unwrap();
+        let req = DaemonRequest::BlastRadius {
+            symbol: "resolve_symbol".to_string(),
+            depth: 3,
+            quiet: false,
+        };
+        write_message(&mut a, &req).unwrap();
+        let got: DaemonRequest = read_message(&mut b).unwrap();
+        match got {
+            DaemonRequest::BlastRadius {
+                symbol,
+                depth,
+                quiet,
+            } => {
+                assert_eq!(symbol, "resolve_symbol");
+                assert_eq!(depth, 3);
+                assert!(!quiet);
+            }
+            _ => panic!("unexpected request variant"),
+        }
+    }
+
+    #[test]
+    fn roundtrip_call_hierarchy_request() {
+        let (mut a, mut b) = UnixStream::pair().unwrap();
+        let req = DaemonRequest::CallHierarchy {
+            symbol: "Foo::bar".to_string(),
+            outgoing: true,
+            quiet: true,
+        };
+        write_message(&mut a, &req).unwrap();
+        let got: DaemonRequest = read_message(&mut b).unwrap();
+        match got {
+            DaemonRequest::CallHierarchy {
+                symbol,
+                outgoing,
+                quiet,
+            } => {
+                assert_eq!(symbol, "Foo::bar");
+                assert!(outgoing);
                 assert!(quiet);
             }
             _ => panic!("unexpected request variant"),

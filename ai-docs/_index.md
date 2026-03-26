@@ -36,7 +36,7 @@ cargo brief [-C] examples [target] [pattern] [OPTIONS]
 cargo brief [-C] summary [target] [module_path] [OPTIONS]
 cargo brief [-C] ts [target] '<query>' [OPTIONS]
 cargo brief clean [SPEC]
-cargo brief lsp {touch|stop|status} [OPTIONS]
+cargo brief lsp {touch|stop|status|references|blast-radius|call-hierarchy} [OPTIONS]
 ```
 
 ### Subcommands
@@ -71,7 +71,9 @@ Remote crate support (`-C`) with dep recursion.
 
 **`lsp`** — Manage persistent rust-analyzer daemon. Subcommands: `touch` (ensure running),
 `stop` (graceful shutdown), `status` (show PID/ra state/uptime), `references <symbol> [-q]`
-(find all references via ra). Unix-only. Rejects `-C`.
+(find all references via ra), `blast-radius <symbol> [--depth N] [-q]` (direct + transitive
+callers via BFS), `call-hierarchy <symbol> [--outgoing] [-q]` (incoming/outgoing call tree).
+Unix-only. Rejects `-C`.
 Daemon per workspace root; idle timeout 10min (override: `CARGO_BRIEF_LSP_TIMEOUT`).
 
 ### Target Resolution (api subcommand)
