@@ -10,6 +10,7 @@ use anyhow::{Context, Result, bail};
 
 use super::protocol::{DaemonRequest, DaemonResponse, RaStatus, read_message, write_message};
 use super::transport::RaTransport;
+use super::watcher::{self, DebounceBuffer};
 
 /// Default idle timeout: 10 minutes.
 const IDLE_TIMEOUT_SECS: u64 = 600;
@@ -215,7 +216,20 @@ pub fn run_daemon(workspace_root: &Path, socket_path: &Path, pid_path: &Path) ->
         }
     }
 
-    // 5. Bind UDS listener
+    // 5. Start file watcher
+    let (fs_rx, _watcher) = match watcher::start_watcher(workspace_root) {
+        Ok((watcher, rx)) => {
+            eprintln!("[lsp-daemon] file watcher started");
+            (Some(rx), Some(watcher))
+        }
+        Err(e) => {
+            eprintln!("[lsp-daemon] file watcher failed: {e}, continuing without");
+            (None, None)
+        }
+    };
+    let mut debounce_buf = DebounceBuffer::new();
+
+    // 6. Bind UDS listener
     let listener = UnixListener::bind(socket_path).context("Failed to bind UDS listener socket")?;
     listener
         .set_nonblocking(true)
@@ -223,7 +237,7 @@ pub fn run_daemon(workspace_root: &Path, socket_path: &Path, pid_path: &Path) ->
 
     eprintln!("[lsp-daemon] listening on {}", socket_path.display());
 
-    // 6. Main loop
+    // 7. Main loop
     let idle_timeout = Duration::from_secs(
         std::env::var("CARGO_BRIEF_LSP_TIMEOUT")
             .ok()
@@ -256,6 +270,22 @@ pub fn run_daemon(workspace_root: &Path, socket_path: &Path, pid_path: &Path) ->
             }
         }
 
+        // Drain FS events
+        if let Some(rx) = &fs_rx {
+            while let Ok(event) = rx.try_recv() {
+                debounce_buf.push(event);
+            }
+            if debounce_buf.should_flush() {
+                let events = debounce_buf.drain();
+                let params = watcher::build_did_change_notification(&events);
+                if let Err(e) =
+                    transport.send_notification("workspace/didChangeWatchedFiles", params)
+                {
+                    eprintln!("[lsp-daemon] failed to notify ra of file changes: {e}");
+                }
+            }
+        }
+
         // Check if ra is still alive
         match ra_child.try_wait() {
             Ok(Some(status)) => {
@@ -270,7 +300,7 @@ pub fn run_daemon(workspace_root: &Path, socket_path: &Path, pid_path: &Path) ->
         }
     }
 
-    // 7. Cleanup
+    // 8. Cleanup
     if ra_status != RaStatus::Stopped {
         shutdown_ra(&mut transport);
     }

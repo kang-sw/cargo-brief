@@ -22,3 +22,6 @@ tree-sitter = "0.25"
 tree-sitter-rust = "0.23"
 streaming-iterator = "0.1"
 libc = "0.2"
+
+[target.'cfg(unix)'.dependencies]
+notify = "6"
