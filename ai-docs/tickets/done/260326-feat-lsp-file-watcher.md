@@ -1,5 +1,7 @@
 ---
 title: "LSP daemon: file watcher integration"
+status: done
+completed: 2026-03-26
 related:
   - 260326-feat-lsp-daemon             # parent
   - 260326-feat-lsp-daemon-bootstrap   # prerequisite
@@ -66,3 +68,27 @@ daemon loop:
 ## Dependencies (crate)
 
 - `notify` 6.x (feature-gated if needed)
+
+### Result (cf278fa) - 26-03-26
+
+Implemented filesystem watching for the LSP daemon. New `src/lsp/watcher.rs`
+(~160 lines) with `notify 6.1.1` under `[target.'cfg(unix)'.dependencies]`.
+
+**What was built:**
+- `start_watcher()`: `RecommendedWatcher` with recursive mode, mpsc channel bridge
+- Event filtering: accept `.rs`/`Cargo.toml`/`Cargo.lock`, reject `target/`/hidden dirs
+- `DebounceBuffer`: 300ms batching with URI dedup (latest change_type wins)
+- `build_did_change_notification()`: LSP notification params construction
+- Daemon integration: watcher starts after LSP initialize, FS events drained via
+  `try_recv()` on every main loop iteration, graceful degradation on watcher failure
+
+**Deviations from ticket design:**
+- Ticket showed `select!`-based loop; actual implementation uses synchronous polling
+  with `try_recv()` (matching the existing daemon architecture established in bootstrap)
+- Debounce window: 300ms (within the 200-500ms range specified)
+
+**Tests:** 17 unit tests (8 DebounceBuffer TDD, 7 event filtering post-impl,
+2 notification format). All pass. Daemon integration tested manually.
+
+**Remaining:** End-to-end validation that ra processes the notifications will be
+covered by `260326-feat-lsp-query-commands` (next sub-ticket).
