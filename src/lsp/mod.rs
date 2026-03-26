@@ -8,6 +8,7 @@ pub(crate) mod client;
 pub mod daemon;
 mod protocol;
 mod transport;
+pub(super) mod watcher;
 
 use anyhow::{Context, Result};
 
