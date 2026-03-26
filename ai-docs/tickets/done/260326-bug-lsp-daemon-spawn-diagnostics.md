@@ -1,5 +1,7 @@
 ---
 title: "LSP daemon: improve spawn failure diagnostics"
+status: done
+completed: 2026-03-26
 related:
   - 260326-feat-lsp-daemon-bootstrap  # original implementation
 ---
@@ -67,3 +69,20 @@ daemon restart to avoid unbounded growth.
 
 Phase 1: ~30 lines (modify `wait_for_socket` + `spawn_daemon` to return PID).
 Phase 2: ~50 lines (stderr redirect + log reading + cleanup).
+
+### Result (d8eb41f) - 26-03-26
+
+Both phases implemented together (tightly coupled — same 3 functions).
+
+**Changes:**
+- `client.rs`: `spawn_daemon` redirects stderr to `lsp.log` via `Stdio::from(File)`,
+  returns `Result<u32>` (child PID). `wait_for_socket` accepts PID + log_path, checks
+  `process_alive(pid)` each iteration, bails with log tail on death or timeout.
+  `ensure_daemon` threads PID and log_path. New `read_log_tail` helper (last N lines).
+- `daemon.rs`: cleanup removes `lsp.log` before `remove_dir`.
+- `mod.rs`: `cmd_stop` removes `lsp.log` before `remove_dir`.
+
+**Tests:** 4 unit tests for `read_log_tail` (>max lines, <max lines, nonexistent, empty).
+Spawn/wait/cleanup paths require manual verification (daemon process lifecycle).
+
+**No deviations from plan.** All success criteria met.
