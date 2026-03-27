@@ -97,7 +97,9 @@ fn send_initialize(transport: &mut RaTransport, workspace_root: &Path) -> Result
     let params = serde_json::json!({
         "processId": std::process::id(),
         "rootUri": root_uri,
-        "capabilities": {},
+        "capabilities": {
+            "window": { "workDoneProgress": true }
+        },
         "initializationOptions": {}
     });
 
@@ -222,6 +224,42 @@ fn process_ra_notification(
     }
 }
 
+/// Uptime threshold (seconds) before assuming Ready if no `$/progress` seen.
+const NO_PROGRESS_FALLBACK_SECS: u64 = 10;
+
+/// Process one ra message: update progress state and reply to server requests.
+fn handle_ra_message(
+    msg: &serde_json::Value,
+    transport: &mut RaTransport,
+    ra_status: &mut RaStatus,
+    active_progress: &mut HashSet<String>,
+    had_progress: &mut bool,
+) {
+    if let Some(new_status) = process_ra_notification(msg, active_progress, had_progress) {
+        if *ra_status != new_status {
+            eprintln!("[lsp-daemon] ra status: {new_status}");
+            *ra_status = new_status;
+        }
+    }
+    // Reply to server-initiated requests (e.g. window/workDoneProgress/create)
+    if msg.get("id").is_some() && msg.get("method").is_some() {
+        if let Some(id) = msg.get("id").cloned() {
+            let _ = transport.send_raw_response(id, serde_json::json!(null));
+        }
+    }
+}
+
+/// Check fallback: no progress tokens ever seen, uptime > threshold → assume Ready.
+fn check_no_progress_fallback(ra_status: &mut RaStatus, had_progress: bool, start_time: Instant) {
+    if !had_progress
+        && *ra_status == RaStatus::Initializing
+        && start_time.elapsed().as_secs() > NO_PROGRESS_FALLBACK_SECS
+    {
+        eprintln!("[lsp-daemon] ra status: ready (no progress reported, fallback)");
+        *ra_status = RaStatus::Ready;
+    }
+}
+
 /// Drain all available ra stdout messages. Updates ra_status and replies
 /// to server-initiated requests. Returns true if any messages were read.
 fn drain_ra_messages(
@@ -248,21 +286,7 @@ fn drain_ra_messages(
         match transport.read_message() {
             Ok(msg) => {
                 any_read = true;
-                // Progress status update
-                if let Some(new_status) =
-                    process_ra_notification(&msg, active_progress, had_progress)
-                {
-                    if *ra_status != new_status {
-                        eprintln!("[lsp-daemon] ra status: {new_status}");
-                        *ra_status = new_status;
-                    }
-                }
-                // Reply to server-initiated requests (e.g. window/workDoneProgress/create)
-                if msg.get("id").is_some() && msg.get("method").is_some() {
-                    if let Some(id) = msg.get("id").cloned() {
-                        let _ = transport.send_raw_response(id, serde_json::json!(null));
-                    }
-                }
+                handle_ra_message(&msg, transport, ra_status, active_progress, had_progress);
             }
             Err(e) => {
                 eprintln!("[lsp-daemon] ra stdout read error: {e}");
@@ -270,12 +294,7 @@ fn drain_ra_messages(
             }
         }
     }
-    // Fallback: no progress tokens ever seen, uptime > 10s → assume Ready
-    if !*had_progress && *ra_status == RaStatus::Initializing && start_time.elapsed().as_secs() > 10
-    {
-        eprintln!("[lsp-daemon] ra status: ready (no progress reported, fallback)");
-        *ra_status = RaStatus::Ready;
-    }
+    check_no_progress_fallback(ra_status, *had_progress, start_time);
     Ok(any_read)
 }
 
@@ -318,35 +337,14 @@ fn wait_for_ready(
             };
             let n = poll_retry(&mut pfd, 500)?;
             if n == 0 {
-                // No data yet — check fallback and loop
-                if !*had_progress
-                    && *ra_status == RaStatus::Initializing
-                    && start_time.elapsed().as_secs() > 10
-                {
-                    eprintln!("[lsp-daemon] ra status: ready (no progress reported, fallback)");
-                    *ra_status = RaStatus::Ready;
-                    return Ok(());
-                }
+                check_no_progress_fallback(ra_status, *had_progress, start_time);
                 continue;
             }
         }
 
         match transport.read_message() {
             Ok(msg) => {
-                if let Some(new_status) =
-                    process_ra_notification(&msg, active_progress, had_progress)
-                {
-                    if *ra_status != new_status {
-                        eprintln!("[lsp-daemon] ra status: {new_status}");
-                        *ra_status = new_status;
-                    }
-                }
-                // Reply to server-initiated requests
-                if msg.get("id").is_some() && msg.get("method").is_some() {
-                    if let Some(id) = msg.get("id").cloned() {
-                        let _ = transport.send_raw_response(id, serde_json::json!(null));
-                    }
-                }
+                handle_ra_message(&msg, transport, ra_status, active_progress, had_progress);
             }
             Err(e) => {
                 eprintln!("[lsp-daemon] ra stdout read error during wait: {e}");
@@ -587,7 +585,7 @@ pub fn run_daemon(workspace_root: &Path, daemon_dir: &Path) -> Result<()> {
     }
 
     // 8. Cleanup
-    if !matches!(ra_status, RaStatus::Stopped) {
+    if ra_status != RaStatus::Stopped {
         shutdown_ra(&mut transport);
     }
     // Wait for ra to exit
