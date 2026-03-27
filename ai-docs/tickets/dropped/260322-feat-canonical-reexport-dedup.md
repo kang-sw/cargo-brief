@@ -34,7 +34,10 @@ already_handled: HashMap<CanonicalPath, AccessPath>
 4. **Graceful degradation** — unexpanded `pub use` lines are still navigable
    via `cargo brief api <crate> <Item>`
 
-## Trigger
+## Drop Reason
 
-Revisit when a real-world crate is found where leaf-name dedup causes
-user-visible confusion.
+Unexpanded `pub use` lines remain in output — users can follow up with
+`cargo brief api <crate> <Item>` to get the full definition. No item
+becomes inaccessible; the only cost is an extra CLI invocation. The
+complexity of canonical path tracking across crate boundaries is not
+justified for this marginal UX improvement.
