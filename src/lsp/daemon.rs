@@ -301,7 +301,16 @@ fn drain_ra_messages(
 /// Default timeout for waiting for ra to finish indexing before a query.
 const READY_TIMEOUT_SECS: u64 = 60;
 
+/// After reaching Ready, keep draining for this long to catch re-indexing cycles.
+/// ra goes through multiple begin/end phases (config load, workspace load,
+/// proc-macro expansion, symbol indexing). Each time status returns to Ready,
+/// the settle timer resets. Only when Ready persists for the full settle period
+/// without any new progress begin do we consider indexing truly complete.
+const SETTLE_MS: u64 = 5000;
+
 /// Block until ra finishes indexing (status becomes Ready) or timeout.
+/// After each Ready transition, continues draining for SETTLE_MS to catch
+/// ra re-entering Indexing (common during multi-phase startup).
 fn wait_for_ready(
     transport: &mut RaTransport,
     ra_status: &mut RaStatus,
@@ -315,12 +324,11 @@ fn wait_for_ready(
     }
 
     let wait_start = Instant::now();
+    // Tracks when we last entered Ready. None = not Ready yet.
+    let mut ready_since: Option<Instant> = None;
     eprintln!("[lsp-daemon] waiting for rust-analyzer to finish indexing...");
 
     loop {
-        if *ra_status == RaStatus::Ready {
-            return Ok(());
-        }
         if wait_start.elapsed() > timeout {
             bail!(
                 "rust-analyzer is still indexing (waited {}s). Try again shortly.",
@@ -328,14 +336,29 @@ fn wait_for_ready(
             );
         }
 
-        // Check BufReader buffer first, then poll with 500ms timeout
+        // Track Ready/Indexing transitions
+        if *ra_status == RaStatus::Ready {
+            if ready_since.is_none() {
+                ready_since = Some(Instant::now());
+            }
+            // Settle period elapsed — indexing is truly done
+            if ready_since.is_some_and(|t| t.elapsed().as_millis() >= SETTLE_MS as u128) {
+                return Ok(());
+            }
+        } else if ready_since.is_some() {
+            // Back to Indexing — reset settle timer
+            ready_since = None;
+        }
+
+        // Poll ra stdout — shorter interval during settle for responsiveness
+        let poll_timeout = if ready_since.is_some() { 100 } else { 500 };
         if !transport.has_buffered_data() {
             let mut pfd = libc::pollfd {
                 fd: transport.stdout_raw_fd(),
                 events: libc::POLLIN,
                 revents: 0,
             };
-            let n = poll_retry(&mut pfd, 500)?;
+            let n = poll_retry(&mut pfd, poll_timeout)?;
             if n == 0 {
                 check_no_progress_fallback(ra_status, *had_progress, start_time);
                 continue;
