@@ -1,6 +1,7 @@
 //! LSP JSON-RPC Content-Length framing for rust-analyzer stdin/stdout.
 
 use std::io::{BufRead, BufReader, Read, Write};
+use std::os::unix::io::{AsRawFd, RawFd};
 use std::process::{ChildStdin, ChildStdout};
 
 use anyhow::{Context, Result, bail};
@@ -58,7 +59,36 @@ impl RaTransport {
         serde_json::from_slice(&buf).context("Failed to parse LSP JSON-RPC message")
     }
 
+    /// Return the raw fd of ra's stdout for use with poll().
+    pub fn stdout_raw_fd(&self) -> RawFd {
+        self.stdout.get_ref().as_raw_fd()
+    }
+
+    /// Check if BufReader has leftover data from a prior read.
+    /// Not a reliable "is data available" check — only catches buffered leftovers.
+    /// Use poll() as the primary mechanism.
+    pub fn has_buffered_data(&self) -> bool {
+        !self.stdout.buffer().is_empty()
+    }
+
+    /// Send an LSP response to a server-initiated request (e.g.
+    /// window/workDoneProgress/create). We are responding to a request FROM
+    /// the server.
+    pub fn send_raw_response(
+        &mut self,
+        id: serde_json::Value,
+        result: serde_json::Value,
+    ) -> Result<()> {
+        let msg = serde_json::json!({
+            "jsonrpc": "2.0",
+            "id": id,
+            "result": result,
+        });
+        self.write_lsp_message(&msg)
+    }
+
     /// Send a request and wait for the matching response, skipping notifications.
+    /// Replies to server-initiated requests (e.g. window/workDoneProgress/create).
     /// Gives up after reading 10,000 messages without a matching response.
     pub fn send_request_and_wait(
         &mut self,
@@ -72,6 +102,14 @@ impl RaTransport {
 
             // Notifications have no "id" field — skip them
             if msg.get("id").is_none() {
+                continue;
+            }
+
+            // Server-initiated request (has both "id" and "method") — reply and continue
+            if msg.get("method").is_some() {
+                if let Some(req_id) = msg.get("id").cloned() {
+                    let _ = self.send_raw_response(req_id, serde_json::json!(null));
+                }
                 continue;
             }
 

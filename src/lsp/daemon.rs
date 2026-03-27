@@ -1,5 +1,6 @@
 //! LSP daemon process: spawns rust-analyzer, accepts FIFO clients, handles idle timeout.
 
+use std::collections::HashSet;
 use std::fs::{File, OpenOptions};
 use std::io::BufRead;
 use std::os::unix::fs::OpenOptionsExt;
@@ -185,6 +186,176 @@ fn shutdown_ra(transport: &mut RaTransport) {
     let _ = transport.send_notification("exit", serde_json::Value::Null);
 }
 
+/// Process a single ra notification for `$/progress` tracking.
+/// Returns `Some(new_status)` when the indexing state changes.
+fn process_ra_notification(
+    msg: &serde_json::Value,
+    active_progress: &mut HashSet<String>,
+    had_progress: &mut bool,
+) -> Option<RaStatus> {
+    let method = msg.get("method")?.as_str()?;
+    if method != "$/progress" {
+        return None;
+    }
+
+    let params = msg.get("params")?;
+    let token = params.get("token")?;
+    let kind = params.get("value")?.get("kind")?.as_str()?;
+
+    let token_key = token.to_string();
+
+    match kind {
+        "begin" => {
+            active_progress.insert(token_key);
+            *had_progress = true;
+            Some(RaStatus::Indexing)
+        }
+        "end" => {
+            active_progress.remove(&token_key);
+            if *had_progress && active_progress.is_empty() {
+                Some(RaStatus::Ready)
+            } else {
+                None
+            }
+        }
+        _ => None, // "report" or unknown
+    }
+}
+
+/// Drain all available ra stdout messages. Updates ra_status and replies
+/// to server-initiated requests. Returns true if any messages were read.
+fn drain_ra_messages(
+    transport: &mut RaTransport,
+    ra_status: &mut RaStatus,
+    active_progress: &mut HashSet<String>,
+    had_progress: &mut bool,
+    start_time: Instant,
+) -> Result<bool> {
+    let mut any_read = false;
+    loop {
+        // Check BufReader internal buffer first (minor optimization)
+        if !transport.has_buffered_data() {
+            let mut pfd = libc::pollfd {
+                fd: transport.stdout_raw_fd(),
+                events: libc::POLLIN,
+                revents: 0,
+            };
+            let n = poll_retry(&mut pfd, 0)?;
+            if n == 0 {
+                break;
+            }
+        }
+        match transport.read_message() {
+            Ok(msg) => {
+                any_read = true;
+                // Progress status update
+                if let Some(new_status) =
+                    process_ra_notification(&msg, active_progress, had_progress)
+                {
+                    if *ra_status != new_status {
+                        eprintln!("[lsp-daemon] ra status: {new_status}");
+                        *ra_status = new_status;
+                    }
+                }
+                // Reply to server-initiated requests (e.g. window/workDoneProgress/create)
+                if msg.get("id").is_some() && msg.get("method").is_some() {
+                    if let Some(id) = msg.get("id").cloned() {
+                        let _ = transport.send_raw_response(id, serde_json::json!(null));
+                    }
+                }
+            }
+            Err(e) => {
+                eprintln!("[lsp-daemon] ra stdout read error: {e}");
+                break;
+            }
+        }
+    }
+    // Fallback: no progress tokens ever seen, uptime > 10s → assume Ready
+    if !*had_progress && *ra_status == RaStatus::Initializing && start_time.elapsed().as_secs() > 10
+    {
+        eprintln!("[lsp-daemon] ra status: ready (no progress reported, fallback)");
+        *ra_status = RaStatus::Ready;
+    }
+    Ok(any_read)
+}
+
+/// Default timeout for waiting for ra to finish indexing before a query.
+const READY_TIMEOUT_SECS: u64 = 60;
+
+/// Block until ra finishes indexing (status becomes Ready) or timeout.
+fn wait_for_ready(
+    transport: &mut RaTransport,
+    ra_status: &mut RaStatus,
+    active_progress: &mut HashSet<String>,
+    had_progress: &mut bool,
+    start_time: Instant,
+    timeout: Duration,
+) -> Result<()> {
+    if *ra_status == RaStatus::Ready {
+        return Ok(());
+    }
+
+    let wait_start = Instant::now();
+    eprintln!("[lsp-daemon] waiting for rust-analyzer to finish indexing...");
+
+    loop {
+        if *ra_status == RaStatus::Ready {
+            return Ok(());
+        }
+        if wait_start.elapsed() > timeout {
+            bail!(
+                "rust-analyzer is still indexing (waited {}s). Try again shortly.",
+                timeout.as_secs()
+            );
+        }
+
+        // Check BufReader buffer first, then poll with 500ms timeout
+        if !transport.has_buffered_data() {
+            let mut pfd = libc::pollfd {
+                fd: transport.stdout_raw_fd(),
+                events: libc::POLLIN,
+                revents: 0,
+            };
+            let n = poll_retry(&mut pfd, 500)?;
+            if n == 0 {
+                // No data yet — check fallback and loop
+                if !*had_progress
+                    && *ra_status == RaStatus::Initializing
+                    && start_time.elapsed().as_secs() > 10
+                {
+                    eprintln!("[lsp-daemon] ra status: ready (no progress reported, fallback)");
+                    *ra_status = RaStatus::Ready;
+                    return Ok(());
+                }
+                continue;
+            }
+        }
+
+        match transport.read_message() {
+            Ok(msg) => {
+                if let Some(new_status) =
+                    process_ra_notification(&msg, active_progress, had_progress)
+                {
+                    if *ra_status != new_status {
+                        eprintln!("[lsp-daemon] ra status: {new_status}");
+                        *ra_status = new_status;
+                    }
+                }
+                // Reply to server-initiated requests
+                if msg.get("id").is_some() && msg.get("method").is_some() {
+                    if let Some(id) = msg.get("id").cloned() {
+                        let _ = transport.send_raw_response(id, serde_json::json!(null));
+                    }
+                }
+            }
+            Err(e) => {
+                eprintln!("[lsp-daemon] ra stdout read error during wait: {e}");
+                bail!("rust-analyzer stdout closed during indexing wait");
+            }
+        }
+    }
+}
+
 /// Main daemon loop.
 pub fn run_daemon(workspace_root: &Path, daemon_dir: &Path) -> Result<()> {
     let start_time = Instant::now();
@@ -227,11 +398,13 @@ pub fn run_daemon(workspace_root: &Path, daemon_dir: &Path) -> Result<()> {
 
     // 4. LSP initialize
     let mut ra_status = RaStatus::Initializing;
+    let mut active_progress: HashSet<String> = HashSet::new();
+    let mut had_progress = false;
+
     eprintln!("[lsp-daemon] sending LSP initialize...");
     match send_initialize(&mut transport, workspace_root) {
         Ok(()) => {
-            ra_status = RaStatus::Ready;
-            eprintln!("[lsp-daemon] rust-analyzer initialized");
+            eprintln!("[lsp-daemon] rust-analyzer initialized, waiting for indexing...");
         }
         Err(e) => {
             eprintln!("[lsp-daemon] initialize failed: {e}");
@@ -286,6 +459,12 @@ pub fn run_daemon(workspace_root: &Path, daemon_dir: &Path) -> Result<()> {
             .and_then(|v| v.parse().ok())
             .unwrap_or(IDLE_TIMEOUT_SECS),
     );
+    let ready_timeout = Duration::from_secs(
+        std::env::var("CARGO_BRIEF_LSP_READY_TIMEOUT")
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(READY_TIMEOUT_SECS),
+    );
     let mut last_activity = Instant::now();
     let mut shutdown = false;
 
@@ -311,6 +490,32 @@ pub fn run_daemon(workspace_root: &Path, daemon_dir: &Path) -> Result<()> {
             };
             set_nonblocking(&req_fd, true)?;
 
+            // Wait for ra to finish indexing before query dispatch
+            let is_query = matches!(
+                request,
+                DaemonRequest::References { .. }
+                    | DaemonRequest::BlastRadius { .. }
+                    | DaemonRequest::CallHierarchy { .. }
+            );
+            if is_query && ra_status != RaStatus::Ready {
+                if let Err(e) = wait_for_ready(
+                    &mut transport,
+                    &mut ra_status,
+                    &mut active_progress,
+                    &mut had_progress,
+                    start_time,
+                    ready_timeout,
+                ) {
+                    let response = DaemonResponse::Error {
+                        message: format!("{e}"),
+                    };
+                    if let Err(we) = write_message(&mut resp_fd, &response) {
+                        eprintln!("[lsp-daemon] failed to write error response: {we}");
+                    }
+                    continue;
+                }
+            }
+
             // Process request
             let response = handle_request(
                 &request,
@@ -335,6 +540,19 @@ pub fn run_daemon(workspace_root: &Path, daemon_dir: &Path) -> Result<()> {
             if last_activity.elapsed() > idle_timeout {
                 eprintln!("[lsp-daemon] idle timeout, shutting down");
                 break;
+            }
+        }
+
+        // Drain ra stdout (progress notifications, server requests)
+        if ra_status != RaStatus::Stopped {
+            if let Err(e) = drain_ra_messages(
+                &mut transport,
+                &mut ra_status,
+                &mut active_progress,
+                &mut had_progress,
+                start_time,
+            ) {
+                eprintln!("[lsp-daemon] drain error: {e}");
             }
         }
 
@@ -369,7 +587,7 @@ pub fn run_daemon(workspace_root: &Path, daemon_dir: &Path) -> Result<()> {
     }
 
     // 8. Cleanup
-    if ra_status != RaStatus::Stopped {
+    if !matches!(ra_status, RaStatus::Stopped) {
         shutdown_ra(&mut transport);
     }
     // Wait for ra to exit
@@ -385,4 +603,152 @@ pub fn run_daemon(workspace_root: &Path, daemon_dir: &Path) -> Result<()> {
 
     eprintln!("[lsp-daemon] shut down cleanly");
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    fn progress_begin(token: serde_json::Value) -> serde_json::Value {
+        json!({
+            "jsonrpc": "2.0",
+            "method": "$/progress",
+            "params": { "token": token, "value": { "kind": "begin", "title": "Indexing" } }
+        })
+    }
+
+    fn progress_end(token: serde_json::Value) -> serde_json::Value {
+        json!({
+            "jsonrpc": "2.0",
+            "method": "$/progress",
+            "params": { "token": token, "value": { "kind": "end" } }
+        })
+    }
+
+    fn progress_report(token: serde_json::Value) -> serde_json::Value {
+        json!({
+            "jsonrpc": "2.0",
+            "method": "$/progress",
+            "params": { "token": token, "value": { "kind": "report", "percentage": 50 } }
+        })
+    }
+
+    #[test]
+    fn progress_begin_returns_indexing() {
+        let mut set = HashSet::new();
+        let mut had = false;
+        let result = process_ra_notification(&progress_begin(json!("tok1")), &mut set, &mut had);
+        assert_eq!(result, Some(RaStatus::Indexing));
+        assert!(had);
+        assert!(set.contains(&json!("tok1").to_string()));
+    }
+
+    #[test]
+    fn progress_end_last_token_returns_ready() {
+        let mut set = HashSet::new();
+        let mut had = false;
+        process_ra_notification(&progress_begin(json!("tok1")), &mut set, &mut had);
+        let result = process_ra_notification(&progress_end(json!("tok1")), &mut set, &mut had);
+        assert_eq!(result, Some(RaStatus::Ready));
+        assert!(set.is_empty());
+    }
+
+    #[test]
+    fn progress_end_not_last_returns_none() {
+        let mut set = HashSet::new();
+        let mut had = false;
+        process_ra_notification(&progress_begin(json!("a")), &mut set, &mut had);
+        process_ra_notification(&progress_begin(json!("b")), &mut set, &mut had);
+        let result = process_ra_notification(&progress_end(json!("a")), &mut set, &mut had);
+        assert_eq!(result, None); // "b" still active
+        assert_eq!(set.len(), 1);
+    }
+
+    #[test]
+    fn progress_report_returns_none() {
+        let mut set = HashSet::new();
+        let mut had = false;
+        process_ra_notification(&progress_begin(json!("tok1")), &mut set, &mut had);
+        let result = process_ra_notification(&progress_report(json!("tok1")), &mut set, &mut had);
+        assert_eq!(result, None);
+    }
+
+    #[test]
+    fn non_progress_notification_returns_none() {
+        let mut set = HashSet::new();
+        let mut had = false;
+        let msg = json!({
+            "jsonrpc": "2.0",
+            "method": "textDocument/publishDiagnostics",
+            "params": {}
+        });
+        assert_eq!(process_ra_notification(&msg, &mut set, &mut had), None);
+    }
+
+    #[test]
+    fn progress_begin_when_had_progress_already_true() {
+        let mut set = HashSet::new();
+        let mut had = true; // already true from prior cycle
+        let result = process_ra_notification(&progress_begin(json!("tok2")), &mut set, &mut had);
+        assert_eq!(result, Some(RaStatus::Indexing));
+    }
+
+    #[test]
+    fn two_full_begin_end_cycles() {
+        let mut set = HashSet::new();
+        let mut had = false;
+        // Cycle 1
+        process_ra_notification(&progress_begin(json!("a")), &mut set, &mut had);
+        let r = process_ra_notification(&progress_end(json!("a")), &mut set, &mut had);
+        assert_eq!(r, Some(RaStatus::Ready));
+        // Cycle 2
+        let r = process_ra_notification(&progress_begin(json!("b")), &mut set, &mut had);
+        assert_eq!(r, Some(RaStatus::Indexing));
+        let r = process_ra_notification(&progress_end(json!("b")), &mut set, &mut had);
+        assert_eq!(r, Some(RaStatus::Ready));
+    }
+
+    #[test]
+    fn unknown_token_in_end_is_noop() {
+        let mut set = HashSet::new();
+        let mut had = false;
+        // End without prior begin — had_progress is false, so no Ready
+        let r = process_ra_notification(&progress_end(json!("unknown")), &mut set, &mut had);
+        assert_eq!(r, None);
+    }
+
+    #[test]
+    fn integer_token_normalized() {
+        let mut set = HashSet::new();
+        let mut had = false;
+        process_ra_notification(&progress_begin(json!(1)), &mut set, &mut had);
+        assert!(set.contains("1"));
+        let r = process_ra_notification(&progress_end(json!(1)), &mut set, &mut had);
+        assert_eq!(r, Some(RaStatus::Ready));
+    }
+
+    #[test]
+    fn string_token_normalized() {
+        let mut set = HashSet::new();
+        let mut had = false;
+        process_ra_notification(&progress_begin(json!("hello")), &mut set, &mut had);
+        // String tokens include quotes in to_string()
+        assert!(set.contains(&json!("hello").to_string()));
+        let r = process_ra_notification(&progress_end(json!("hello")), &mut set, &mut had);
+        assert_eq!(r, Some(RaStatus::Ready));
+    }
+
+    #[test]
+    fn mixed_int_string_tokens() {
+        let mut set = HashSet::new();
+        let mut had = false;
+        process_ra_notification(&progress_begin(json!(42)), &mut set, &mut had);
+        process_ra_notification(&progress_begin(json!("foo")), &mut set, &mut had);
+        assert_eq!(set.len(), 2);
+        process_ra_notification(&progress_end(json!(42)), &mut set, &mut had);
+        assert_eq!(set.len(), 1);
+        let r = process_ra_notification(&progress_end(json!("foo")), &mut set, &mut had);
+        assert_eq!(r, Some(RaStatus::Ready));
+    }
 }

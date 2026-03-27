@@ -48,6 +48,7 @@ pub enum DaemonResponse {
 #[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RaStatus {
     Initializing,
+    Indexing,
     Ready,
     Stopped,
 }
@@ -56,6 +57,7 @@ impl std::fmt::Display for RaStatus {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             RaStatus::Initializing => write!(f, "initializing"),
+            RaStatus::Indexing => write!(f, "indexing"),
             RaStatus::Ready => write!(f, "ready"),
             RaStatus::Stopped => write!(f, "stopped"),
         }
@@ -128,6 +130,24 @@ mod tests {
                 assert_eq!(pid, 42);
                 assert_eq!(ra_status, RaStatus::Ready);
                 assert_eq!(uptime_secs, 120);
+            }
+            _ => panic!("unexpected response variant"),
+        }
+    }
+
+    #[test]
+    fn roundtrip_indexing_status() {
+        let (mut a, mut b) = UnixStream::pair().unwrap();
+        let resp = DaemonResponse::Status {
+            pid: 1,
+            ra_status: RaStatus::Indexing,
+            uptime_secs: 5,
+        };
+        write_message(&mut a, &resp).unwrap();
+        let got: DaemonResponse = read_message(&mut b).unwrap();
+        match got {
+            DaemonResponse::Status { ra_status, .. } => {
+                assert_eq!(ra_status, RaStatus::Indexing);
             }
             _ => panic!("unexpected response variant"),
         }
