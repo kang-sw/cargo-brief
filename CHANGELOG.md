@@ -2,6 +2,23 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.9.0] - 2026-03-27
+
+### Added
+
+- **`lsp` subcommand** (Unix only): Persistent rust-analyzer daemon with query commands. Spawns a background `rust-analyzer` process with idle timeout and filesystem watcher for VFS updates. Communicates via FIFO-based IPC with `flock` serialization.
+  - **`lsp references <symbol> [-q]`**: Find all references to a symbol across the workspace.
+  - **`lsp blast-radius <symbol> [--depth N]`**: Direct and transitive callers via BFS (depth 1–10).
+  - **`lsp call-hierarchy <symbol> [--outgoing] [-q]`**: Incoming or outgoing call tree with arrow indicators.
+  - **`lsp touch`**: Ensure the daemon is running (spawns if needed).
+  - **`lsp stop`**: Shut down the daemon.
+  - **`lsp status`**: Show daemon status.
+  - `-q` quiet mode outputs locations only (no source context).
+
+### Platform
+
+- The `lsp` subcommand requires Unix (Linux / macOS). It is not available on Windows.
+
 ## [0.8.0] - 2026-03-24
 
 ### Added
