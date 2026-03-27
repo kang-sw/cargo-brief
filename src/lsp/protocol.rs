@@ -9,7 +9,6 @@ use serde::{Deserialize, Serialize, de::DeserializeOwned};
 
 #[derive(Serialize, Deserialize, Debug)]
 pub enum DaemonRequest {
-    Ping,
     Stop,
     Status,
     References {
@@ -104,10 +103,10 @@ mod tests {
     #[test]
     fn roundtrip_request() {
         let (mut a, mut b) = UnixStream::pair().unwrap();
-        let req = DaemonRequest::Ping;
+        let req = DaemonRequest::Stop;
         write_message(&mut a, &req).unwrap();
         let got: DaemonRequest = read_message(&mut b).unwrap();
-        assert!(matches!(got, DaemonRequest::Ping));
+        assert!(matches!(got, DaemonRequest::Stop));
     }
 
     #[test]

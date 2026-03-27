@@ -20,7 +20,7 @@ use anyhow::{Context, Result};
 use crate::cli::{LspArgs, LspCommand, RemoteOpts};
 use crate::resolve;
 
-use client::{daemon_dir, ensure_daemon, send_command};
+use client::{cleanup_daemon_files, daemon_dir, ensure_daemon, send_command};
 use protocol::{DaemonRequest, DaemonResponse};
 
 pub fn run_lsp_command(args: &LspArgs, remote: &RemoteOpts) -> Result<()> {
@@ -114,16 +114,18 @@ fn cmd_stop(target_dir: &Path, workspace_root: &Path, verbose: bool) -> Result<(
                 eprintln!("[lsp] {message}");
             }
             Ok(_) => {}
-            Err(_) => {}
+            Err(e) => {
+                if verbose {
+                    eprintln!("[lsp] stop failed: {e}");
+                }
+            }
         }
     } else if verbose {
         eprintln!("[lsp] no daemon running");
     }
 
     // Clean up files
-    for name in ["lsp.pid", "lsp.req", "lsp.resp", "lsp.lock", "lsp.log"] {
-        std::fs::remove_file(dir.join(name)).ok();
-    }
+    cleanup_daemon_files(&dir);
     std::fs::remove_dir(&dir).ok();
 
     Ok(())

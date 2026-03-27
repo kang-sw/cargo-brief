@@ -10,7 +10,7 @@ use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result, bail};
 
-use super::client::{create_fifo, set_nonblocking};
+use super::client::{create_fifo, poll_retry, set_nonblocking};
 use super::protocol::{DaemonRequest, DaemonResponse, RaStatus, read_message, write_message};
 use super::query;
 use super::transport::RaTransport;
@@ -113,7 +113,7 @@ fn send_initialize(transport: &mut RaTransport, workspace_root: &Path) -> Result
     Ok(())
 }
 
-/// Handle a single request (pure function — no IO).
+/// Handle a single request and produce a response.
 fn handle_request(
     request: &DaemonRequest,
     ra_status: RaStatus,
@@ -123,9 +123,6 @@ fn handle_request(
     workspace_root: &Path,
 ) -> DaemonResponse {
     match request {
-        DaemonRequest::Ping => DaemonResponse::Ok {
-            message: "pong".to_string(),
-        },
         DaemonRequest::Stop => {
             *shutdown = true;
             DaemonResponse::Ok {
@@ -293,14 +290,13 @@ pub fn run_daemon(workspace_root: &Path, daemon_dir: &Path) -> Result<()> {
     let mut shutdown = false;
 
     loop {
-        // Poll lsp.req for incoming data (POLLIN)
+        // Poll lsp.req for incoming data (POLLIN), EINTR-safe
         let mut pfd = libc::pollfd {
             fd: req_fd.as_raw_fd(),
             events: libc::POLLIN,
             revents: 0,
         };
-        // SAFETY: poll on a valid fd with a stack-allocated pollfd.
-        let n = unsafe { libc::poll(&mut pfd, 1, 100) };
+        let n = poll_retry(&mut pfd, 100)?;
 
         if n > 0 && (pfd.revents & libc::POLLIN) != 0 {
             // Client sent data — switch to blocking, read full message
@@ -334,8 +330,8 @@ pub fn run_daemon(workspace_root: &Path, daemon_dir: &Path) -> Result<()> {
             if shutdown {
                 break;
             }
-        } else if n == 0 {
-            // Timeout — check idle
+        } else {
+            // Timeout (n == 0) — check idle
             if last_activity.elapsed() > idle_timeout {
                 eprintln!("[lsp-daemon] idle timeout, shutting down");
                 break;

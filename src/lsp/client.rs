@@ -39,6 +39,22 @@ pub(super) fn flock_exclusive(file: &File) -> Result<()> {
     Ok(())
 }
 
+/// Call `libc::poll()` with EINTR retry. Returns the poll result (>0 = ready, 0 = timeout).
+pub(super) fn poll_retry(pfd: &mut libc::pollfd, timeout_ms: libc::c_int) -> Result<libc::c_int> {
+    loop {
+        // SAFETY: poll on a valid fd with a stack-allocated pollfd.
+        let n = unsafe { libc::poll(pfd, 1, timeout_ms) };
+        if n >= 0 {
+            return Ok(n);
+        }
+        let err = std::io::Error::last_os_error();
+        if err.raw_os_error() != Some(libc::EINTR) {
+            return Err(err).context("poll() failed");
+        }
+        // EINTR — retry
+    }
+}
+
 /// Toggle `O_NONBLOCK` on a file descriptor.
 pub(super) fn set_nonblocking(file: &File, nonblock: bool) -> Result<()> {
     let fd = file.as_raw_fd();
@@ -150,23 +166,38 @@ pub fn send_command(
     write_message(&mut req_fd, &request)?;
     drop(req_fd);
 
-    // 4. Open resp FIFO for reading (non-blocking initially for poll)
+    // 4. Open resp FIFO for reading (non-blocking initially for drain + poll)
     let resp_fd = OpenOptions::new()
         .read(true)
         .custom_flags(libc::O_NONBLOCK)
         .open(&resp_path)
         .context("Failed to open response FIFO")?;
 
-    // 5. Poll for response with timeout
+    // 4a. Drain stale data from resp FIFO (from a previously crashed client)
+    let mut drain_buf = [0u8; 4096];
+    loop {
+        // SAFETY: read on a valid fd with a stack-allocated buffer.
+        let n = unsafe {
+            libc::read(
+                resp_fd.as_raw_fd(),
+                drain_buf.as_mut_ptr() as *mut libc::c_void,
+                drain_buf.len(),
+            )
+        };
+        if n <= 0 {
+            break;
+        }
+    }
+
+    // 5. Poll for response with timeout (EINTR-safe)
     let timeout_ms: libc::c_int = timeout.as_millis().try_into().unwrap_or(libc::c_int::MAX);
     let mut pfd = libc::pollfd {
         fd: resp_fd.as_raw_fd(),
         events: libc::POLLIN,
         revents: 0,
     };
-    // SAFETY: poll on a valid fd with a stack-allocated pollfd.
-    let n = unsafe { libc::poll(&mut pfd, 1, timeout_ms) };
-    if n <= 0 {
+    let n = poll_retry(&mut pfd, timeout_ms)?;
+    if n == 0 {
         bail!(
             "Timed out waiting for daemon response ({}s)",
             timeout.as_secs()
@@ -183,7 +214,7 @@ pub fn send_command(
 }
 
 /// Remove daemon files (FIFOs, PID, lock, log) from a daemon directory.
-fn cleanup_daemon_files(dir: &Path) {
+pub(super) fn cleanup_daemon_files(dir: &Path) {
     for name in ["lsp.pid", "lsp.req", "lsp.resp", "lsp.lock", "lsp.log"] {
         std::fs::remove_file(dir.join(name)).ok();
     }
