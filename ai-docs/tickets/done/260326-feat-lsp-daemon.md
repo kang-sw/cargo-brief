@@ -2,9 +2,11 @@
 title: "LSP daemon integration via rust-analyzer"
 related:
   - 260326-feat-lsp-daemon-bootstrap  # sub-ticket: daemon bootstrap (done)
-  - 260326-feat-lsp-file-watcher      # sub-ticket: file watcher
-  - 260326-feat-lsp-query-commands    # sub-ticket: query commands
+  - 260326-feat-lsp-file-watcher      # sub-ticket: file watcher (done)
+  - 260326-feat-lsp-query-commands    # sub-ticket: query commands (done)
+  - 260327-refactor-lsp-fifo-ipc      # IPC refactor: UDS → FIFO (done)
 started: 2026-03-26
+completed: 2026-03-27
 ---
 
 # LSP daemon integration via rust-analyzer
@@ -98,3 +100,14 @@ a time. No edge cases lost.
 - In-process ra embedding (library mode)
 - Auto-refactoring / code actions
 - Diagnostics forwarding
+
+### Result (d620626) - 26-03-27
+
+All sub-tickets complete. Full `cargo brief lsp` command family operational:
+touch, stop, status, references, blast-radius, call-hierarchy.
+
+Architecture note: the UDS-based IPC described in this ticket's Architecture
+section was replaced by FIFO pair + flock serialization in
+`260327-refactor-lsp-fifo-ipc` for macOS sandbox compatibility. The current
+implementation uses `lsp.req`/`lsp.resp` named pipes instead of `lsp.sock`.
+See `ai-docs/mental-model/lsp-daemon.md` for accurate current architecture.
