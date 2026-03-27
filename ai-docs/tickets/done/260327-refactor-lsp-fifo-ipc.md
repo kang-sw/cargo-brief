@@ -4,6 +4,8 @@ related:
   - 260326-feat-lsp-daemon-bootstrap   # original UDS implementation
   - 260326-feat-lsp-query-commands     # query commands using current IPC
   - 260326-feat-lsp-windows-support    # shares IPC abstraction concern
+started: 2026-03-27
+completed: 2026-03-27
 ---
 
 # LSP daemon: FIFO-based IPC
@@ -133,3 +135,22 @@ liveness instead of ping.
 
 Remove dead UDS code, update mental model and docs, verify no socket
 syscalls remain in the lsp module.
+
+### Result (527c6e6) - 26-03-27
+
+All three phases implemented in a single session:
+
+**Phase 1** (31036b5): `write_message`/`read_message` genericized to `impl Write`/`impl Read`. All 6 existing roundtrip tests pass unchanged.
+
+**Phase 2** (7ebd956): Full UDS → FIFO replacement:
+- `daemon.rs`: `poll()`-based main loop on `lsp.req`, `O_RDWR` keeps FIFOs open for daemon lifetime, `handle_client` → `handle_request` (takes `&DaemonRequest`, returns `DaemonResponse`), `--daemon-dir` replaces `--socket`+`--pid-file`
+- `client.rs`: `ensure_daemon` returns `PathBuf`, `send_command` uses `flock` + FIFO write/poll/read with timeout, `wait_for_daemon` polls FIFO existence, new helpers (`create_fifo`, `flock_exclusive`, `set_nonblocking`)
+- `mod.rs`: All `cmd_*` use daemon dir + `send_command` with explicit timeouts
+
+**Phase 3** (527c6e6, code review fixes): Removed `DaemonRequest::Ping` (dead after UDS removal). Added `poll_retry()` for EINTR safety. Added stale FIFO data drain. Updated mental model, `_index.md`, `_memory.md`.
+
+**Deviations:**
+- Plan's "daemon keeps FIFOs open with O_RDWR" design preserved exactly
+- Plan suggested `handle_request` as "pure function, no IO" — review caught this was incorrect (query handlers do IO via transport); doc comment corrected
+- Stale FIFO data race (crashed client leaving orphaned response) not in plan — added client-side drain as mitigation during review
+- EINTR handling not in plan — added during code review

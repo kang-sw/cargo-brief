@@ -1,13 +1,16 @@
-//! LSP daemon process: spawns rust-analyzer, accepts UDS clients, handles idle timeout.
+//! LSP daemon process: spawns rust-analyzer, accepts FIFO clients, handles idle timeout.
 
+use std::fs::{File, OpenOptions};
 use std::io::BufRead;
-use std::os::unix::net::UnixListener;
+use std::os::unix::fs::OpenOptionsExt;
+use std::os::unix::io::AsRawFd;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result, bail};
 
+use super::client::{create_fifo, poll_retry, set_nonblocking};
 use super::protocol::{DaemonRequest, DaemonResponse, RaStatus, read_message, write_message};
 use super::query;
 use super::transport::RaTransport;
@@ -21,13 +24,12 @@ pub fn run_daemon_from_args() -> Result<()> {
     let args: Vec<String> = std::env::args().collect();
 
     let mut workspace_root = None;
-    let mut socket = None;
-    let mut pid_file = None;
+    let mut daemon_dir = None;
 
     let mut i = 2; // skip binary name and "__lsp-daemon"
     while i < args.len() {
         match args[i].as_str() {
-            "--workspace-root" | "--socket" | "--pid-file" => {
+            "--workspace-root" | "--daemon-dir" => {
                 let flag = &args[i];
                 i += 1;
                 let value = args
@@ -35,8 +37,7 @@ pub fn run_daemon_from_args() -> Result<()> {
                     .with_context(|| format!("Missing value for {flag}"))?;
                 match flag.as_str() {
                     "--workspace-root" => workspace_root = Some(PathBuf::from(value)),
-                    "--socket" => socket = Some(PathBuf::from(value)),
-                    "--pid-file" => pid_file = Some(PathBuf::from(value)),
+                    "--daemon-dir" => daemon_dir = Some(PathBuf::from(value)),
                     _ => unreachable!(),
                 }
             }
@@ -46,10 +47,9 @@ pub fn run_daemon_from_args() -> Result<()> {
     }
 
     let workspace_root = workspace_root.context("Missing --workspace-root")?;
-    let socket = socket.context("Missing --socket")?;
-    let pid_file = pid_file.context("Missing --pid-file")?;
+    let daemon_dir = daemon_dir.context("Missing --daemon-dir")?;
 
-    run_daemon(&workspace_root, &socket, &pid_file)
+    run_daemon(&workspace_root, &daemon_dir)
 }
 
 /// Discover the rust-analyzer binary path.
@@ -113,24 +113,16 @@ fn send_initialize(transport: &mut RaTransport, workspace_root: &Path) -> Result
     Ok(())
 }
 
-/// Handle a single client connection on the UDS.
-fn handle_client(
-    mut stream: std::os::unix::net::UnixStream,
+/// Handle a single request and produce a response.
+fn handle_request(
+    request: &DaemonRequest,
     ra_status: RaStatus,
     start_time: Instant,
     shutdown: &mut bool,
     transport: &mut RaTransport,
     workspace_root: &Path,
-) -> Result<()> {
-    // Set a read timeout to avoid blocking forever on malformed clients
-    stream.set_read_timeout(Some(Duration::from_secs(5)))?;
-
-    let request: DaemonRequest = read_message(&mut stream)?;
-
-    let response = match request {
-        DaemonRequest::Ping => DaemonResponse::Ok {
-            message: "pong".to_string(),
-        },
+) -> DaemonResponse {
+    match request {
         DaemonRequest::Stop => {
             *shutdown = true;
             DaemonResponse::Ok {
@@ -143,7 +135,7 @@ fn handle_client(
             uptime_secs: start_time.elapsed().as_secs(),
         },
         DaemonRequest::References { symbol, quiet } => {
-            match query::handle_references(transport, workspace_root, &symbol, quiet) {
+            match query::handle_references(transport, workspace_root, symbol, *quiet) {
                 Ok(output) => DaemonResponse::QueryResult { output },
                 Err(e) => DaemonResponse::Error {
                     message: format!("{e}"),
@@ -154,7 +146,7 @@ fn handle_client(
             symbol,
             depth,
             quiet,
-        } => match query::handle_blast_radius(transport, workspace_root, &symbol, depth, quiet) {
+        } => match query::handle_blast_radius(transport, workspace_root, symbol, *depth, *quiet) {
             Ok(output) => DaemonResponse::QueryResult { output },
             Err(e) => DaemonResponse::Error {
                 message: format!("{e}"),
@@ -165,7 +157,7 @@ fn handle_client(
             outgoing,
             quiet,
         } => {
-            match query::handle_call_hierarchy(transport, workspace_root, &symbol, outgoing, quiet)
+            match query::handle_call_hierarchy(transport, workspace_root, symbol, *outgoing, *quiet)
             {
                 Ok(output) => DaemonResponse::QueryResult { output },
                 Err(e) => DaemonResponse::Error {
@@ -173,10 +165,7 @@ fn handle_client(
                 },
             }
         }
-    };
-
-    write_message(&mut stream, &response)?;
-    Ok(())
+    }
 }
 
 /// Shutdown rust-analyzer gracefully via LSP shutdown/exit.
@@ -197,16 +186,16 @@ fn shutdown_ra(transport: &mut RaTransport) {
 }
 
 /// Main daemon loop.
-pub fn run_daemon(workspace_root: &Path, socket_path: &Path, pid_path: &Path) -> Result<()> {
+pub fn run_daemon(workspace_root: &Path, daemon_dir: &Path) -> Result<()> {
     let start_time = Instant::now();
-
-    // Clean up stale socket
-    if socket_path.exists() {
-        std::fs::remove_file(socket_path).ok();
-    }
+    let pid_path = daemon_dir.join("lsp.pid");
+    let req_path = daemon_dir.join("lsp.req");
+    let resp_path = daemon_dir.join("lsp.resp");
+    let lock_path = daemon_dir.join("lsp.lock");
 
     // 1. Write PID file early to prevent double-spawn race
-    std::fs::write(pid_path, std::process::id().to_string()).context("Failed to write PID file")?;
+    std::fs::write(&pid_path, std::process::id().to_string())
+        .context("Failed to write PID file")?;
 
     // 2. Discover ra binary
     let ra_bin = discover_ra_binary()?;
@@ -263,13 +252,32 @@ pub fn run_daemon(workspace_root: &Path, socket_path: &Path, pid_path: &Path) ->
     };
     let mut debounce_buf = DebounceBuffer::new();
 
-    // 6. Bind UDS listener
-    let listener = UnixListener::bind(socket_path).context("Failed to bind UDS listener socket")?;
-    listener
-        .set_nonblocking(true)
-        .context("Failed to set listener non-blocking")?;
+    // 6. Create FIFOs and lock file (AFTER ra init — preserves readiness invariant)
+    // Clean stale FIFOs first
+    std::fs::remove_file(&req_path).ok();
+    std::fs::remove_file(&resp_path).ok();
+    create_fifo(&req_path, 0o600).context("Failed to create request FIFO")?;
+    create_fifo(&resp_path, 0o600).context("Failed to create response FIFO")?;
+    File::create(&lock_path).context("Failed to create lock file")?;
 
-    eprintln!("[lsp-daemon] listening on {}", socket_path.display());
+    // Open FIFOs with O_RDWR — daemon keeps both open for its lifetime.
+    // O_RDWR prevents open() from blocking and eliminates POLLHUP races.
+    let req_fd = OpenOptions::new()
+        .read(true)
+        .write(true)
+        .custom_flags(libc::O_NONBLOCK)
+        .open(&req_path)
+        .context("Failed to open request FIFO")?;
+    let mut resp_fd = OpenOptions::new()
+        .read(true)
+        .write(true)
+        .open(&resp_path)
+        .context("Failed to open response FIFO")?;
+
+    eprintln!(
+        "[lsp-daemon] listening on FIFOs in {}",
+        daemon_dir.display()
+    );
 
     // 7. Main loop
     let idle_timeout = Duration::from_secs(
@@ -282,32 +290,51 @@ pub fn run_daemon(workspace_root: &Path, socket_path: &Path, pid_path: &Path) ->
     let mut shutdown = false;
 
     loop {
-        match listener.accept() {
-            Ok((stream, _)) => {
-                if let Err(e) = handle_client(
-                    stream,
-                    ra_status,
-                    start_time,
-                    &mut shutdown,
-                    &mut transport,
-                    workspace_root,
-                ) {
-                    eprintln!("[lsp-daemon] client error: {e}");
+        // Poll lsp.req for incoming data (POLLIN), EINTR-safe
+        let mut pfd = libc::pollfd {
+            fd: req_fd.as_raw_fd(),
+            events: libc::POLLIN,
+            revents: 0,
+        };
+        let n = poll_retry(&mut pfd, 100)?;
+
+        if n > 0 && (pfd.revents & libc::POLLIN) != 0 {
+            // Client sent data — switch to blocking, read full message
+            set_nonblocking(&req_fd, false)?;
+            let request: DaemonRequest = match read_message(&mut &req_fd) {
+                Ok(req) => req,
+                Err(e) => {
+                    eprintln!("[lsp-daemon] failed to read request: {e}");
+                    set_nonblocking(&req_fd, true)?;
+                    continue;
                 }
-                last_activity = Instant::now();
-                if shutdown {
-                    break;
-                }
+            };
+            set_nonblocking(&req_fd, true)?;
+
+            // Process request
+            let response = handle_request(
+                &request,
+                ra_status,
+                start_time,
+                &mut shutdown,
+                &mut transport,
+                workspace_root,
+            );
+
+            // Write response
+            if let Err(e) = write_message(&mut resp_fd, &response) {
+                eprintln!("[lsp-daemon] failed to write response: {e}");
             }
-            Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
-                if last_activity.elapsed() > idle_timeout {
-                    eprintln!("[lsp-daemon] idle timeout, shutting down");
-                    break;
-                }
-                std::thread::sleep(Duration::from_millis(100));
+
+            last_activity = Instant::now();
+            if shutdown {
+                break;
             }
-            Err(e) => {
-                eprintln!("[lsp-daemon] accept error: {e}");
+        } else {
+            // Timeout (n == 0) — check idle
+            if last_activity.elapsed() > idle_timeout {
+                eprintln!("[lsp-daemon] idle timeout, shutting down");
+                break;
             }
         }
 
@@ -348,13 +375,13 @@ pub fn run_daemon(workspace_root: &Path, socket_path: &Path, pid_path: &Path) ->
     // Wait for ra to exit
     let _ = ra_child.wait();
 
-    std::fs::remove_file(pid_path).ok();
-    std::fs::remove_file(socket_path).ok();
-    std::fs::remove_file(socket_path.with_file_name("lsp.log")).ok();
+    std::fs::remove_file(&pid_path).ok();
+    std::fs::remove_file(&req_path).ok();
+    std::fs::remove_file(&resp_path).ok();
+    std::fs::remove_file(&lock_path).ok();
+    std::fs::remove_file(daemon_dir.join("lsp.log")).ok();
     // Try to remove the parent directory (only succeeds if empty)
-    if let Some(parent) = socket_path.parent() {
-        std::fs::remove_dir(parent).ok();
-    }
+    std::fs::remove_dir(daemon_dir).ok();
 
     eprintln!("[lsp-daemon] shut down cleanly");
     Ok(())
