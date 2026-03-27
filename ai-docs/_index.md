@@ -126,7 +126,7 @@ src/
   main.rs          — CLI arg parsing, subcommand dispatch, RemoteOpts extraction from BriefDirect, __lsp-daemon early-exit
   cli.rs           — Subcommand types: ApiArgs, SearchArgs, ExamplesArgs, SummaryArgs, CleanArgs, LspArgs + shared TargetArgs/FilterArgs/GlobalArgs + RemoteOpts (plain struct)
   cross_crate.rs   — cross-crate module following for facade crates
-  lsp/             — LSP daemon management (unix-only): mod.rs (entry), daemon.rs (process), client.rs (connect/spawn), protocol.rs (UDS framing), transport.rs (LSP JSON-RPC framing), watcher.rs (filesystem watching), query.rs (symbol resolution + references)
+  lsp/             — LSP daemon management (unix-only): mod.rs (entry), daemon.rs (process), client.rs (connect/spawn), protocol.rs (FIFO IPC framing), transport.rs (LSP JSON-RPC framing), watcher.rs (filesystem watching), query.rs (symbol resolution + references)
   remote.rs        — temp workspace creation for --crates (crates.io fetch) + cache management
   resolve.rs       — flexible target resolution (self, crate::module, fallback) + cargo metadata
   rustdoc_json.rs  — JSON generation (with use_cache param) + parsing (bincode-cached)
@@ -197,7 +197,7 @@ Domain-oriented operational knowledge in `ai-docs/mental-model/`:
 | `remote-pipeline.md` | `--crates` lifecycle: TempDir borrow chain, version semantics, remote-only constraints |
 | `glob-expansion.md` | Glob re-export expansion: string-based detection, Phase 1/2 inlining, coupling with render |
 | `testing.md` | Test infrastructure: BriefArgs coupling, fixture contracts, visibility test patterns |
-| `lsp-daemon.md` | LSP daemon: re-exec contract, UDS framing, PID ordering, idle timeout |
+| `lsp-daemon.md` | LSP daemon: re-exec contract, FIFO IPC, flock serialization, idle timeout |
 
 ---
 
