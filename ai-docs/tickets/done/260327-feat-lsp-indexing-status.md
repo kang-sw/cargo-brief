@@ -1,5 +1,7 @@
 ---
 title: "LSP daemon: track rust-analyzer indexing status via $/progress"
+started: 2026-03-27
+completed: 2026-03-27
 related:
   - 260326-feat-lsp-windows-support  # same subsystem
 ---
@@ -53,3 +55,23 @@ When a query request arrives and `ra_status == Indexing`, enter a
 sub-loop that drains ra stdout until indexing completes or timeout
 (default 60s, env-configurable). Then execute the query normally.
 Update client-side `send_command` timeout to accommodate the extra wait.
+
+### Result (56b7f2b) - 26-03-27
+
+Implemented both phases in a single pass.
+
+**Phase 1 — ra stdout polling + indexing state tracking:**
+- Added `RaStatus::Indexing` variant to protocol.rs
+- Added `stdout_raw_fd()`, `has_buffered_data()`, `send_raw_response()` to `RaTransport`
+- Modified `send_request_and_wait()` to reply to server-initiated requests (e.g. `window/workDoneProgress/create`)
+- Added `process_ra_notification()` pure function (11 unit tests) tracking `$/progress` begin/end tokens via `HashSet<String>`
+- Added `drain_ra_messages()` called each main loop iteration with poll-then-read pattern
+- `NO_PROGRESS_FALLBACK_SECS` (10s): if no `$/progress` ever seen, assume Ready
+- Declared `window.workDoneProgress: true` in initialize capabilities (code review finding)
+
+**Phase 2 — query-time wait-for-ready:**
+- Added `wait_for_ready()` blocking drain loop (500ms poll intervals, 60s default timeout via `CARGO_BRIEF_LSP_READY_TIMEOUT`)
+- Query commands (References, BlastRadius, CallHierarchy) gate on `wait_for_ready()` before dispatch
+- Client-side query timeout increased to 120s (`QUERY_TIMEOUT` constant in mod.rs)
+
+**Deviations from ticket:** Used single-fd poll pattern (poll ra stdout separately in main loop) rather than adding ra stdout to the FIFO pollfd set — simpler integration with existing BufReader wrapping.
