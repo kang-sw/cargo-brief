@@ -131,6 +131,10 @@ fn cmd_stop(target_dir: &Path, workspace_root: &Path, verbose: bool) -> Result<(
     Ok(())
 }
 
+/// Client-side timeout for query commands: 120s to accommodate
+/// 60s daemon-side indexing wait + 30s query execution + margin.
+const QUERY_TIMEOUT: Duration = Duration::from_secs(120);
+
 /// Send a query request to the daemon and print the result.
 fn cmd_query(
     target_dir: &Path,
@@ -140,7 +144,7 @@ fn cmd_query(
 ) -> Result<()> {
     let dir = ensure_daemon(target_dir, workspace_root, verbose)?;
 
-    let resp = send_command(&dir, request, Duration::from_secs(30))?;
+    let resp = send_command(&dir, request, QUERY_TIMEOUT)?;
     match resp {
         DaemonResponse::QueryResult { output } => {
             print!("{output}");
