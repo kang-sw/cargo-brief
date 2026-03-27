@@ -1,7 +1,8 @@
 //! Client-side logic: ensure daemon is running, connect, send commands.
 
-use std::fs::File;
-use std::os::unix::net::UnixStream;
+use std::fs::{File, OpenOptions};
+use std::os::unix::fs::OpenOptionsExt;
+use std::os::unix::io::AsRawFd;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 use std::time::{Duration, Instant};
@@ -10,8 +11,57 @@ use anyhow::{Context, Result, bail};
 
 use super::protocol::{DaemonRequest, DaemonResponse, read_message, write_message};
 
-/// Socket/PID directory for a workspace. Uses `<target_dir>/cargo-brief-lsp/<hash>`
-/// so the socket lives inside the project's target directory (sandbox-friendly).
+/// Create a named pipe (FIFO) at `path`. Ignores `EEXIST` (idempotent).
+pub(super) fn create_fifo(path: &Path, mode: libc::mode_t) -> Result<()> {
+    use std::ffi::CString;
+    use std::os::unix::ffi::OsStrExt;
+
+    let c_path =
+        CString::new(path.as_os_str().as_bytes()).context("FIFO path contains null byte")?;
+    // SAFETY: mkfifo is a standard POSIX call; c_path is valid and null-terminated.
+    let ret = unsafe { libc::mkfifo(c_path.as_ptr(), mode) };
+    if ret != 0 {
+        let err = std::io::Error::last_os_error();
+        if err.raw_os_error() != Some(libc::EEXIST) {
+            return Err(err).with_context(|| format!("mkfifo failed: {}", path.display()));
+        }
+    }
+    Ok(())
+}
+
+/// Acquire an exclusive advisory lock on `file` (blocking).
+pub(super) fn flock_exclusive(file: &File) -> Result<()> {
+    // SAFETY: flock is a standard POSIX call; fd is valid while File is alive.
+    let ret = unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_EX) };
+    if ret != 0 {
+        return Err(std::io::Error::last_os_error()).context("flock(LOCK_EX) failed");
+    }
+    Ok(())
+}
+
+/// Toggle `O_NONBLOCK` on a file descriptor.
+pub(super) fn set_nonblocking(file: &File, nonblock: bool) -> Result<()> {
+    let fd = file.as_raw_fd();
+    // SAFETY: fcntl F_GETFL/F_SETFL are standard POSIX calls on a valid fd.
+    unsafe {
+        let flags = libc::fcntl(fd, libc::F_GETFL);
+        if flags == -1 {
+            return Err(std::io::Error::last_os_error()).context("fcntl(F_GETFL) failed");
+        }
+        let new_flags = if nonblock {
+            flags | libc::O_NONBLOCK
+        } else {
+            flags & !libc::O_NONBLOCK
+        };
+        if libc::fcntl(fd, libc::F_SETFL, new_flags) == -1 {
+            return Err(std::io::Error::last_os_error()).context("fcntl(F_SETFL) failed");
+        }
+    }
+    Ok(())
+}
+
+/// Daemon directory for a workspace. Uses `<target_dir>/cargo-brief-lsp/<hash>`
+/// so the FIFOs live inside the project's target directory (sandbox-friendly).
 /// Canonicalizes the workspace root to avoid duplicate daemons from symlinks.
 pub fn daemon_dir(target_dir: &Path, workspace_root: &Path) -> PathBuf {
     let canonical = workspace_root
@@ -21,22 +71,24 @@ pub fn daemon_dir(target_dir: &Path, workspace_root: &Path) -> PathBuf {
     target_dir.join("cargo-brief-lsp").join(hash)
 }
 
-/// Ensure daemon is running and return a connected UDS stream.
-pub fn ensure_daemon(
-    target_dir: &Path,
-    workspace_root: &Path,
-    verbose: bool,
-) -> Result<UnixStream> {
+/// Ensure daemon is running. Returns the daemon directory path.
+/// Liveness check: PID file alive + `lsp.req` FIFO exists (readiness invariant).
+pub fn ensure_daemon(target_dir: &Path, workspace_root: &Path, verbose: bool) -> Result<PathBuf> {
     let dir = daemon_dir(target_dir, workspace_root);
-    let sock = dir.join("lsp.sock");
     let pid_file = dir.join("lsp.pid");
+    let req_fifo = dir.join("lsp.req");
 
-    // Try connecting to existing daemon
-    if let Some(stream) = try_connect(&sock) {
+    // Check if existing daemon is alive and ready (FIFOs exist)
+    if req_fifo.exists()
+        && pid_file.exists()
+        && let Ok(pid_str) = std::fs::read_to_string(&pid_file)
+        && let Ok(pid) = pid_str.trim().parse::<u32>()
+        && process_alive(pid)
+    {
         if verbose {
-            eprintln!("[lsp] connected to existing daemon");
+            eprintln!("[lsp] daemon already running (PID {pid})");
         }
-        return Ok(stream);
+        return Ok(dir);
     }
 
     // Check for stale PID file
@@ -48,8 +100,7 @@ pub fn ensure_daemon(
         if verbose {
             eprintln!("[lsp] cleaning up stale daemon (PID {pid})");
         }
-        std::fs::remove_file(&pid_file).ok();
-        std::fs::remove_file(&sock).ok();
+        cleanup_daemon_files(&dir);
     }
 
     // Spawn daemon process
@@ -61,36 +112,85 @@ pub fn ensure_daemon(
     if verbose {
         eprintln!("[lsp] spawning daemon for {}", workspace_root.display());
     }
-    let mut child = spawn_daemon(workspace_root, &sock, &pid_file, &log_path)?;
+    let mut child = spawn_daemon(workspace_root, &dir, &log_path)?;
 
-    // Wait for socket to become available (poll with backoff)
-    wait_for_socket(&sock, Duration::from_secs(120), &mut child, &log_path)
+    // Wait for FIFO to appear (daemon creates FIFOs after ra init)
+    wait_for_daemon(&dir, Duration::from_secs(120), &mut child, &log_path)?;
+    Ok(dir)
 }
 
-/// Send a request to the daemon and return the response.
-pub fn send_command(stream: &mut UnixStream, request: DaemonRequest) -> Result<DaemonResponse> {
-    write_message(stream, &request)?;
-    read_message(stream)
+/// Send a request to the daemon via FIFO and return the response.
+/// Uses `flock` on `lsp.lock` to serialize concurrent clients.
+pub fn send_command(
+    daemon_dir: &Path,
+    request: DaemonRequest,
+    timeout: Duration,
+) -> Result<DaemonResponse> {
+    let lock_path = daemon_dir.join("lsp.lock");
+    let req_path = daemon_dir.join("lsp.req");
+    let resp_path = daemon_dir.join("lsp.resp");
+
+    // 1. Acquire exclusive lock
+    let lock_file = OpenOptions::new()
+        .read(true)
+        .write(true)
+        .create(true)
+        .truncate(false)
+        .open(&lock_path)
+        .context("Failed to open lock file")?;
+    flock_exclusive(&lock_file)?;
+
+    // 2. Open req FIFO for writing (blocks until daemon has read-end — instant)
+    let mut req_fd = OpenOptions::new()
+        .write(true)
+        .open(&req_path)
+        .context("Failed to open request FIFO")?;
+
+    // 3. Write request, then drop to signal we're done writing
+    write_message(&mut req_fd, &request)?;
+    drop(req_fd);
+
+    // 4. Open resp FIFO for reading (non-blocking initially for poll)
+    let resp_fd = OpenOptions::new()
+        .read(true)
+        .custom_flags(libc::O_NONBLOCK)
+        .open(&resp_path)
+        .context("Failed to open response FIFO")?;
+
+    // 5. Poll for response with timeout
+    let timeout_ms: libc::c_int = timeout.as_millis().try_into().unwrap_or(libc::c_int::MAX);
+    let mut pfd = libc::pollfd {
+        fd: resp_fd.as_raw_fd(),
+        events: libc::POLLIN,
+        revents: 0,
+    };
+    // SAFETY: poll on a valid fd with a stack-allocated pollfd.
+    let n = unsafe { libc::poll(&mut pfd, 1, timeout_ms) };
+    if n <= 0 {
+        bail!(
+            "Timed out waiting for daemon response ({}s)",
+            timeout.as_secs()
+        );
+    }
+
+    // 6. Switch to blocking and read the response
+    set_nonblocking(&resp_fd, false)?;
+    let mut resp_fd = resp_fd;
+    let response: DaemonResponse = read_message(&mut resp_fd)?;
+
+    // 7. flock auto-released on lock_fd drop
+    Ok(response)
 }
 
-/// Try connecting to an existing daemon. Returns None if connection fails.
-fn try_connect(sock: &Path) -> Option<UnixStream> {
-    let mut stream = UnixStream::connect(sock).ok()?;
-    stream.set_read_timeout(Some(Duration::from_secs(5))).ok()?;
-
-    // Verify with a ping
-    write_message(&mut stream, &DaemonRequest::Ping).ok()?;
-    let resp: DaemonResponse = read_message(&mut stream).ok()?;
-
-    match resp {
-        DaemonResponse::Ok { .. } => Some(stream),
-        _ => None,
+/// Remove daemon files (FIFOs, PID, lock, log) from a daemon directory.
+fn cleanup_daemon_files(dir: &Path) {
+    for name in ["lsp.pid", "lsp.req", "lsp.resp", "lsp.lock", "lsp.log"] {
+        std::fs::remove_file(dir.join(name)).ok();
     }
 }
 
-/// Spawn the daemon via re-exec. Returns the Child handle (caller must hold it
-/// to avoid zombie processes — `try_wait()` is used for death detection).
-fn spawn_daemon(workspace_root: &Path, sock: &Path, pid: &Path, log_path: &Path) -> Result<Child> {
+/// Spawn the daemon via re-exec. Returns the Child handle.
+fn spawn_daemon(workspace_root: &Path, daemon_dir: &Path, log_path: &Path) -> Result<Child> {
     use std::os::unix::process::CommandExt;
 
     let exe = std::env::current_exe().context("Failed to get current executable path")?;
@@ -98,8 +198,7 @@ fn spawn_daemon(workspace_root: &Path, sock: &Path, pid: &Path, log_path: &Path)
     let ws_str = workspace_root
         .to_str()
         .context("Non-UTF8 workspace root path")?;
-    let sock_str = sock.to_str().context("Non-UTF8 socket path")?;
-    let pid_str = pid.to_str().context("Non-UTF8 pid file path")?;
+    let dir_str = daemon_dir.to_str().context("Non-UTF8 daemon dir path")?;
 
     let log_file = File::create(log_path)
         .with_context(|| format!("Failed to create daemon log: {}", log_path.display()))?;
@@ -109,10 +208,8 @@ fn spawn_daemon(workspace_root: &Path, sock: &Path, pid: &Path, log_path: &Path)
             "__lsp-daemon",
             "--workspace-root",
             ws_str,
-            "--socket",
-            sock_str,
-            "--pid-file",
-            pid_str,
+            "--daemon-dir",
+            dir_str,
         ])
         .stdin(Stdio::null())
         .stdout(Stdio::null())
@@ -124,25 +221,25 @@ fn spawn_daemon(workspace_root: &Path, sock: &Path, pid: &Path, log_path: &Path)
     Ok(child)
 }
 
-/// Wait for the socket file to appear and be connectable.
-/// Uses `child.try_wait()` each iteration for fast failure detection (also reaps
-/// zombies — `kill(pid, 0)` alone cannot detect exited children of this process).
-fn wait_for_socket(
-    sock: &Path,
+/// Wait for the daemon's `lsp.req` FIFO to appear (readiness signal).
+/// Uses `child.try_wait()` each iteration for fast failure detection.
+fn wait_for_daemon(
+    daemon_dir: &Path,
     timeout: Duration,
     child: &mut Child,
     log_path: &Path,
-) -> Result<UnixStream> {
+) -> Result<()> {
     let start = Instant::now();
     let mut interval = Duration::from_millis(50);
     let pid = child.id();
+    let req_fifo = daemon_dir.join("lsp.req");
 
     while start.elapsed() < timeout {
-        if let Some(stream) = try_connect(sock) {
-            return Ok(stream);
+        if req_fifo.exists() {
+            return Ok(());
         }
 
-        // Check if daemon died before we could connect (try_wait reaps zombies)
+        // Check if daemon died before FIFOs appeared (try_wait reaps zombies)
         if let Ok(Some(_status)) = child.try_wait() {
             let tail = read_log_tail(log_path, 20);
             let log_section = if tail.is_empty() {
@@ -168,11 +265,11 @@ fn wait_for_socket(
         tail
     };
     bail!(
-        "Timed out waiting for LSP daemon socket after {}s.\n\
-         Socket path: {}\n\
+        "Timed out waiting for LSP daemon after {}s.\n\
+         Daemon dir: {}\n\
          Daemon log:\n{log_section}",
         timeout.as_secs(),
-        sock.display()
+        daemon_dir.display()
     )
 }
 
@@ -268,5 +365,52 @@ mod tests {
         std::fs::write(&path, "").unwrap();
         let tail = read_log_tail(&path, 20);
         assert!(tail.is_empty());
+    }
+
+    #[test]
+    fn create_fifo_creates_pipe() {
+        use std::os::unix::fs::FileTypeExt;
+        let dir = tempfile::tempdir().unwrap();
+        let fifo = dir.path().join("test.fifo");
+        create_fifo(&fifo, 0o600).unwrap();
+        assert!(std::fs::metadata(&fifo).unwrap().file_type().is_fifo());
+    }
+
+    #[test]
+    fn create_fifo_idempotent() {
+        let dir = tempfile::tempdir().unwrap();
+        let fifo = dir.path().join("test.fifo");
+        create_fifo(&fifo, 0o600).unwrap();
+        create_fifo(&fifo, 0o600).unwrap(); // second call succeeds (EEXIST ignored)
+    }
+
+    #[test]
+    fn flock_exclusive_blocks_second() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("test.lock");
+        let f1 = File::create(&path).unwrap();
+        flock_exclusive(&f1).unwrap();
+
+        // Try non-blocking lock — should fail with EWOULDBLOCK
+        let f2 = File::open(&path).unwrap();
+        let ret = unsafe { libc::flock(f2.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) };
+        assert_ne!(ret, 0);
+        let err = std::io::Error::last_os_error();
+        assert_eq!(err.raw_os_error(), Some(libc::EWOULDBLOCK));
+    }
+
+    #[test]
+    fn set_nonblocking_toggles_flag() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("test.file");
+        let f = File::create(&path).unwrap();
+
+        set_nonblocking(&f, true).unwrap();
+        let flags = unsafe { libc::fcntl(f.as_raw_fd(), libc::F_GETFL) };
+        assert_ne!(flags & libc::O_NONBLOCK, 0);
+
+        set_nonblocking(&f, false).unwrap();
+        let flags = unsafe { libc::fcntl(f.as_raw_fd(), libc::F_GETFL) };
+        assert_eq!(flags & libc::O_NONBLOCK, 0);
     }
 }

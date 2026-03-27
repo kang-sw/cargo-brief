@@ -3,7 +3,7 @@
 //! Provides `cargo brief lsp` subcommands: `touch`, `stop`, `status`, `references`,
 //! `blast-radius`, `call-hierarchy`.
 //! The daemon spawns rust-analyzer as a background process, communicates
-//! via LSP over stdio, and accepts client queries via Unix domain socket.
+//! via LSP over stdio, and accepts client queries via named pipes (FIFOs).
 
 pub(crate) mod client;
 pub mod daemon;
@@ -13,6 +13,7 @@ mod transport;
 mod watcher;
 
 use std::path::Path;
+use std::time::Duration;
 
 use anyhow::{Context, Result};
 
@@ -80,15 +81,9 @@ pub fn run_lsp_command(args: &LspArgs, remote: &RemoteOpts) -> Result<()> {
 
 /// Ensure daemon is running (start if needed).
 fn cmd_touch(target_dir: &Path, workspace_root: &Path, verbose: bool) -> Result<()> {
-    ensure_daemon(target_dir, workspace_root, verbose)?;
+    let dir = ensure_daemon(target_dir, workspace_root, verbose)?;
 
-    let dir = daemon_dir(target_dir, workspace_root);
-    let sock = dir.join("lsp.sock");
-    let mut stream = std::os::unix::net::UnixStream::connect(&sock)
-        .context("Failed to connect to LSP daemon")?;
-    stream.set_read_timeout(Some(std::time::Duration::from_secs(5)))?;
-
-    let resp = send_command(&mut stream, DaemonRequest::Status)?;
+    let resp = send_command(&dir, DaemonRequest::Status, Duration::from_secs(5))?;
     match resp {
         DaemonResponse::Status {
             pid,
@@ -111,27 +106,24 @@ fn cmd_touch(target_dir: &Path, workspace_root: &Path, verbose: bool) -> Result<
 /// Stop the daemon.
 fn cmd_stop(target_dir: &Path, workspace_root: &Path, verbose: bool) -> Result<()> {
     let dir = daemon_dir(target_dir, workspace_root);
-    let sock = dir.join("lsp.sock");
 
-    if let Ok(mut stream) = std::os::unix::net::UnixStream::connect(&sock) {
-        stream
-            .set_read_timeout(Some(std::time::Duration::from_secs(5)))
-            .ok();
-
-        if let Ok(()) = protocol::write_message(&mut stream, &DaemonRequest::Stop)
-            && let Ok(DaemonResponse::Ok { message }) =
-                protocol::read_message::<DaemonResponse>(&mut stream)
-        {
-            eprintln!("[lsp] {message}");
+    // Try sending stop — if FIFOs don't exist, daemon is not running
+    if dir.join("lsp.req").exists() {
+        match send_command(&dir, DaemonRequest::Stop, Duration::from_secs(5)) {
+            Ok(DaemonResponse::Ok { message }) => {
+                eprintln!("[lsp] {message}");
+            }
+            Ok(_) => {}
+            Err(_) => {}
         }
     } else if verbose {
         eprintln!("[lsp] no daemon running");
     }
 
-    let pid_file = dir.join("lsp.pid");
-    std::fs::remove_file(&sock).ok();
-    std::fs::remove_file(&pid_file).ok();
-    std::fs::remove_file(dir.join("lsp.log")).ok();
+    // Clean up files
+    for name in ["lsp.pid", "lsp.req", "lsp.resp", "lsp.lock", "lsp.log"] {
+        std::fs::remove_file(dir.join(name)).ok();
+    }
     std::fs::remove_dir(&dir).ok();
 
     Ok(())
@@ -144,15 +136,9 @@ fn cmd_query(
     verbose: bool,
     request: DaemonRequest,
 ) -> Result<()> {
-    ensure_daemon(target_dir, workspace_root, verbose)?;
+    let dir = ensure_daemon(target_dir, workspace_root, verbose)?;
 
-    let dir = daemon_dir(target_dir, workspace_root);
-    let sock = dir.join("lsp.sock");
-    let mut stream = std::os::unix::net::UnixStream::connect(&sock)
-        .context("Failed to connect to LSP daemon")?;
-    stream.set_read_timeout(Some(std::time::Duration::from_secs(30)))?;
-
-    let resp = send_command(&mut stream, request)?;
+    let resp = send_command(&dir, request, Duration::from_secs(30))?;
     match resp {
         DaemonResponse::QueryResult { output } => {
             print!("{output}");
@@ -166,41 +152,39 @@ fn cmd_query(
 /// Show daemon status.
 fn cmd_status(target_dir: &Path, workspace_root: &Path) -> Result<()> {
     let dir = daemon_dir(target_dir, workspace_root);
-    let sock = dir.join("lsp.sock");
 
-    match std::os::unix::net::UnixStream::connect(&sock) {
-        Ok(mut stream) => {
-            stream
-                .set_read_timeout(Some(std::time::Duration::from_secs(5)))
-                .ok();
+    // Check if daemon FIFOs exist
+    if !dir.join("lsp.req").exists() {
+        println!("LSP daemon: not running");
+        return Ok(());
+    }
 
-            let resp = send_command(&mut stream, DaemonRequest::Status)?;
-            match resp {
-                DaemonResponse::Status {
-                    pid,
-                    ra_status,
-                    uptime_secs,
-                } => {
-                    let minutes = uptime_secs / 60;
-                    let seconds = uptime_secs % 60;
-                    println!("LSP daemon: running");
-                    println!("  PID:     {pid}");
-                    println!("  RA:      {ra_status}");
-                    println!("  Uptime:  {minutes}m {seconds}s");
-                    println!("  Socket:  {}", sock.display());
-                }
-                DaemonResponse::Error { message } => {
-                    println!("LSP daemon: error");
-                    println!("  {message}");
-                }
-                DaemonResponse::Ok { message } => {
-                    println!("LSP daemon: {message}");
-                }
-                DaemonResponse::QueryResult { .. } => {
-                    println!("LSP daemon: unexpected response");
-                }
+    match send_command(&dir, DaemonRequest::Status, Duration::from_secs(5)) {
+        Ok(resp) => match resp {
+            DaemonResponse::Status {
+                pid,
+                ra_status,
+                uptime_secs,
+            } => {
+                let minutes = uptime_secs / 60;
+                let seconds = uptime_secs % 60;
+                println!("LSP daemon: running");
+                println!("  PID:     {pid}");
+                println!("  RA:      {ra_status}");
+                println!("  Uptime:  {minutes}m {seconds}s");
+                println!("  Dir:     {}", dir.display());
             }
-        }
+            DaemonResponse::Error { message } => {
+                println!("LSP daemon: error");
+                println!("  {message}");
+            }
+            DaemonResponse::Ok { message } => {
+                println!("LSP daemon: {message}");
+            }
+            DaemonResponse::QueryResult { .. } => {
+                println!("LSP daemon: unexpected response");
+            }
+        },
         Err(_) => {
             println!("LSP daemon: not running");
         }
