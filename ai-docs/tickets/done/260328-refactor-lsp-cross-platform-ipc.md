@@ -1,6 +1,8 @@
 ---
 title: "LSP IPC refactoring: platform abstraction for cross-platform support"
+status: done
 started: 2026-03-28
+completed: 2026-03-28
 plans:
   phase2: 2603/28-1033-lsp-process-abstraction
   phase3: 2603/28-1230-lsp-cfg-gate-removal
@@ -165,6 +167,28 @@ into `src/lsp/process/{mod,unix,windows}.rs`.
   module) instead of traits — simpler and consistent.
 
 **Next:** Phase 3 (cfg gate removal + CI).
+
+### Result (92d705e) — 26-03-28
+
+**Phase 3 complete.** Removed `#[cfg(unix)]` from `lsp` module. All platform-
+specific code is now behind platform-gated sub-modules (`ipc/`, `process/`).
+
+- `transport.rs`: Background reader thread replaces `libc::poll`. `RaTransport`
+  stores `Option<BufReader<ChildStdout>>` + `Option<Receiver>`. After
+  `spawn_reader_thread()`, `read_message()` reads from mpsc channel.
+  New methods: `try_read_message()` (non-blocking), `read_message_timeout()`.
+  Removed: `stdout_raw_fd()`, `has_buffered_data()`.
+- `daemon.rs`: `drain_ra_messages()` uses `try_read_message()`, returns `bool`
+  (not `Result`). `wait_for_ready()` uses `read_message_timeout()`.
+  `shutdown_ra()` simplified to fire-and-forget.
+- `ipc/mod.rs`: Removed `poll_retry` re-export.
+- `Cargo.toml`: `libc` → `cfg(unix)`, `notify` → unconditional.
+- `lib.rs`: Removed `#[cfg(unix)]` from `pub mod lsp` and `run_lsp_command`.
+- `query.rs`: Unchanged — `send_request_and_wait()` transparently uses channel.
+- All 232 integration + 20 unit tests pass, no new clippy warnings.
+- No deviations from plan.
+
+**All 3 phases complete.** Ticket ready to move to `done/`.
 
 ## Out of Scope
 
