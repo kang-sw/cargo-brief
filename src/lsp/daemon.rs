@@ -1,18 +1,16 @@
-//! LSP daemon process: spawns rust-analyzer, accepts FIFO clients, handles idle timeout.
+//! LSP daemon process: spawns rust-analyzer, accepts IPC clients, handles idle timeout.
 
 use std::collections::HashSet;
-use std::fs::{File, OpenOptions};
 use std::io::BufRead;
-use std::os::unix::fs::OpenOptionsExt;
-use std::os::unix::io::AsRawFd;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result, bail};
 
-use super::client::{create_fifo, poll_retry, set_nonblocking};
-use super::protocol::{DaemonRequest, DaemonResponse, RaStatus, read_message, write_message};
+use super::ipc;
+use super::ipc::poll_retry;
+use super::protocol::{DaemonRequest, DaemonResponse, RaStatus};
 use super::query;
 use super::transport::RaTransport;
 use super::watcher::{self, DebounceBuffer};
@@ -376,9 +374,6 @@ fn wait_for_ready(
 pub fn run_daemon(workspace_root: &Path, daemon_dir: &Path) -> Result<()> {
     let start_time = Instant::now();
     let pid_path = daemon_dir.join("lsp.pid");
-    let req_path = daemon_dir.join("lsp.req");
-    let resp_path = daemon_dir.join("lsp.resp");
-    let lock_path = daemon_dir.join("lsp.lock");
 
     // 1. Write PID file early to prevent double-spawn race
     std::fs::write(&pid_path, std::process::id().to_string())
@@ -441,32 +436,10 @@ pub fn run_daemon(workspace_root: &Path, daemon_dir: &Path) -> Result<()> {
     };
     let mut debounce_buf = DebounceBuffer::new();
 
-    // 6. Create FIFOs and lock file (AFTER ra init — preserves readiness invariant)
-    // Clean stale FIFOs first
-    std::fs::remove_file(&req_path).ok();
-    std::fs::remove_file(&resp_path).ok();
-    create_fifo(&req_path, 0o600).context("Failed to create request FIFO")?;
-    create_fifo(&resp_path, 0o600).context("Failed to create response FIFO")?;
-    File::create(&lock_path).context("Failed to create lock file")?;
+    // 6. Create IPC endpoints (AFTER ra init — preserves readiness invariant)
+    let mut ipc_handle = ipc::DaemonIpc::setup(daemon_dir)?;
 
-    // Open FIFOs with O_RDWR — daemon keeps both open for its lifetime.
-    // O_RDWR prevents open() from blocking and eliminates POLLHUP races.
-    let req_fd = OpenOptions::new()
-        .read(true)
-        .write(true)
-        .custom_flags(libc::O_NONBLOCK)
-        .open(&req_path)
-        .context("Failed to open request FIFO")?;
-    let mut resp_fd = OpenOptions::new()
-        .read(true)
-        .write(true)
-        .open(&resp_path)
-        .context("Failed to open response FIFO")?;
-
-    eprintln!(
-        "[lsp-daemon] listening on FIFOs in {}",
-        daemon_dir.display()
-    );
+    eprintln!("[lsp-daemon] listening on IPC in {}", daemon_dir.display());
 
     // 7. Main loop
     let idle_timeout = Duration::from_secs(
@@ -485,77 +458,61 @@ pub fn run_daemon(workspace_root: &Path, daemon_dir: &Path) -> Result<()> {
     let mut shutdown = false;
 
     loop {
-        // Poll lsp.req for incoming data (POLLIN), EINTR-safe
-        let mut pfd = libc::pollfd {
-            fd: req_fd.as_raw_fd(),
-            events: libc::POLLIN,
-            revents: 0,
-        };
-        let n = poll_retry(&mut pfd, 100)?;
-
-        if n > 0 && (pfd.revents & libc::POLLIN) != 0 {
-            // Client sent data — switch to blocking, read full message
-            set_nonblocking(&req_fd, false)?;
-            let request: DaemonRequest = match read_message(&mut &req_fd) {
-                Ok(req) => req,
-                Err(e) => {
-                    eprintln!("[lsp-daemon] failed to read request: {e}");
-                    set_nonblocking(&req_fd, true)?;
-                    continue;
-                }
-            };
-            set_nonblocking(&req_fd, true)?;
-
-            // Wait for ra to finish indexing before query dispatch
-            let is_query = matches!(
-                request,
-                DaemonRequest::References { .. }
-                    | DaemonRequest::BlastRadius { .. }
-                    | DaemonRequest::CallHierarchy { .. }
-            );
-            if is_query && ra_status != RaStatus::Ready {
-                if let Err(e) = wait_for_ready(
-                    &mut transport,
-                    &mut ra_status,
-                    &mut active_progress,
-                    &mut had_progress,
-                    start_time,
-                    ready_timeout,
-                ) {
-                    let response = DaemonResponse::Error {
-                        message: format!("{e}"),
-                    };
-                    if let Err(we) = write_message(&mut resp_fd, &response) {
-                        eprintln!("[lsp-daemon] failed to write error response: {we}");
+        // Poll for incoming client request
+        match ipc_handle.poll_request(100)? {
+            Some(request) => {
+                // Wait for ra to finish indexing before query dispatch
+                let is_query = matches!(
+                    request,
+                    DaemonRequest::References { .. }
+                        | DaemonRequest::BlastRadius { .. }
+                        | DaemonRequest::CallHierarchy { .. }
+                );
+                if is_query && ra_status != RaStatus::Ready {
+                    if let Err(e) = wait_for_ready(
+                        &mut transport,
+                        &mut ra_status,
+                        &mut active_progress,
+                        &mut had_progress,
+                        start_time,
+                        ready_timeout,
+                    ) {
+                        let response = DaemonResponse::Error {
+                            message: format!("{e}"),
+                        };
+                        if let Err(we) = ipc_handle.send_response(&response) {
+                            eprintln!("[lsp-daemon] failed to write error response: {we}");
+                        }
+                        continue;
                     }
-                    continue;
+                }
+
+                // Process request
+                let response = handle_request(
+                    &request,
+                    ra_status,
+                    start_time,
+                    &mut shutdown,
+                    &mut transport,
+                    workspace_root,
+                );
+
+                // Write response
+                if let Err(e) = ipc_handle.send_response(&response) {
+                    eprintln!("[lsp-daemon] failed to write response: {e}");
+                }
+
+                last_activity = Instant::now();
+                if shutdown {
+                    break;
                 }
             }
-
-            // Process request
-            let response = handle_request(
-                &request,
-                ra_status,
-                start_time,
-                &mut shutdown,
-                &mut transport,
-                workspace_root,
-            );
-
-            // Write response
-            if let Err(e) = write_message(&mut resp_fd, &response) {
-                eprintln!("[lsp-daemon] failed to write response: {e}");
-            }
-
-            last_activity = Instant::now();
-            if shutdown {
-                break;
-            }
-        } else {
-            // Timeout (n == 0) — check idle
-            if last_activity.elapsed() > idle_timeout {
-                eprintln!("[lsp-daemon] idle timeout, shutting down");
-                break;
+            None => {
+                // Timeout — check idle
+                if last_activity.elapsed() > idle_timeout {
+                    eprintln!("[lsp-daemon] idle timeout, shutting down");
+                    break;
+                }
             }
         }
 
@@ -609,10 +566,9 @@ pub fn run_daemon(workspace_root: &Path, daemon_dir: &Path) -> Result<()> {
     // Wait for ra to exit
     let _ = ra_child.wait();
 
-    std::fs::remove_file(&pid_path).ok();
-    std::fs::remove_file(&req_path).ok();
-    std::fs::remove_file(&resp_path).ok();
-    std::fs::remove_file(&lock_path).ok();
+    // Remove IPC files + non-IPC files
+    ipc::cleanup_ipc_files(daemon_dir);
+    std::fs::remove_file(daemon_dir.join("lsp.pid")).ok();
     std::fs::remove_file(daemon_dir.join("lsp.log")).ok();
     // Try to remove the parent directory (only succeeds if empty)
     std::fs::remove_dir(daemon_dir).ok();
