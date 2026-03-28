@@ -1,6 +1,7 @@
 //! Symbol resolution and reference queries via rust-analyzer.
 
 use std::collections::{BTreeMap, HashSet, VecDeque};
+use std::fs;
 use std::path::Path;
 
 use anyhow::{Result, bail};
@@ -41,15 +42,201 @@ fn symbol_kind_label(kind: i64) -> &'static str {
     }
 }
 
+struct GrepHit {
+    uri: String,  // file:// URI
+    line: u32,    // 0-indexed
+    col: u32,     // 0-indexed byte offset (== char offset for ASCII identifiers)
+    is_use: bool, // true if the line looks like a `use` import
+}
+
+/// Walk workspace `.rs` files and find lines containing the symbol name.
+/// For qualified queries like `hecs::World`, tries the full string first,
+/// then falls back to the bare name. `use` lines are prioritized.
+fn grep_workspace_for_symbol(workspace_root: &Path, query: &str, max_hits: usize) -> Vec<GrepHit> {
+    let segments: Vec<&str> = query.split("::").collect();
+    let bare_name = segments.last().copied().unwrap_or(query);
+    let is_qualified = segments.len() > 1;
+
+    let mut hits = Vec::new();
+
+    // For qualified names, try the full qualified string first
+    if is_qualified {
+        walk_and_grep(workspace_root, query, bare_name, max_hits, &mut hits);
+    }
+
+    // If qualified search found nothing (or not qualified), search bare name
+    if hits.is_empty() {
+        walk_and_grep(workspace_root, bare_name, bare_name, max_hits, &mut hits);
+    }
+
+    // Prioritize `use` lines
+    hits.sort_by_key(|h| !h.is_use);
+    hits.truncate(max_hits);
+    hits
+}
+
+/// Walk .rs files under `root`, grep for `search_term`, record column of `ident_name`.
+fn walk_and_grep(
+    root: &Path,
+    search_term: &str,
+    ident_name: &str,
+    max_hits: usize,
+    hits: &mut Vec<GrepHit>,
+) {
+    let mut dirs = vec![root.to_path_buf()];
+
+    while let Some(dir) = dirs.pop() {
+        let entries = match fs::read_dir(&dir) {
+            Ok(e) => e,
+            Err(_) => continue,
+        };
+
+        for entry in entries.flatten() {
+            let path = entry.path();
+            let file_name = entry.file_name();
+            let name = file_name.to_string_lossy();
+
+            // Skip hidden dirs and target/
+            if name.starts_with('.') || name == "target" {
+                continue;
+            }
+
+            if path.is_dir() {
+                dirs.push(path);
+            } else if name.ends_with(".rs") {
+                grep_file(&path, search_term, ident_name, max_hits, hits);
+                if hits.len() >= max_hits {
+                    return;
+                }
+            }
+        }
+    }
+}
+
+fn grep_file(
+    path: &Path,
+    search_term: &str,
+    ident_name: &str,
+    max_hits: usize,
+    hits: &mut Vec<GrepHit>,
+) {
+    let content = match fs::read_to_string(path) {
+        Ok(c) => c,
+        Err(_) => return,
+    };
+
+    let path_str = path.to_str().unwrap_or_default();
+    let uri = if path_str.starts_with('/') {
+        format!("file://{path_str}")
+    } else {
+        format!("file:///{path_str}")
+    };
+
+    for (line_idx, line) in content.lines().enumerate() {
+        if !line.contains(search_term) {
+            continue;
+        }
+
+        // Find the column of the identifier (last segment) within the line
+        let col = match line.find(ident_name) {
+            Some(byte_offset) => byte_offset as u32,
+            None => continue,
+        };
+
+        let trimmed = line.trim_start();
+        let is_use = trimmed.starts_with("use ") || trimmed.starts_with("pub use ");
+
+        hits.push(GrepHit {
+            uri: uri.clone(),
+            line: line_idx as u32,
+            col,
+            is_use,
+        });
+
+        if hits.len() >= max_hits {
+            return;
+        }
+    }
+}
+
+/// Send `textDocument/definition` for each grep hit, collect unique definitions.
+fn resolve_via_definition(
+    transport: &mut RaTransport,
+    workspace_root: &Path,
+    hits: &[GrepHit],
+    query: &str,
+) -> Result<ResolveResult> {
+    let name = query.rsplit("::").next().unwrap_or(query);
+    // Key: (uri, line) for dedup
+    let mut seen: HashSet<(String, u32)> = HashSet::new();
+    let mut matches: Vec<SymbolMatch> = Vec::new();
+
+    for hit in hits {
+        let params = serde_json::json!({
+            "textDocument": { "uri": &hit.uri },
+            "position": { "line": hit.line, "character": hit.col }
+        });
+        let response = transport.send_request_and_wait("textDocument/definition", params)?;
+
+        // definition can be a single Location or an array of Locations
+        let locations: Vec<&serde_json::Value> = if let Some(arr) = response["result"].as_array() {
+            arr.iter().collect()
+        } else if response["result"]["uri"].is_string() {
+            vec![&response["result"]]
+        } else {
+            continue;
+        };
+
+        for loc in locations {
+            let uri = match loc["uri"].as_str() {
+                Some(u) => u,
+                None => continue,
+            };
+            let line = match loc["range"]["start"]["line"].as_u64() {
+                Some(l) => l as u32,
+                None => continue,
+            };
+            let col = loc["range"]["start"]["character"].as_u64().unwrap_or(0) as u32;
+
+            let key = (uri.to_string(), line);
+            if seen.contains(&key) {
+                continue;
+            }
+            seen.insert(key);
+
+            let container = uri_to_relative(workspace_root, uri);
+            matches.push(SymbolMatch {
+                name: name.to_string(),
+                container_name: Some(container),
+                uri: uri.to_string(),
+                line,
+                col,
+                kind: "symbol".to_string(),
+            });
+        }
+    }
+
+    match matches.len() {
+        0 => Ok(ResolveResult::NotFound),
+        1 => Ok(ResolveResult::Ok(matches.remove(0))),
+        _ => Ok(ResolveResult::Ambiguous(matches)),
+    }
+}
+
 /// Resolve a symbol query to a single match, multiple matches, or not found.
-pub fn resolve_symbol(transport: &mut RaTransport, query: &str) -> Result<ResolveResult> {
+pub fn resolve_symbol(
+    transport: &mut RaTransport,
+    query: &str,
+    workspace_root: &Path,
+) -> Result<ResolveResult> {
     let params = serde_json::json!({ "query": query });
     let response = transport.send_request_and_wait("workspace/symbol", params)?;
     let results = response["result"].as_array();
 
+    let empty = Vec::new();
     let results = match results {
         Some(arr) if !arr.is_empty() => arr,
-        _ => return Ok(ResolveResult::NotFound),
+        _ => &empty,
     };
 
     // Extract last :: segment for exact name matching
@@ -94,7 +281,14 @@ pub fn resolve_symbol(transport: &mut RaTransport, query: &str) -> Result<Resolv
         .collect();
 
     match matches.len() {
-        0 => Ok(ResolveResult::NotFound),
+        0 => {
+            // Fallback: grep workspace source for usage sites, then resolve via definition
+            let hits = grep_workspace_for_symbol(workspace_root, query, 15);
+            if !hits.is_empty() {
+                return resolve_via_definition(transport, workspace_root, &hits, query);
+            }
+            Ok(ResolveResult::NotFound)
+        }
         1 => Ok(ResolveResult::Ok(matches.remove(0))),
         _ => Ok(ResolveResult::Ambiguous(matches)),
     }
@@ -227,7 +421,7 @@ pub fn handle_references(
     symbol: &str,
     quiet: bool,
 ) -> Result<String> {
-    match resolve_symbol(transport, symbol)? {
+    match resolve_symbol(transport, symbol, workspace_root)? {
         ResolveResult::NotFound => {
             bail!("Symbol not found: {symbol}")
         }
@@ -249,7 +443,7 @@ pub fn handle_call_hierarchy(
     outgoing: bool,
     quiet: bool,
 ) -> Result<String> {
-    let m = match resolve_symbol(transport, symbol)? {
+    let m = match resolve_symbol(transport, symbol, workspace_root)? {
         ResolveResult::NotFound => bail!("Symbol not found: {symbol}"),
         ResolveResult::Ambiguous(matches) => {
             return Ok(format_disambiguation(&matches, symbol, workspace_root));
@@ -354,7 +548,7 @@ pub fn handle_blast_radius(
 ) -> Result<String> {
     let depth = depth.clamp(1, 10);
 
-    let m = match resolve_symbol(transport, symbol)? {
+    let m = match resolve_symbol(transport, symbol, workspace_root)? {
         ResolveResult::NotFound => bail!("Symbol not found: {symbol}"),
         ResolveResult::Ambiguous(matches) => {
             return Ok(format_disambiguation(&matches, symbol, workspace_root));
@@ -822,5 +1016,102 @@ mod tests {
         let result = format_disambiguation(&matches, "Config", Path::new("/project"));
         assert!(result.contains("1. struct Config  src/config.rs:1"));
         assert!(result.contains("2. struct app::Config  src/app.rs:6"));
+    }
+
+    // --- grep_workspace_for_symbol tests ---
+
+    fn create_test_workspace(files: &[(&str, &str)]) -> tempfile::TempDir {
+        let dir = tempfile::tempdir().unwrap();
+        for (path, content) in files {
+            let full = dir.path().join(path);
+            std::fs::create_dir_all(full.parent().unwrap()).unwrap();
+            std::fs::write(full, content).unwrap();
+        }
+        dir
+    }
+
+    #[test]
+    fn grep_bare_name() {
+        let ws = create_test_workspace(&[
+            (
+                "src/main.rs",
+                "use hecs::World;\nfn main() { let w = World::new(); }\n",
+            ),
+            ("src/lib.rs", "pub struct Foo;\n"),
+        ]);
+        let hits = grep_workspace_for_symbol(ws.path(), "World", 10);
+        assert!(!hits.is_empty());
+        // All hits should reference "World"
+        assert!(hits.iter().all(|h| h.uri.ends_with("main.rs")));
+    }
+
+    #[test]
+    fn grep_qualified_narrows() {
+        let ws = create_test_workspace(&[
+            ("src/a.rs", "use hecs::World;\n"),
+            ("src/b.rs", "use other::World;\n"),
+        ]);
+        // Qualified: should find "hecs::World" first
+        let hits = grep_workspace_for_symbol(ws.path(), "hecs::World", 10);
+        assert_eq!(hits.len(), 1);
+        assert!(hits[0].uri.ends_with("a.rs"));
+    }
+
+    #[test]
+    fn grep_qualified_fallback_to_bare() {
+        // If qualified string not found, falls back to bare name
+        let ws = create_test_workspace(&[("src/a.rs", "let w: World = todo!();\n")]);
+        let hits = grep_workspace_for_symbol(ws.path(), "nonexist::World", 10);
+        assert_eq!(hits.len(), 1); // falls back to bare "World"
+    }
+
+    #[test]
+    fn grep_use_lines_prioritized() {
+        let ws = create_test_workspace(&[(
+            "src/main.rs",
+            "let w = World::new();\nuse hecs::World;\nWorld::default();\n",
+        )]);
+        let hits = grep_workspace_for_symbol(ws.path(), "World", 10);
+        assert!(hits.len() >= 2);
+        // First hit should be the `use` line
+        assert!(hits[0].is_use);
+    }
+
+    #[test]
+    fn grep_max_hits_cap() {
+        let mut content = String::new();
+        for i in 0..20 {
+            content.push_str(&format!("let x{i} = Foo;\n"));
+        }
+        let ws = create_test_workspace(&[("src/main.rs", &content)]);
+        let hits = grep_workspace_for_symbol(ws.path(), "Foo", 5);
+        assert_eq!(hits.len(), 5);
+    }
+
+    #[test]
+    fn grep_skips_target_and_hidden() {
+        let ws = create_test_workspace(&[
+            ("src/main.rs", "use Foo;\n"),
+            ("target/debug/foo.rs", "use Foo;\n"),
+            (".hidden/bar.rs", "use Foo;\n"),
+        ]);
+        let hits = grep_workspace_for_symbol(ws.path(), "Foo", 10);
+        assert_eq!(hits.len(), 1);
+        assert!(hits[0].uri.contains("src/main.rs"));
+    }
+
+    #[test]
+    fn grep_col_offset() {
+        let ws = create_test_workspace(&[("src/a.rs", "    let x = World::new();\n")]);
+        let hits = grep_workspace_for_symbol(ws.path(), "World", 10);
+        assert_eq!(hits.len(), 1);
+        assert_eq!(hits[0].col, 12); // "    let x = " is 12 bytes
+    }
+
+    #[test]
+    fn grep_no_match() {
+        let ws = create_test_workspace(&[("src/a.rs", "fn main() {}\n")]);
+        let hits = grep_workspace_for_symbol(ws.path(), "nonexistent_xyz", 10);
+        assert!(hits.is_empty());
     }
 }

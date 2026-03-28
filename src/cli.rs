@@ -49,9 +49,9 @@ TIPS:
   - Feature-gated items are invisible without -F. Try -F full if not found.
   - Smart-case: all-lowercase pattern = case-insensitive, any uppercase = exact.
   - `code` searches ALL workspace members by default (not just current package).
-  - `lsp` finds workspace-defined symbols only (not external deps like bevy::App).
-    Use unique names; common methods like \"new\" may not resolve.
-    Falls back: `code --refs <name>` for grep-based reference search.
+  - `lsp` resolves symbols by name. Workspace items are found instantly;
+    external deps (e.g., hecs::World) use usage-site fallback (slower).
+    Use unique names; common methods like \"new\" may still be ambiguous.
   - `lsp` spawns a persistent rust-analyzer daemon; first query may be slow
     while indexing. Use `lsp touch` to pre-warm.
 
@@ -422,19 +422,18 @@ EXAMPLES:
   cargo brief lsp stop                          # shut down daemon
 
 SYMBOL RESOLUTION:
-  Symbols are resolved via rust-analyzer's workspace/symbol search.
-  This means:
-    - Works best with WORKSPACE-DEFINED items (functions, structs, enums,
-      traits). External dependency types (e.g., hecs::World) are NOT found.
-    - Use unique identifiers. Common method names like \"new\" or \"get\" are
-      typically not returned by workspace/symbol search.
-    - Type::method syntax (e.g., \"Foo::bar\") works only if rust-analyzer
-      returns the method as a workspace symbol. Prefer the bare function
-      name when possible.
+  Symbols are resolved in two stages:
+    1. workspace/symbol search (fast, finds workspace-defined items)
+    2. Fallback: grep workspace source for usage sites, then resolve via
+       textDocument/definition (slower, finds external deps like hecs::World)
+
+  Tips:
+    - Qualified names work: \"hecs::World\", \"App::new\", \"MyStruct::method\"
+    - Common names like \"new\" or \"get\" may return Ambiguous (many matches).
+      Use a qualified form to narrow down.
     - call-hierarchy and blast-radius work on functions/methods, not types.
       Use `references` for tracking struct/enum/trait usage.
-
-  If a symbol is not found, try `code --refs <name>` as a grep-based fallback.
+    - If resolution still fails, try `code --refs <name>` as a last resort.
 
 NOTE:
   The LSP daemon spawns automatically on first query. Initial indexing may

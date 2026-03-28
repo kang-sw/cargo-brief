@@ -1,5 +1,6 @@
 ---
 title: "LSP symbol resolution: grep + definition fallback for external/method symbols"
+completed: 2026-03-28
 plans:
   phase-1: 2026-03/28-2130.lsp-grep-fallback-resolution
 ---
@@ -83,3 +84,20 @@ plumbing needed).
    - `lsp call-hierarchy new` with container disambiguation
    - `lsp blast-radius resolve_movement` (should still work, regression check)
 6. Update lsp help text to remove "workspace-defined only" caveat
+
+### Result (e44b45b) - 26-03-28
+
+Implemented as planned. All changes in `src/lsp/query.rs` + help text in `src/cli.rs`.
+
+**What was implemented:**
+- `grep_workspace_for_symbol()`: walks workspace .rs files, skips target/hidden dirs, prioritizes `use` lines, caps at max_hits (15). Qualified name narrowing (full string first, then bare name).
+- `resolve_via_definition()`: sends `textDocument/definition` for each grep hit, deduplicates by (uri, line), returns ResolveResult.
+- `resolve_symbol()` gains `workspace_root: &Path` parameter. Falls back to grep+definition when workspace/symbol returns 0 filtered matches. All 3 call sites updated.
+- Help text updated in both TIPS and SYMBOL RESOLUTION sections.
+- 7 unit tests for grep helper (qualified narrowing, use-line priority, max_hits, target/hidden skip, column offset, no match).
+
+**Deviations from plan:**
+- Used `std::fs` walk (not ripgrep/regex) — simpler, no new dependency.
+- `didOpen` was not needed — ra resolves definition on workspace files without it.
+- `kind` in fallback matches is generic `"symbol"` (no LSP method resolves kind from position). Acceptable UX trade-off.
+- UTF-16 column offset: uses byte offset from `str::find()`, which equals char offset for ASCII Rust identifiers. Non-ASCII line prefixes may cause misalignment — acknowledged limitation, matches existing codebase patterns.
