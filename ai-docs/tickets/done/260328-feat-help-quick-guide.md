@@ -1,7 +1,8 @@
 ---
 title: Add AI agent quick guide to --help output
-status: wip
+status: done
 started: 2026-03-28
+completed: 2026-03-28
 ---
 
 # Add AI agent quick guide to --help output
