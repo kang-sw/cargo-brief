@@ -7,6 +7,7 @@
 
 pub(crate) mod client;
 pub mod daemon;
+mod process;
 mod protocol;
 mod query;
 mod transport;
