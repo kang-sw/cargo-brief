@@ -9,6 +9,15 @@
 - Lint: `cargo clippy`
 - Requires nightly toolchain for rustdoc JSON generation (`cargo +nightly rustdoc`)
 
+## Active Work
+
+- **LSP cross-platform IPC refactoring** (`260328-refactor-lsp-cross-platform-ipc`):
+  Extracting platform-specific IPC and process management into abstraction modules.
+  Unix keeps FIFOs; Windows uses atomic-rename file protocol (sandbox-safe, target/ only).
+  Phase order: Phase 2 (process mgmt, simpler) → Phase 1 (IPC, larger) → Phase 3 (cfg cleanup + CI).
+  Cross-compilation check: `cargo check --target x86_64-pc-windows-msvc` (no linker needed).
+  Windows runtime testing deferred to `260326-feat-lsp-windows-support`.
+
 ## Recent Work
 
 - **LSP indexing status tracking**: Daemon tracks ra's `$/progress` begin/end notifications to determine indexing state. `RaStatus::Indexing` variant added. Main loop drains ra stdout via poll-then-read pattern (`drain_ra_messages()`). Query commands gate on `wait_for_ready()` (60s default, `CARGO_BRIEF_LSP_READY_TIMEOUT` env var). Client-side query timeout increased to 120s. `send_request_and_wait()` replies to server-initiated requests. `window.workDoneProgress: true` declared in capabilities. Fallback: no `$/progress` ever + uptime > 10s → assume Ready.
