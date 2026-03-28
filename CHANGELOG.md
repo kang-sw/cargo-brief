@@ -2,6 +2,20 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.9.2] - 2026-03-28
+
+### Added
+
+- **LSP grep-based fallback symbol resolution.** When `workspace/symbol` fails to find a symbol, `resolve_symbol()` now greps workspace source files for usage sites and resolves via `textDocument/definition`. This enables:
+  - External dependency types (e.g., `hecs::World`, `bevy::prelude::App`)
+  - Qualified method syntax (e.g., `ActionRegistry::new`)
+  - Common method names (e.g., `new`) — shown as disambiguation list
+- All three query commands (`references`, `blast-radius`, `call-hierarchy`) benefit automatically.
+
+### Changed
+
+- Updated `lsp` help text to reflect that external deps are now supported via the fallback path.
+
 ## [0.9.1] - 2026-03-28
 
 ### Changed
