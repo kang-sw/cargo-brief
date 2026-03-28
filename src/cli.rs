@@ -19,7 +19,36 @@ pub enum CargoCommand {
 #[command(
     version,
     about = "Visibility-aware Rust API extractor for AI agents",
-    after_help = "Run `cargo brief <subcommand> --help` for subcommand-specific options."
+    after_help = "Run `cargo brief --help` for AI agent quick guide, or `cargo brief <cmd> --help` for details.",
+    after_long_help = "\
+QUICK GUIDE — which subcommand for which task:
+
+  \"What's the signature of X?\"        → search [--members]
+  \"Show a module's full API surface\"   → api [--depth N] [--compact]
+  \"Where is X defined? Show source\"    → code [--refs]
+  \"What modules exist in this crate?\"  → summary
+  \"How is X used in practice?\"         → examples [--tests]
+  \"Find structural patterns in AST\"    → ts '<s-expr>'
+  \"Who calls X? What breaks?\"          → lsp references / blast-radius
+
+TYPICAL WORKFLOW:
+  cargo brief summary self                    # 1. overview of modules
+  cargo brief api self::some_module           # 2. drill into a module
+  cargo brief search self SomeType --members  # 3. find a specific item
+  cargo brief code fn some_function --refs    # 4. read source + references
+
+REMOTE CRATES (-C):
+  cargo brief -C summary tokio@1              # explore an unfamiliar crate
+  cargo brief -C -F rt,net api tokio@1 net    # feature-gated APIs need -F
+  cargo brief -C search serde@1 Serialize     # search a crates.io dependency
+
+TIPS:
+  - Feature-gated items are invisible without -F. Try -F full if not found.
+  - Smart-case: all-lowercase pattern = case-insensitive, any uppercase = exact.
+  - `code` searches ALL workspace members by default (not just current package).
+  - `lsp` queries use a persistent rust-analyzer daemon; first query may be slow.
+
+Run `cargo brief <subcommand> --help` for subcommand-specific options and examples."
 )]
 pub struct BriefDirect {
     /// Interpret TARGET as a crates.io package spec (e.g., serde@1, tokio@1.0)
