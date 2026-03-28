@@ -9,7 +9,6 @@ use std::time::{Duration, Instant};
 use anyhow::{Context, Result, bail};
 
 use super::ipc;
-use super::ipc::poll_retry;
 use super::protocol::{DaemonRequest, DaemonResponse, RaStatus};
 use super::query;
 use super::transport::RaTransport;
@@ -165,19 +164,12 @@ fn handle_request(
 }
 
 /// Shutdown rust-analyzer gracefully via LSP shutdown/exit.
-/// Bounded read loop: reads at most 10 messages waiting for shutdown response.
-/// If ra is already dead, read_message() returns Err immediately (broken pipe).
+/// Fire-and-forget: send shutdown request + exit notification without reading
+/// responses. The reader thread has responses in its channel; we don't need to
+/// process them during shutdown. The thread will exit when ra closes stdout
+/// after receiving exit.
 fn shutdown_ra(transport: &mut RaTransport) {
-    if let Ok(id) = transport.send_request("shutdown", serde_json::Value::Null) {
-        for _ in 0..10 {
-            match transport.read_message() {
-                Ok(msg) if msg["id"].as_i64() == Some(id as i64) => break,
-                Ok(_) => continue,
-                Err(_) => break,
-            }
-        }
-    }
-
+    let _ = transport.send_request("shutdown", serde_json::Value::Null);
     let _ = transport.send_notification("exit", serde_json::Value::Null);
 }
 
@@ -261,26 +253,15 @@ fn drain_ra_messages(
     active_progress: &mut HashSet<String>,
     had_progress: &mut bool,
     start_time: Instant,
-) -> Result<bool> {
+) -> bool {
     let mut any_read = false;
     loop {
-        // Check BufReader internal buffer first (minor optimization)
-        if !transport.has_buffered_data() {
-            let mut pfd = libc::pollfd {
-                fd: transport.stdout_raw_fd(),
-                events: libc::POLLIN,
-                revents: 0,
-            };
-            let n = poll_retry(&mut pfd, 0)?;
-            if n == 0 {
-                break;
-            }
-        }
-        match transport.read_message() {
-            Ok(msg) => {
+        match transport.try_read_message() {
+            Ok(Some(msg)) => {
                 any_read = true;
                 handle_ra_message(&msg, transport, ra_status, active_progress, had_progress);
             }
+            Ok(None) => break,
             Err(e) => {
                 eprintln!("[lsp-daemon] ra stdout read error: {e}");
                 break;
@@ -288,7 +269,7 @@ fn drain_ra_messages(
         }
     }
     check_no_progress_fallback(ra_status, *had_progress, start_time);
-    Ok(any_read)
+    any_read
 }
 
 /// Default timeout for waiting for ra to finish indexing before a query.
@@ -345,26 +326,13 @@ fn wait_for_ready(
 
         // Poll ra stdout — shorter interval during settle for responsiveness
         let poll_timeout = if ready_since.is_some() { 100 } else { 500 };
-        if !transport.has_buffered_data() {
-            let mut pfd = libc::pollfd {
-                fd: transport.stdout_raw_fd(),
-                events: libc::POLLIN,
-                revents: 0,
-            };
-            let n = poll_retry(&mut pfd, poll_timeout)?;
-            if n == 0 {
-                check_no_progress_fallback(ra_status, *had_progress, start_time);
-                continue;
-            }
-        }
-
-        match transport.read_message() {
-            Ok(msg) => {
+        match transport.read_message_timeout(Duration::from_millis(poll_timeout))? {
+            Some(msg) => {
                 handle_ra_message(&msg, transport, ra_status, active_progress, had_progress);
             }
-            Err(e) => {
-                eprintln!("[lsp-daemon] ra stdout read error during wait: {e}");
-                bail!("rust-analyzer stdout closed during indexing wait");
+            None => {
+                check_no_progress_fallback(ra_status, *had_progress, start_time);
+                continue;
             }
         }
     }
@@ -422,6 +390,9 @@ pub fn run_daemon(workspace_root: &Path, daemon_dir: &Path) -> Result<()> {
             // Continue running — ra might still become ready
         }
     }
+
+    // Spawn background reader thread for ra stdout (replaces libc::poll)
+    transport.spawn_reader_thread();
 
     // 5. Start file watcher
     let (fs_rx, _watcher) = match watcher::start_watcher(workspace_root) {
@@ -525,15 +496,13 @@ pub fn run_daemon(workspace_root: &Path, daemon_dir: &Path) -> Result<()> {
 
         // Drain ra stdout (progress notifications, server requests)
         if ra_status != RaStatus::Stopped {
-            if let Err(e) = drain_ra_messages(
+            drain_ra_messages(
                 &mut transport,
                 &mut ra_status,
                 &mut active_progress,
                 &mut had_progress,
                 start_time,
-            ) {
-                eprintln!("[lsp-daemon] drain error: {e}");
-            }
+            );
         }
 
         // Drain FS events

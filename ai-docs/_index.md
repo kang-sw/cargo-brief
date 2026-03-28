@@ -73,7 +73,7 @@ Remote crate support (`-C`) with dep recursion.
 `stop` (graceful shutdown), `status` (show PID/ra state/uptime), `references <symbol> [-q]`
 (find all references via ra), `blast-radius <symbol> [--depth N] [-q]` (direct + transitive
 callers via BFS), `call-hierarchy <symbol> [--outgoing] [-q]` (incoming/outgoing call tree).
-Unix-only. Rejects `-C`.
+Rejects `-C`.
 Daemon per workspace root; idle timeout 10min (override: `CARGO_BRIEF_LSP_TIMEOUT`).
 
 ### Target Resolution (api subcommand)
@@ -126,7 +126,7 @@ src/
   main.rs          — CLI arg parsing, subcommand dispatch, RemoteOpts extraction from BriefDirect, __lsp-daemon early-exit
   cli.rs           — Subcommand types: ApiArgs, SearchArgs, ExamplesArgs, SummaryArgs, CleanArgs, LspArgs + shared TargetArgs/FilterArgs/GlobalArgs + RemoteOpts (plain struct)
   cross_crate.rs   — cross-crate module following for facade crates
-  lsp/             — LSP daemon management (unix-only gate pending Phase 3): mod.rs (entry), daemon.rs (main loop), client.rs (daemon lifecycle: ensure/spawn/wait), ipc/ (platform-abstracted IPC: unix.rs FIFO + windows.rs atomic-rename), process/ (platform-abstracted process mgmt: unix.rs + windows.rs), protocol.rs (message framing), transport.rs (LSP JSON-RPC framing), watcher.rs (filesystem watching), query.rs (symbol resolution + references)
+  lsp/             — LSP daemon management (cross-platform): mod.rs (entry), daemon.rs (main loop), client.rs (daemon lifecycle: ensure/spawn/wait), ipc/ (platform-abstracted IPC: unix.rs FIFO + windows.rs atomic-rename), process/ (platform-abstracted process mgmt: unix.rs + windows.rs), protocol.rs (message framing), transport.rs (LSP JSON-RPC framing + background reader thread), watcher.rs (filesystem watching), query.rs (symbol resolution + references)
   remote.rs        — temp workspace creation for --crates (crates.io fetch) + cache management
   resolve.rs       — flexible target resolution (self, crate::module, fallback) + cargo metadata
   rustdoc_json.rs  — JSON generation (with use_cache param) + parsing (bincode-cached)
@@ -182,7 +182,7 @@ Parsed via `rustdoc-types` 0.57. Post-macro-expansion output.
 - **Examples subcommand**: `cargo brief examples <target> [pattern]` greps example/test/bench source files. List mode (no pattern) shows files with `//!` docs; grep mode shows matches with `*` markers, dynamic line numbers, context control. `--tests [DEPTH]` / `--benches [DEPTH]` extend scope. Smart-case matching.
 - **Tree-sitter subcommand**: `cargo brief ts <target> '<query>'` runs S-expression structural queries against `.rs` source files. Supports verbatim output, `--captures` mode (capture name + text pairs), `--context N` (surrounding lines with `*` markers). Capture-less queries auto-augmented with `@_match`. Scans `src/`, `examples/`, `tests/`, `benches/`. Remote crate support (`-C`) not yet implemented.
 - **Code subcommand**: `cargo brief code <target> [kind] <name>` looks up code definitions by kind and name using pre-crafted tree-sitter queries. Three dep modes: default (accessible-path BFS via rustdoc JSON, recursive), `--no-deps` (target crate only), `--all-deps` (cargo metadata direct deps, no nightly needed). Smart-case matching. `--quiet`/`-q` for location-only, `--limit` pagination, `--src-only`. Remote crate support (`-C`) with dep recursion. `discover_accessible_deps()` is a standalone BFS separate from `pre_warm_cross_crate_json()`. `load_dep_package_dirs()` maps crate names to source dirs.
-- Dependencies: `clap` 4, `rustdoc-types` 0.57, `serde_json` 1, `anyhow` 1, `tempfile` 3, `bincode` 1, `semver` 1, `ureq` 2, `tree-sitter` 0.25, `tree-sitter-rust` 0.23, `streaming-iterator` 0.1, `libc` 0.2, `notify` 6 (unix-only).
+- Dependencies: `clap` 4, `rustdoc-types` 0.57, `serde_json` 1, `anyhow` 1, `tempfile` 3, `bincode` 1, `semver` 1, `ureq` 2, `tree-sitter` 0.25, `tree-sitter-rust` 0.23, `streaming-iterator` 0.1, `libc` 0.2 (unix-only), `notify` 6.
 - Test fixture (`test_fixture/`) covers all supported item types. Workspace with `glob-source`/`glob-inner` sub-crates for cross-crate glob chain testing and `named-source` sub-crate for named re-export expansion testing.
 
 ## Mental Model Documents

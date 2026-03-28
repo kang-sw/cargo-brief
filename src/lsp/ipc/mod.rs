@@ -12,8 +12,3 @@ mod windows;
 pub(super) use unix::{DaemonIpc, cleanup_ipc_files, ready_indicator, send_command};
 #[cfg(windows)]
 pub(super) use windows::{DaemonIpc, cleanup_ipc_files, ready_indicator, send_command};
-
-// Re-export poll_retry for daemon.rs ra-stdout polling
-// (Unix-only, will be replaced in Phase 3 with transport abstraction)
-#[cfg(unix)]
-pub(super) use unix::poll_retry;

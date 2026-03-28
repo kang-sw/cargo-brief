@@ -1,15 +1,17 @@
 //! LSP JSON-RPC Content-Length framing for rust-analyzer stdin/stdout.
 
-use std::io::{BufRead, BufReader, Read, Write};
-use std::os::unix::io::{AsRawFd, RawFd};
+use std::io::{BufRead, BufReader, Write};
 use std::process::{ChildStdin, ChildStdout};
+use std::sync::mpsc::{self, Receiver};
+use std::time::Duration;
 
 use anyhow::{Context, Result, bail};
 
 /// Transport layer for LSP JSON-RPC communication with rust-analyzer.
 pub struct RaTransport {
     stdin: ChildStdin,
-    stdout: BufReader<ChildStdout>,
+    stdout: Option<BufReader<ChildStdout>>,
+    ra_rx: Option<Receiver<Result<serde_json::Value>>>,
     next_id: i32,
 }
 
@@ -17,7 +19,8 @@ impl RaTransport {
     pub fn new(stdin: ChildStdin, stdout: ChildStdout) -> Self {
         Self {
             stdin,
-            stdout: BufReader::new(stdout),
+            stdout: Some(BufReader::new(stdout)),
+            ra_rx: None,
             next_id: 1,
         }
     }
@@ -49,26 +52,66 @@ impl RaTransport {
         self.write_lsp_message(&msg)
     }
 
-    /// Read one LSP message from stdout.
+    /// Read one LSP message from stdout (direct) or channel (after thread spawn).
     pub fn read_message(&mut self) -> Result<serde_json::Value> {
-        let content_length = self.read_headers()?;
-        let mut buf = vec![0u8; content_length];
-        self.stdout
-            .read_exact(&mut buf)
-            .context("Failed to read LSP message body")?;
-        serde_json::from_slice(&buf).context("Failed to parse LSP JSON-RPC message")
+        if let Some(stdout) = &mut self.stdout {
+            Self::read_one_message(stdout)
+        } else if let Some(rx) = &self.ra_rx {
+            match rx.recv() {
+                Ok(result) => result,
+                Err(_) => bail!("rust-analyzer stdout closed"),
+            }
+        } else {
+            bail!("transport has no reader")
+        }
     }
 
-    /// Return the raw fd of ra's stdout for use with poll().
-    pub fn stdout_raw_fd(&self) -> RawFd {
-        self.stdout.get_ref().as_raw_fd()
+    /// Spawn a background thread to read LSP messages from ra stdout.
+    /// After this, read_message() reads from the channel (blocking).
+    /// The thread exits when ra closes stdout or the receiver is dropped.
+    pub fn spawn_reader_thread(&mut self) {
+        let mut stdout = self.stdout.take().expect("reader thread already spawned");
+        let (tx, rx) = mpsc::channel();
+        self.ra_rx = Some(rx);
+        std::thread::spawn(move || {
+            loop {
+                match Self::read_one_message(&mut stdout) {
+                    Ok(msg) => {
+                        if tx.send(Ok(msg)).is_err() {
+                            break; // receiver dropped
+                        }
+                    }
+                    Err(e) => {
+                        let _ = tx.send(Err(e));
+                        break;
+                    }
+                }
+            }
+        });
     }
 
-    /// Check if BufReader has leftover data from a prior read.
-    /// Not a reliable "is data available" check — only catches buffered leftovers.
-    /// Use poll() as the primary mechanism.
-    pub fn has_buffered_data(&self) -> bool {
-        !self.stdout.buffer().is_empty()
+    /// Non-blocking read. Returns Ok(Some(msg)) if available, Ok(None) if empty,
+    /// or the error from the reader thread.
+    /// Only available after spawn_reader_thread().
+    pub fn try_read_message(&self) -> Result<Option<serde_json::Value>> {
+        let rx = self.ra_rx.as_ref().expect("reader thread not spawned");
+        match rx.try_recv() {
+            Ok(result) => result.map(Some),
+            Err(mpsc::TryRecvError::Empty) => Ok(None),
+            Err(mpsc::TryRecvError::Disconnected) => bail!("rust-analyzer stdout closed"),
+        }
+    }
+
+    /// Read with timeout. Returns Ok(Some(msg)) if available, Ok(None) on timeout,
+    /// or the error from the reader thread.
+    /// Only available after spawn_reader_thread().
+    pub fn read_message_timeout(&self, timeout: Duration) -> Result<Option<serde_json::Value>> {
+        let rx = self.ra_rx.as_ref().expect("reader thread not spawned");
+        match rx.recv_timeout(timeout) {
+            Ok(result) => result.map(Some),
+            Err(mpsc::RecvTimeoutError::Timeout) => Ok(None),
+            Err(mpsc::RecvTimeoutError::Disconnected) => bail!("rust-analyzer stdout closed"),
+        }
     }
 
     /// Send an LSP response to a server-initiated request (e.g.
@@ -129,6 +172,17 @@ impl RaTransport {
         bail!("Timed out waiting for LSP response to {method} (id={id})")
     }
 
+    /// Read one complete LSP message from a buffered reader.
+    /// Used by both direct reads (before thread spawn) and the background reader thread.
+    fn read_one_message(reader: &mut impl BufRead) -> Result<serde_json::Value> {
+        let content_length = Self::read_headers(reader)?;
+        let mut buf = vec![0u8; content_length];
+        reader
+            .read_exact(&mut buf)
+            .context("Failed to read LSP message body")?;
+        serde_json::from_slice(&buf).context("Failed to parse LSP JSON-RPC message")
+    }
+
     fn write_lsp_message(&mut self, msg: &serde_json::Value) -> Result<()> {
         let body = serde_json::to_string(msg).context("Failed to serialize LSP message")?;
         let header = format!("Content-Length: {}\r\n\r\n", body.len());
@@ -142,14 +196,13 @@ impl RaTransport {
         Ok(())
     }
 
-    fn read_headers(&mut self) -> Result<usize> {
+    fn read_headers(reader: &mut impl BufRead) -> Result<usize> {
         let mut content_length: Option<usize> = None;
         let mut line = String::new();
 
         loop {
             line.clear();
-            let bytes_read = self
-                .stdout
+            let bytes_read = reader
                 .read_line(&mut line)
                 .context("Failed to read LSP header line")?;
 
