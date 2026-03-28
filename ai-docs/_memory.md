@@ -14,10 +14,12 @@
 - **LSP cross-platform IPC refactoring** (`260328-refactor-lsp-cross-platform-ipc`):
   Extracting platform-specific IPC and process management into abstraction modules.
   Unix keeps FIFOs; Windows uses atomic-rename file protocol (sandbox-safe, target/ only).
-  **Phase 2 complete** (process mgmt): `src/lsp/process/{mod,unix,windows}.rs` extracted
-  from client.rs/daemon.rs. `windows-sys` 0.59 added as cfg(windows) dep.
-  Remaining: Phase 1 (IPC abstraction) → Phase 3 (cfg cleanup + CI).
-  Cross-compilation check: `cargo check --target x86_64-pc-windows-msvc` (no linker needed).
+  **Phase 1 & 2 complete**: `src/lsp/ipc/{mod,unix,windows}.rs` (IPC) and
+  `src/lsp/process/{mod,unix,windows}.rs` (process mgmt) extracted from client.rs/daemon.rs.
+  `windows-sys` 0.59 with FileSystem/IO features. client.rs now daemon lifecycle only.
+  daemon.rs uses `DaemonIpc` struct. `poll_retry` re-exported from ipc for ra stdout.
+  Remaining: Phase 3 (cfg gate removal + transport abstraction + CI).
+  Cross-compilation check blocked by missing MSVC C headers (ring/tree-sitter build scripts).
   Windows runtime testing deferred to `260326-feat-lsp-windows-support`.
 
 ## Recent Work

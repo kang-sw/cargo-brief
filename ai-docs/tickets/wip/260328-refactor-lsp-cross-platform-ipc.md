@@ -139,6 +139,32 @@ into `src/lsp/process/{mod,unix,windows}.rs`.
 
 **Next:** Phase 1 (IPC abstraction) or Phase 3 (cfg gate removal).
 
+### Result (0080630) - 26-03-28
+
+**Phase 1 complete.** Extracted all IPC-specific code from `client.rs` and
+`daemon.rs` into `src/lsp/ipc/{mod,unix,windows}.rs`.
+
+- Unix backend: pure extraction, behavior unchanged. FIFOs + flock serialization.
+  `DaemonIpc` struct wraps req/resp file descriptors with `setup()`,
+  `poll_request()`, `send_response()` methods. `send_command()`,
+  `cleanup_ipc_files()`, `ready_indicator()` as free functions.
+- Windows backend: atomic-rename file protocol with `LockFileEx` serialization.
+  Same interface. Stale response drain added (review fix).
+- `client.rs` now contains only daemon lifecycle logic (ensure_daemon,
+  spawn_daemon, wait_for_daemon, daemon_dir).
+- `daemon.rs` main loop uses `DaemonIpc` methods — no direct FIFO/poll/fcntl
+  calls (except `poll_retry` for ra stdout, Phase 3 scope).
+- Protocol tests ported from `UnixStream::pair()` to `Cursor`/`Vec<u8>`.
+- Review fixes: daemon resilience to malformed requests (log+continue, not crash),
+  Windows stale response cleanup, doc comment update.
+- Deviation: `cargo check --target x86_64-pc-windows-msvc` blocked by missing
+  MSVC C headers for `ring`/`tree-sitter` build scripts. Environment limitation,
+  not a code issue. Rust code verified via host compilation + clippy.
+- Deviation from ticket text: uses struct+cfg pattern (matching Phase 2's process/
+  module) instead of traits — simpler and consistent.
+
+**Next:** Phase 3 (cfg gate removal + CI).
+
 ## Out of Scope
 
 - Actual Windows runtime testing (see `260326-feat-lsp-windows-support`).
