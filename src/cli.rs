@@ -29,13 +29,16 @@ QUICK GUIDE — which subcommand for which task:
   \"What modules exist in this crate?\"  → summary
   \"How is X used in practice?\"         → examples [--tests]
   \"Find structural patterns in AST\"    → ts '<s-expr>'
-  \"Who calls X? What breaks?\"          → lsp references / blast-radius
+  \"Who calls X? All references\"        → lsp references <symbol>
+  \"What breaks if I change X?\"         → lsp blast-radius <symbol> [--depth N]
+  \"What does X call / who calls X?\"    → lsp call-hierarchy <symbol> [--outgoing]
 
 TYPICAL WORKFLOW:
   cargo brief summary self                    # 1. overview of modules
   cargo brief api self::some_module           # 2. drill into a module
   cargo brief search self SomeType --members  # 3. find a specific item
   cargo brief code fn some_function --refs    # 4. read source + references
+  cargo brief lsp references some_function    # 5. cross-crate reference tracking
 
 REMOTE CRATES (-C):
   cargo brief -C summary tokio@1              # explore an unfamiliar crate
@@ -46,7 +49,8 @@ TIPS:
   - Feature-gated items are invisible without -F. Try -F full if not found.
   - Smart-case: all-lowercase pattern = case-insensitive, any uppercase = exact.
   - `code` searches ALL workspace members by default (not just current package).
-  - `lsp` queries use a persistent rust-analyzer daemon; first query may be slow.
+  - `lsp` spawns a persistent rust-analyzer daemon; first query may be slow
+    while indexing, subsequent queries are fast. Use `lsp touch` to pre-warm.
 
 Run `cargo brief <subcommand> --help` for subcommand-specific options and examples."
 )]
@@ -397,14 +401,27 @@ EXAMPLES:
     /// Manage LSP daemon (persistent rust-analyzer)
     #[command(after_help = "\
 EXAMPLES:
-  # Start or pre-warm the LSP daemon
-  cargo brief lsp touch
+  # Find all references to a symbol across the workspace
+  cargo brief lsp references resolve_symbol
+  cargo brief lsp references Foo::bar -q        # quiet: locations only
 
-  # Check daemon status
-  cargo brief lsp status
+  # Blast radius: direct + transitive callers (\"what breaks if I change X?\")
+  cargo brief lsp blast-radius handle_request
+  cargo brief lsp blast-radius handle_request --depth 3
 
-  # Stop the daemon
-  cargo brief lsp stop")]
+  # Call hierarchy: who calls X (incoming) / what does X call (outgoing)
+  cargo brief lsp call-hierarchy spawn
+  cargo brief lsp call-hierarchy spawn --outgoing -q
+
+  # Daemon lifecycle (daemon auto-starts on first query)
+  cargo brief lsp touch                         # pre-warm rust-analyzer
+  cargo brief lsp status                        # check if running
+  cargo brief lsp stop                          # shut down daemon
+
+NOTE:
+  The LSP daemon spawns automatically on first query. Initial indexing may
+  take time; subsequent queries are fast. Use `lsp touch` to pre-warm.
+  Symbol names use smart-case matching (all-lowercase = case-insensitive).")]
     Lsp(LspArgs),
 }
 
