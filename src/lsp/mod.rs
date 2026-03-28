@@ -3,10 +3,11 @@
 //! Provides `cargo brief lsp` subcommands: `touch`, `stop`, `status`, `references`,
 //! `blast-radius`, `call-hierarchy`.
 //! The daemon spawns rust-analyzer as a background process, communicates
-//! via LSP over stdio, and accepts client queries via named pipes (FIFOs).
+//! via LSP over stdio, and accepts client queries via platform-specific IPC.
 
 pub(crate) mod client;
 pub mod daemon;
+mod ipc;
 mod process;
 mod protocol;
 mod query;
@@ -21,7 +22,8 @@ use anyhow::{Context, Result};
 use crate::cli::{LspArgs, LspCommand, RemoteOpts};
 use crate::resolve;
 
-use client::{cleanup_daemon_files, daemon_dir, ensure_daemon, send_command};
+use client::{cleanup_daemon_files, daemon_dir, ensure_daemon};
+use ipc::send_command;
 use protocol::{DaemonRequest, DaemonResponse};
 
 pub fn run_lsp_command(args: &LspArgs, remote: &RemoteOpts) -> Result<()> {
@@ -108,8 +110,8 @@ fn cmd_touch(target_dir: &Path, workspace_root: &Path, verbose: bool) -> Result<
 fn cmd_stop(target_dir: &Path, workspace_root: &Path, verbose: bool) -> Result<()> {
     let dir = daemon_dir(target_dir, workspace_root);
 
-    // Try sending stop — if FIFOs don't exist, daemon is not running
-    if dir.join("lsp.req").exists() {
+    // Try sending stop — if readiness indicator doesn't exist, daemon is not running
+    if ipc::ready_indicator(&dir).exists() {
         match send_command(&dir, DaemonRequest::Stop, Duration::from_secs(5)) {
             Ok(DaemonResponse::Ok { message }) => {
                 eprintln!("[lsp] {message}");
@@ -160,8 +162,8 @@ fn cmd_query(
 fn cmd_status(target_dir: &Path, workspace_root: &Path) -> Result<()> {
     let dir = daemon_dir(target_dir, workspace_root);
 
-    // Check if daemon FIFOs exist
-    if !dir.join("lsp.req").exists() {
+    // Check if daemon is ready
+    if !ipc::ready_indicator(&dir).exists() {
         println!("LSP daemon: not running");
         return Ok(());
     }

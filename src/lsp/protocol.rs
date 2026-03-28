@@ -100,27 +100,30 @@ pub fn read_message<T: DeserializeOwned>(reader: &mut impl Read) -> Result<T> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::os::unix::net::UnixStream;
+    use std::io::Cursor;
+
+    /// Write a message to a Vec<u8>, then read it back from a Cursor.
+    /// Portable — no Unix-specific types needed.
+    fn roundtrip<T: Serialize + DeserializeOwned + std::fmt::Debug>(msg: &T) -> T {
+        let mut buf = Vec::new();
+        write_message(&mut buf, msg).unwrap();
+        read_message(&mut Cursor::new(buf)).unwrap()
+    }
 
     #[test]
     fn roundtrip_request() {
-        let (mut a, mut b) = UnixStream::pair().unwrap();
-        let req = DaemonRequest::Stop;
-        write_message(&mut a, &req).unwrap();
-        let got: DaemonRequest = read_message(&mut b).unwrap();
+        let got: DaemonRequest = roundtrip(&DaemonRequest::Stop);
         assert!(matches!(got, DaemonRequest::Stop));
     }
 
     #[test]
     fn roundtrip_response() {
-        let (mut a, mut b) = UnixStream::pair().unwrap();
         let resp = DaemonResponse::Status {
             pid: 42,
             ra_status: RaStatus::Ready,
             uptime_secs: 120,
         };
-        write_message(&mut a, &resp).unwrap();
-        let got: DaemonResponse = read_message(&mut b).unwrap();
+        let got: DaemonResponse = roundtrip(&resp);
         match got {
             DaemonResponse::Status {
                 pid,
@@ -137,14 +140,12 @@ mod tests {
 
     #[test]
     fn roundtrip_indexing_status() {
-        let (mut a, mut b) = UnixStream::pair().unwrap();
         let resp = DaemonResponse::Status {
             pid: 1,
             ra_status: RaStatus::Indexing,
             uptime_secs: 5,
         };
-        write_message(&mut a, &resp).unwrap();
-        let got: DaemonResponse = read_message(&mut b).unwrap();
+        let got: DaemonResponse = roundtrip(&resp);
         match got {
             DaemonResponse::Status { ra_status, .. } => {
                 assert_eq!(ra_status, RaStatus::Indexing);
@@ -155,13 +156,11 @@ mod tests {
 
     #[test]
     fn roundtrip_references_request() {
-        let (mut a, mut b) = UnixStream::pair().unwrap();
         let req = DaemonRequest::References {
             symbol: "Foo::bar".to_string(),
             quiet: true,
         };
-        write_message(&mut a, &req).unwrap();
-        let got: DaemonRequest = read_message(&mut b).unwrap();
+        let got: DaemonRequest = roundtrip(&req);
         match got {
             DaemonRequest::References { symbol, quiet } => {
                 assert_eq!(symbol, "Foo::bar");
@@ -173,14 +172,12 @@ mod tests {
 
     #[test]
     fn roundtrip_blast_radius_request() {
-        let (mut a, mut b) = UnixStream::pair().unwrap();
         let req = DaemonRequest::BlastRadius {
             symbol: "resolve_symbol".to_string(),
             depth: 3,
             quiet: false,
         };
-        write_message(&mut a, &req).unwrap();
-        let got: DaemonRequest = read_message(&mut b).unwrap();
+        let got: DaemonRequest = roundtrip(&req);
         match got {
             DaemonRequest::BlastRadius {
                 symbol,
@@ -197,14 +194,12 @@ mod tests {
 
     #[test]
     fn roundtrip_call_hierarchy_request() {
-        let (mut a, mut b) = UnixStream::pair().unwrap();
         let req = DaemonRequest::CallHierarchy {
             symbol: "Foo::bar".to_string(),
             outgoing: true,
             quiet: true,
         };
-        write_message(&mut a, &req).unwrap();
-        let got: DaemonRequest = read_message(&mut b).unwrap();
+        let got: DaemonRequest = roundtrip(&req);
         match got {
             DaemonRequest::CallHierarchy {
                 symbol,
@@ -221,12 +216,10 @@ mod tests {
 
     #[test]
     fn roundtrip_query_result_response() {
-        let (mut a, mut b) = UnixStream::pair().unwrap();
         let resp = DaemonResponse::QueryResult {
             output: "// 2 references to Foo\n".to_string(),
         };
-        write_message(&mut a, &resp).unwrap();
-        let got: DaemonResponse = read_message(&mut b).unwrap();
+        let got: DaemonResponse = roundtrip(&resp);
         match got {
             DaemonResponse::QueryResult { output } => {
                 assert_eq!(output, "// 2 references to Foo\n");

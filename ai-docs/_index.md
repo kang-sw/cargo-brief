@@ -126,7 +126,7 @@ src/
   main.rs          — CLI arg parsing, subcommand dispatch, RemoteOpts extraction from BriefDirect, __lsp-daemon early-exit
   cli.rs           — Subcommand types: ApiArgs, SearchArgs, ExamplesArgs, SummaryArgs, CleanArgs, LspArgs + shared TargetArgs/FilterArgs/GlobalArgs + RemoteOpts (plain struct)
   cross_crate.rs   — cross-crate module following for facade crates
-  lsp/             — LSP daemon management (unix-only): mod.rs (entry), daemon.rs (process), client.rs (connect/spawn), protocol.rs (FIFO IPC framing), transport.rs (LSP JSON-RPC framing), watcher.rs (filesystem watching), query.rs (symbol resolution + references), process/ (platform-abstracted process mgmt: unix.rs + windows.rs)
+  lsp/             — LSP daemon management (unix-only gate pending Phase 3): mod.rs (entry), daemon.rs (main loop), client.rs (daemon lifecycle: ensure/spawn/wait), ipc/ (platform-abstracted IPC: unix.rs FIFO + windows.rs atomic-rename), process/ (platform-abstracted process mgmt: unix.rs + windows.rs), protocol.rs (message framing), transport.rs (LSP JSON-RPC framing), watcher.rs (filesystem watching), query.rs (symbol resolution + references)
   remote.rs        — temp workspace creation for --crates (crates.io fetch) + cache management
   resolve.rs       — flexible target resolution (self, crate::module, fallback) + cargo metadata
   rustdoc_json.rs  — JSON generation (with use_cache param) + parsing (bincode-cached)
