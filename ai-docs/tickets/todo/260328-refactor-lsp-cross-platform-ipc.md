@@ -1,5 +1,7 @@
 ---
 title: "LSP IPC refactoring: platform abstraction for cross-platform support"
+plans:
+  phase2: 2603/28-1033-lsp-process-abstraction
 related:
   - 260326-feat-lsp-daemon-bootstrap  # original FIFO-based IPC
   - 260326-feat-lsp-windows-support   # runtime testing deferred until Windows env available
