@@ -99,7 +99,7 @@ pub fn ensure_daemon(target_dir: &Path, workspace_root: &Path, verbose: bool) ->
         && pid_file.exists()
         && let Ok(pid_str) = std::fs::read_to_string(&pid_file)
         && let Ok(pid) = pid_str.trim().parse::<u32>()
-        && process_alive(pid)
+        && super::process::process_alive(pid)
     {
         if verbose {
             eprintln!("[lsp] daemon already running (PID {pid})");
@@ -111,7 +111,7 @@ pub fn ensure_daemon(target_dir: &Path, workspace_root: &Path, verbose: bool) ->
     if pid_file.exists()
         && let Ok(pid_str) = std::fs::read_to_string(&pid_file)
         && let Ok(pid) = pid_str.trim().parse::<u32>()
-        && !process_alive(pid)
+        && !super::process::process_alive(pid)
     {
         if verbose {
             eprintln!("[lsp] cleaning up stale daemon (PID {pid})");
@@ -222,8 +222,6 @@ pub(super) fn cleanup_daemon_files(dir: &Path) {
 
 /// Spawn the daemon via re-exec. Returns the Child handle.
 fn spawn_daemon(workspace_root: &Path, daemon_dir: &Path, log_path: &Path) -> Result<Child> {
-    use std::os::unix::process::CommandExt;
-
     let exe = std::env::current_exe().context("Failed to get current executable path")?;
 
     let ws_str = workspace_root
@@ -234,20 +232,21 @@ fn spawn_daemon(workspace_root: &Path, daemon_dir: &Path, log_path: &Path) -> Re
     let log_file = File::create(log_path)
         .with_context(|| format!("Failed to create daemon log: {}", log_path.display()))?;
 
-    let child = Command::new(exe)
-        .args([
-            "__lsp-daemon",
-            "--workspace-root",
-            ws_str,
-            "--daemon-dir",
-            dir_str,
-        ])
-        .stdin(Stdio::null())
-        .stdout(Stdio::null())
-        .stderr(Stdio::from(log_file))
-        .process_group(0)
-        .spawn()
-        .context("Failed to spawn LSP daemon process")?;
+    let mut cmd = Command::new(exe);
+    cmd.args([
+        "__lsp-daemon",
+        "--workspace-root",
+        ws_str,
+        "--daemon-dir",
+        dir_str,
+    ])
+    .stdin(Stdio::null())
+    .stdout(Stdio::null())
+    .stderr(Stdio::from(log_file));
+
+    super::process::configure_daemon_spawn(&mut cmd);
+
+    let child = cmd.spawn().context("Failed to spawn LSP daemon process")?;
 
     Ok(child)
 }
@@ -312,15 +311,6 @@ fn read_log_tail(path: &Path, max_lines: usize) -> String {
     let lines: Vec<&str> = content.lines().collect();
     let start = lines.len().saturating_sub(max_lines);
     lines[start..].join("\n")
-}
-
-/// Check if a process is alive via kill(pid, 0).
-fn process_alive(pid: u32) -> bool {
-    let Ok(pid) = libc::pid_t::try_from(pid) else {
-        return false;
-    };
-    // SAFETY: kill(pid, 0) with signal 0 only checks process existence.
-    unsafe { libc::kill(pid, 0) == 0 }
 }
 
 /// FNV-1a 64-bit hash of a path, hex-encoded. Deterministic across Rust versions.

@@ -67,14 +67,9 @@ fn discover_ra_binary() -> Result<PathBuf> {
         }
     }
 
-    // Fall back to PATH
-    if let Ok(output) = Command::new("which").arg("rust-analyzer").output()
-        && output.status.success()
-    {
-        let path = String::from_utf8_lossy(&output.stdout).trim().to_string();
-        if !path.is_empty() {
-            return Ok(PathBuf::from(path));
-        }
+    // Fall back to platform-specific PATH lookup
+    if let Some(path) = super::process::find_binary_on_path("rust-analyzer") {
+        return Ok(path);
     }
 
     bail!(
