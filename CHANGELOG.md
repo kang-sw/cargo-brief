@@ -2,11 +2,20 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.9.1] - 2026-03-28
+
+### Changed
+
+- **`lsp` subcommand is now cross-platform.** Removed the `#[cfg(unix)]` gate — the module compiles on all platforms. Platform-specific IPC and process management are abstracted behind `ipc/` and `process/` modules.
+- LSP daemon now tracks rust-analyzer indexing status via `$/progress` notifications. Query commands (`references`, `blast-radius`, `call-hierarchy`) wait for indexing to complete before executing (60s timeout, configurable via `CARGO_BRIEF_LSP_READY_TIMEOUT`).
+- `lsp status` now shows ra indexing state (`initializing` / `indexing` / `ready`).
+- Internal: replaced `libc::poll`-based stdout polling with a background reader thread (`mpsc` channel). `libc` dependency is now Unix-only; `notify` is unconditional.
+
 ## [0.9.0] - 2026-03-27
 
 ### Added
 
-- **`lsp` subcommand** (Unix only): Persistent rust-analyzer daemon with query commands. Spawns a background `rust-analyzer` process with idle timeout and filesystem watcher for VFS updates. Communicates via FIFO-based IPC with `flock` serialization.
+- **`lsp` subcommand**: Persistent rust-analyzer daemon with query commands. Spawns a background `rust-analyzer` process with idle timeout and filesystem watcher for VFS updates. Communicates via FIFO-based IPC with `flock` serialization.
   - **`lsp references <symbol> [-q]`**: Find all references to a symbol across the workspace.
   - **`lsp blast-radius <symbol> [--depth N]`**: Direct and transitive callers via BFS (depth 1–10).
   - **`lsp call-hierarchy <symbol> [--outgoing] [-q]`**: Incoming or outgoing call tree with arrow indicators.
@@ -14,10 +23,6 @@ All notable changes to this project will be documented in this file.
   - **`lsp stop`**: Shut down the daemon.
   - **`lsp status`**: Show daemon status.
   - `-q` quiet mode outputs locations only (no source context).
-
-### Platform
-
-- The `lsp` subcommand requires Unix (Linux / macOS). It is not available on Windows.
 
 ## [0.8.0] - 2026-03-24
 
