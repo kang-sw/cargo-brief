@@ -459,7 +459,14 @@ pub fn run_daemon(workspace_root: &Path, daemon_dir: &Path) -> Result<()> {
 
     loop {
         // Poll for incoming client request
-        match ipc_handle.poll_request(100)? {
+        let poll_result = match ipc_handle.poll_request(100) {
+            Ok(r) => r,
+            Err(e) => {
+                eprintln!("[lsp-daemon] failed to read request: {e}");
+                continue;
+            }
+        };
+        match poll_result {
             Some(request) => {
                 // Wait for ra to finish indexing before query dispatch
                 let is_query = matches!(

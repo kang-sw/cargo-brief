@@ -126,7 +126,10 @@ pub(in crate::lsp) fn send_command(
         .context("Failed to open lock file")?;
     lock_exclusive(&lock_file)?;
 
-    // 2. Write request to tmp file, then atomic rename
+    // 2. Drain stale response from a previously crashed client
+    fs::remove_file(&resp_path).ok();
+
+    // 3. Write request to tmp file, then atomic rename
     let mut req_file = File::create(&req_tmp).context("Failed to create request tmp file")?;
     write_message(&mut req_file, &request)?;
     drop(req_file);

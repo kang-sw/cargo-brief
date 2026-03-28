@@ -3,7 +3,7 @@
 //! Provides `cargo brief lsp` subcommands: `touch`, `stop`, `status`, `references`,
 //! `blast-radius`, `call-hierarchy`.
 //! The daemon spawns rust-analyzer as a background process, communicates
-//! via LSP over stdio, and accepts client queries via named pipes (FIFOs).
+//! via LSP over stdio, and accepts client queries via platform-specific IPC.
 
 pub(crate) mod client;
 pub mod daemon;
