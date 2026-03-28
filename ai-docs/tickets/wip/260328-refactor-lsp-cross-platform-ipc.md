@@ -1,5 +1,6 @@
 ---
 title: "LSP IPC refactoring: platform abstraction for cross-platform support"
+started: 2026-03-28
 plans:
   phase2: 2603/28-1033-lsp-process-abstraction
 related:
@@ -122,6 +123,21 @@ platform-specific code in `transport.rs`. Add cross-compilation check to CI.
 
 Success criteria: `cargo check --target x86_64-pc-windows-msvc` passes for the
 entire crate. Existing Unix tests still pass.
+
+### Result (1e73f6f) - 26-03-28
+
+**Phase 2 complete.** Extracted `process_alive()`, daemon spawn detachment
+(`process_group(0)`), and `which` binary lookup from `client.rs`/`daemon.rs`
+into `src/lsp/process/{mod,unix,windows}.rs`.
+
+- Unix backend: pure extraction, behavior unchanged. All tests pass.
+- Windows backend: `OpenProcess(SYNCHRONIZE)` for liveness, `creation_flags(CREATE_NEW_PROCESS_GROUP)` for detachment, `where.exe` for PATH lookup. Compiles under `cfg(windows)` but is dead code until Phase 3 removes the outer `#[cfg(unix)]` gate.
+- `windows-sys` 0.59 added as `cfg(windows)` dependency.
+- No deviations from the plan.
+- Code review minor notes (deferred to Phase 3): `CREATE_NEW_PROCESS_GROUP` uses local constant instead of `windows-sys` export; `process_alive` has redundant `INVALID_HANDLE_VALUE` check (harmless).
+- Runtime directory logic extraction (`%LOCALAPPDATA%` fallback) was not in scope for this phase — `daemon_dir()` remains in `client.rs`.
+
+**Next:** Phase 1 (IPC abstraction) or Phase 3 (cfg gate removal).
 
 ## Out of Scope
 
