@@ -49,8 +49,11 @@ TIPS:
   - Feature-gated items are invisible without -F. Try -F full if not found.
   - Smart-case: all-lowercase pattern = case-insensitive, any uppercase = exact.
   - `code` searches ALL workspace members by default (not just current package).
+  - `lsp` finds workspace-defined symbols only (not external deps like bevy::App).
+    Use unique names; common methods like \"new\" may not resolve.
+    Falls back: `code --refs <name>` for grep-based reference search.
   - `lsp` spawns a persistent rust-analyzer daemon; first query may be slow
-    while indexing, subsequent queries are fast. Use `lsp touch` to pre-warm.
+    while indexing. Use `lsp touch` to pre-warm.
 
 Run `cargo brief <subcommand> --help` for subcommand-specific options and examples."
 )]
@@ -418,10 +421,24 @@ EXAMPLES:
   cargo brief lsp status                        # check if running
   cargo brief lsp stop                          # shut down daemon
 
+SYMBOL RESOLUTION:
+  Symbols are resolved via rust-analyzer's workspace/symbol search.
+  This means:
+    - Works best with WORKSPACE-DEFINED items (functions, structs, enums,
+      traits). External dependency types (e.g., hecs::World) are NOT found.
+    - Use unique identifiers. Common method names like \"new\" or \"get\" are
+      typically not returned by workspace/symbol search.
+    - Type::method syntax (e.g., \"Foo::bar\") works only if rust-analyzer
+      returns the method as a workspace symbol. Prefer the bare function
+      name when possible.
+    - call-hierarchy and blast-radius work on functions/methods, not types.
+      Use `references` for tracking struct/enum/trait usage.
+
+  If a symbol is not found, try `code --refs <name>` as a grep-based fallback.
+
 NOTE:
   The LSP daemon spawns automatically on first query. Initial indexing may
-  take time; subsequent queries are fast. Use `lsp touch` to pre-warm.
-  Symbol names use smart-case matching (all-lowercase = case-insensitive).")]
+  take time; subsequent queries are fast. Use `lsp touch` to pre-warm.")]
     Lsp(LspArgs),
 }
 
