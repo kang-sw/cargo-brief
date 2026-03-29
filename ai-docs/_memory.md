@@ -11,16 +11,19 @@
 
 ## Active Work
 
-- **LSP cross-platform IPC refactoring** (`260328-refactor-lsp-cross-platform-ipc`):
-  All 3 phases complete. `lsp` module is now cross-platform (no `#[cfg(unix)]` gate).
-  Phase 1: IPC abstraction (`src/lsp/ipc/{mod,unix,windows}.rs`).
-  Phase 2: Process management abstraction (`src/lsp/process/{mod,unix,windows}.rs`).
-  Phase 3: Background reader thread replaces `libc::poll` in transport.rs; `libc` gated
-  to `cfg(unix)`, `notify` made unconditional. `shutdown_ra()` simplified to fire-and-forget.
-  Windows runtime testing deferred to `260326-feat-lsp-windows-support`.
+No active items.
 
 ## Recent Work
 
+- **LSP daemon lifecycle fixes** (`260329-bug-lsp-daemon-lifecycle`):
+  Phase 1: `setsid()` replaces `process_group(0)` in unix.rs — daemon survives
+  parent shell exit. Phase 2: `touch` blocks by default until indexing completes.
+  `--no-wait` flag for fire-and-forget. `DaemonRequest::WaitForReady` with unlimited
+  daemon-side timeout. Progress dots every 3s on stderr. Errors include `lsp.log` tail.
+  Main loop `is_query` boolean replaced with per-variant `Option<Duration>` wait_timeout.
+  Windows `send_command` uses `checked_add` to prevent `Instant` overflow with `Duration::MAX`.
+- **LSP cross-platform IPC refactoring** (`260328-refactor-lsp-cross-platform-ipc`):
+  All 3 phases complete. `lsp` module is now cross-platform.
 - **LSP indexing status tracking**: Daemon tracks ra's `$/progress` begin/end notifications to determine indexing state. `RaStatus::Indexing` variant added. Main loop drains ra stdout via poll-then-read pattern (`drain_ra_messages()`). Query commands gate on `wait_for_ready()` (60s default, `CARGO_BRIEF_LSP_READY_TIMEOUT` env var). Client-side query timeout increased to 120s. `send_request_and_wait()` replies to server-initiated requests. `window.workDoneProgress: true` declared in capabilities. Fallback: no `$/progress` ever + uptime > 10s → assume Ready.
 - **LSP FIFO IPC refactor**: Replaced UDS IPC with FIFO pair + `flock` serialization for macOS sandbox compatibility.
 - **LSP blast-radius + call-hierarchy commands**: BFS incoming/outgoing callers via `callHierarchy` LSP methods.

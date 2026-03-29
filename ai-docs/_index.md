@@ -69,7 +69,8 @@ Remote crate support (`-C`) with dep recursion.
 
 **`clean`** — Clear cached remote crate workspaces. Optional `SPEC` argument for specific crate.
 
-**`lsp`** — Manage persistent rust-analyzer daemon. Subcommands: `touch` (ensure running),
+**`lsp`** — Manage persistent rust-analyzer daemon. Subcommands: `touch [--no-wait]`
+(ensure running; blocks until indexing completes by default, `--no-wait` for fire-and-forget),
 `stop` (graceful shutdown), `status` (show PID/ra state/uptime), `references <symbol> [-q]`
 (find all references via ra), `blast-radius <symbol> [--depth N] [-q]` (direct + transitive
 callers via BFS), `call-hierarchy <symbol> [--outgoing] [-q]` (incoming/outgoing call tree).
