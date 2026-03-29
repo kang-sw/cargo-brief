@@ -11,6 +11,7 @@ use serde::{Deserialize, Serialize, de::DeserializeOwned};
 pub enum DaemonRequest {
     Stop,
     Status,
+    WaitForReady,
     References {
         symbol: String,
         quiet: bool,
@@ -152,6 +153,12 @@ mod tests {
             }
             _ => panic!("unexpected response variant"),
         }
+    }
+
+    #[test]
+    fn roundtrip_wait_for_ready_request() {
+        let got: DaemonRequest = roundtrip(&DaemonRequest::WaitForReady);
+        assert!(matches!(got, DaemonRequest::WaitForReady));
     }
 
     #[test]

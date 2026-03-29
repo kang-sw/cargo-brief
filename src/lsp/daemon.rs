@@ -160,6 +160,9 @@ fn handle_request(
                 },
             }
         }
+        DaemonRequest::WaitForReady => DaemonResponse::Ok {
+            message: "rust-analyzer ready".to_string(),
+        },
     }
 }
 
@@ -332,8 +335,15 @@ fn wait_for_ready(
             }
             None => {
                 check_no_progress_fallback(ra_status, *had_progress, start_time);
-                continue;
             }
+        }
+
+        // Note: ra crash during indexing is primarily detected by the transport
+        // returning Err (reader thread sees stdout close), which propagates via `?`.
+        // The Stopped check below is a forward-looking guard in case a future
+        // code path sets ra_status to Stopped within this function's scope.
+        if *ra_status == RaStatus::Stopped {
+            bail!("rust-analyzer stopped unexpectedly during indexing");
         }
     }
 }
@@ -439,30 +449,32 @@ pub fn run_daemon(workspace_root: &Path, daemon_dir: &Path) -> Result<()> {
         };
         match poll_result {
             Some(request) => {
-                // Wait for ra to finish indexing before query dispatch
-                let is_query = matches!(
-                    request,
+                // Wait for ra to finish indexing before dispatch
+                let wait_timeout = match &request {
+                    DaemonRequest::WaitForReady => Some(Duration::MAX),
                     DaemonRequest::References { .. }
-                        | DaemonRequest::BlastRadius { .. }
-                        | DaemonRequest::CallHierarchy { .. }
-                );
-                if is_query && ra_status != RaStatus::Ready {
-                    if let Err(e) = wait_for_ready(
+                    | DaemonRequest::BlastRadius { .. }
+                    | DaemonRequest::CallHierarchy { .. } => Some(ready_timeout),
+                    _ => None,
+                };
+                if let Some(timeout) = wait_timeout
+                    && ra_status != RaStatus::Ready
+                    && let Err(e) = wait_for_ready(
                         &mut transport,
                         &mut ra_status,
                         &mut active_progress,
                         &mut had_progress,
                         start_time,
-                        ready_timeout,
-                    ) {
-                        let response = DaemonResponse::Error {
-                            message: format!("{e}"),
-                        };
-                        if let Err(we) = ipc_handle.send_response(&response) {
-                            eprintln!("[lsp-daemon] failed to write error response: {we}");
-                        }
-                        continue;
+                        timeout,
+                    )
+                {
+                    let response = DaemonResponse::Error {
+                        message: format!("{e}"),
+                    };
+                    if let Err(we) = ipc_handle.send_response(&response) {
+                        eprintln!("[lsp-daemon] failed to write error response: {we}");
                     }
+                    continue;
                 }
 
                 // Process request

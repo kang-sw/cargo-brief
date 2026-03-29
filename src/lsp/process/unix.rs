@@ -11,9 +11,18 @@ pub(in crate::lsp) fn process_alive(pid: u32) -> bool {
     unsafe { libc::kill(pid, 0) == 0 }
 }
 
-/// Detach a daemon process from the parent's process group.
+/// Detach daemon into a new session so it survives parent shell exit.
 pub(in crate::lsp) fn configure_daemon_spawn(cmd: &mut Command) {
-    cmd.process_group(0);
+    // SAFETY: setsid() is async-signal-safe (POSIX). Creates a new session
+    // so the daemon is not killed by SIGHUP when the parent terminal closes.
+    unsafe {
+        cmd.pre_exec(|| {
+            if libc::setsid() == -1 {
+                return Err(std::io::Error::last_os_error());
+            }
+            Ok(())
+        });
+    }
 }
 
 /// Look up a binary on PATH using `which`.
