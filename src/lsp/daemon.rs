@@ -454,25 +454,24 @@ pub fn run_daemon(workspace_root: &Path, daemon_dir: &Path) -> Result<()> {
                     | DaemonRequest::CallHierarchy { .. } => Some(ready_timeout),
                     _ => None,
                 };
-                if let Some(timeout) = wait_timeout {
-                    if ra_status != RaStatus::Ready {
-                        if let Err(e) = wait_for_ready(
-                            &mut transport,
-                            &mut ra_status,
-                            &mut active_progress,
-                            &mut had_progress,
-                            start_time,
-                            timeout,
-                        ) {
-                            let response = DaemonResponse::Error {
-                                message: format!("{e}"),
-                            };
-                            if let Err(we) = ipc_handle.send_response(&response) {
-                                eprintln!("[lsp-daemon] failed to write error response: {we}");
-                            }
-                            continue;
-                        }
+                if let Some(timeout) = wait_timeout
+                    && ra_status != RaStatus::Ready
+                    && let Err(e) = wait_for_ready(
+                        &mut transport,
+                        &mut ra_status,
+                        &mut active_progress,
+                        &mut had_progress,
+                        start_time,
+                        timeout,
+                    )
+                {
+                    let response = DaemonResponse::Error {
+                        message: format!("{e}"),
+                    };
+                    if let Err(we) = ipc_handle.send_response(&response) {
+                        eprintln!("[lsp-daemon] failed to write error response: {we}");
                     }
+                    continue;
                 }
 
                 // Process request
