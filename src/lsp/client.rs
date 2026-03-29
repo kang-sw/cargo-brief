@@ -158,7 +158,7 @@ fn wait_for_daemon(
 }
 
 /// Read the last `max_lines` lines from a file. Returns empty string on any error.
-fn read_log_tail(path: &Path, max_lines: usize) -> String {
+pub(super) fn read_log_tail(path: &Path, max_lines: usize) -> String {
     let Ok(content) = std::fs::read_to_string(path) else {
         return String::new();
     };

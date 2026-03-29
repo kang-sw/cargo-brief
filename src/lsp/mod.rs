@@ -22,7 +22,7 @@ use anyhow::{Context, Result};
 use crate::cli::{LspArgs, LspCommand, RemoteOpts};
 use crate::resolve;
 
-use client::{cleanup_daemon_files, daemon_dir, ensure_daemon};
+use client::{cleanup_daemon_files, daemon_dir, ensure_daemon, read_log_tail};
 use ipc::send_command;
 use protocol::{DaemonRequest, DaemonResponse};
 
@@ -39,7 +39,7 @@ pub fn run_lsp_command(args: &LspArgs, remote: &RemoteOpts) -> Result<()> {
     let verbose = args.global.verbose;
 
     match &args.command {
-        LspCommand::Touch => cmd_touch(td, wr, verbose),
+        LspCommand::Touch { no_wait } => cmd_touch(td, wr, verbose, *no_wait),
         LspCommand::Stop => cmd_stop(td, wr, verbose),
         LspCommand::Status => cmd_status(td, wr),
         LspCommand::References { symbol, quiet } => cmd_query(
@@ -82,28 +82,79 @@ pub fn run_lsp_command(args: &LspArgs, remote: &RemoteOpts) -> Result<()> {
     }
 }
 
-/// Ensure daemon is running (start if needed).
-fn cmd_touch(target_dir: &Path, workspace_root: &Path, verbose: bool) -> Result<()> {
+/// Ensure daemon is running. By default blocks until indexing completes.
+fn cmd_touch(target_dir: &Path, workspace_root: &Path, verbose: bool, no_wait: bool) -> Result<()> {
     let dir = ensure_daemon(target_dir, workspace_root, verbose)?;
 
-    let resp = send_command(&dir, DaemonRequest::Status, Duration::from_secs(5))?;
-    match resp {
-        DaemonResponse::Status {
-            pid,
-            ra_status,
-            uptime_secs,
-        } => {
-            eprintln!("[lsp] daemon running (PID {pid}, ra: {ra_status}, uptime: {uptime_secs}s)");
+    if no_wait {
+        // Fire-and-forget: just check status and return
+        let resp = send_command(&dir, DaemonRequest::Status, Duration::from_secs(5))?;
+        match resp {
+            DaemonResponse::Status {
+                pid,
+                ra_status,
+                uptime_secs,
+            } => {
+                eprintln!(
+                    "[lsp] daemon running (PID {pid}, ra: {ra_status}, uptime: {uptime_secs}s)"
+                );
+            }
+            DaemonResponse::Ok { message } => eprintln!("[lsp] {message}"),
+            DaemonResponse::Error { message } => eprintln!("[lsp] daemon error: {message}"),
+            DaemonResponse::QueryResult { .. } => {}
         }
-        DaemonResponse::Ok { message } => {
-            eprintln!("[lsp] {message}");
-        }
-        DaemonResponse::Error { message } => {
-            eprintln!("[lsp] daemon error: {message}");
-        }
-        DaemonResponse::QueryResult { .. } => {}
+        return Ok(());
     }
-    Ok(())
+
+    // Blocking mode: wait until ra finishes indexing
+    let stop_flag = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let stop_clone = stop_flag.clone();
+
+    let dot_thread = std::thread::spawn(move || {
+        eprint!("[lsp] Indexing ");
+        loop {
+            // Sleep 3s total, checking stop_flag every 100ms
+            for _ in 0..30 {
+                if stop_clone.load(std::sync::atomic::Ordering::Relaxed) {
+                    eprintln!();
+                    return;
+                }
+                std::thread::sleep(Duration::from_millis(100));
+            }
+            eprint!(". ");
+        }
+    });
+
+    let result = send_command(&dir, DaemonRequest::WaitForReady, Duration::MAX);
+
+    stop_flag.store(true, std::sync::atomic::Ordering::Relaxed);
+    let _ = dot_thread.join();
+
+    match result {
+        Ok(DaemonResponse::Ok { message }) => {
+            eprintln!("[lsp] {message}");
+            Ok(())
+        }
+        Ok(DaemonResponse::Error { message }) => {
+            let log_path = dir.join("lsp.log");
+            let tail = read_log_tail(&log_path, 20);
+            if tail.is_empty() {
+                anyhow::bail!("LSP daemon error: {message}");
+            }
+            anyhow::bail!("LSP daemon error: {message}\nDaemon log (last 20 lines):\n{tail}");
+        }
+        Err(e) => {
+            let log_path = dir.join("lsp.log");
+            let tail = read_log_tail(&log_path, 20);
+            if tail.is_empty() {
+                anyhow::bail!("LSP daemon communication failed: {e}");
+            }
+            anyhow::bail!(
+                "LSP daemon communication failed: {e}\nDaemon log (last 20 lines):\n{tail}"
+            );
+        }
+        _ => anyhow::bail!("Unexpected response from daemon"),
+    }
 }
 
 /// Stop the daemon.

@@ -770,7 +770,11 @@ pub struct LspArgs {
 #[derive(Subcommand, Debug, Clone)]
 pub enum LspCommand {
     /// Ensure LSP daemon is running (pre-warm rust-analyzer)
-    Touch,
+    Touch {
+        /// Return immediately after ensuring daemon is running (skip indexing wait)
+        #[arg(long)]
+        no_wait: bool,
+    },
     /// Stop the LSP daemon
     Stop,
     /// Show LSP daemon status
