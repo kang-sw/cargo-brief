@@ -136,7 +136,10 @@ pub(in crate::lsp) fn send_command(
     fs::rename(&req_tmp, &req_path).context("Failed to rename request file")?;
 
     // 3. Poll for response with timeout
-    let deadline = Instant::now() + timeout;
+    let now = Instant::now();
+    let deadline = now
+        .checked_add(timeout)
+        .unwrap_or(now + Duration::from_secs(86400 * 365));
     loop {
         if resp_path.exists() {
             let mut file = File::open(&resp_path).context("Failed to open response file")?;

@@ -161,7 +161,7 @@ fn handle_request(
             }
         }
         DaemonRequest::WaitForReady => DaemonResponse::Ok {
-            message: format!("ready (ra: {ra_status})"),
+            message: "rust-analyzer ready".to_string(),
         },
     }
 }
@@ -338,7 +338,10 @@ fn wait_for_ready(
             }
         }
 
-        // Safety net: if ra stopped (process exited but pipe lingered), bail
+        // Note: ra crash during indexing is primarily detected by the transport
+        // returning Err (reader thread sees stdout close), which propagates via `?`.
+        // The Stopped check below is a forward-looking guard in case a future
+        // code path sets ra_status to Stopped within this function's scope.
         if *ra_status == RaStatus::Stopped {
             bail!("rust-analyzer stopped unexpectedly during indexing");
         }
