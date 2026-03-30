@@ -15,6 +15,12 @@ No active items.
 
 ## Recent Work
 
+- **Nightly toolchain auto-install** (`260330-feat-nightly-toolchain-auto-install`):
+  `ensure_toolchain_available()` in `rustdoc_json.rs` pre-checks nightly via
+  `rustup which rustdoc --toolchain {toolchain}` (~10ms). Interactive TTY prompt
+  for installation; actionable error in non-TTY mode. `AtomicBool` guard for
+  at-most-once check. Called after cache early-return in `generate_rustdoc_json()`.
+  `batch_generate_rustdoc_json()` skipped (pre-warming; per-crate fallback handles prompt).
 - **LSP daemon lifecycle fixes** (`260329-bug-lsp-daemon-lifecycle`):
   Phase 1: `setsid()` replaces `process_group(0)` in unix.rs — daemon survives
   parent shell exit. Phase 2: `touch` blocks by default until indexing completes.

@@ -1,6 +1,8 @@
 use std::collections::{HashMap, HashSet};
+use std::io::IsTerminal;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use anyhow::{Context, Result, bail};
 
@@ -53,6 +55,105 @@ impl LockfilePackages {
     }
 }
 
+/// Guard: runs the toolchain check at most once per process.
+static TOOLCHAIN_CHECKED: AtomicBool = AtomicBool::new(false);
+
+/// Pre-check that the required rustup toolchain is available.
+///
+/// Uses `rustup which rustdoc --toolchain {toolchain}` (~10ms) to detect.
+/// When the toolchain is missing and stderr is a TTY, prompts the user to
+/// install it interactively (reading from `/dev/tty` on Unix, `CONIN$` on
+/// Windows). In non-TTY mode, bails with an actionable error message.
+///
+/// The check runs at most once per process via an `AtomicBool` guard.
+fn ensure_toolchain_available(toolchain: &str) -> Result<()> {
+    if TOOLCHAIN_CHECKED.load(Ordering::Relaxed) {
+        return Ok(());
+    }
+
+    let result = Command::new("rustup")
+        .args(["which", "rustdoc", "--toolchain", toolchain])
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status();
+
+    match result {
+        Ok(status) if status.success() => {
+            TOOLCHAIN_CHECKED.store(true, Ordering::Relaxed);
+            return Ok(());
+        }
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+            bail!(
+                "rustup is not installed. Install it from https://rustup.rs/ \
+                 then run: rustup toolchain install {toolchain}"
+            );
+        }
+        _ => {} // toolchain missing — fall through to prompt/error
+    }
+
+    if std::io::stderr().is_terminal() {
+        eprintln!("[cargo-brief] The '{toolchain}' toolchain is required but not installed.");
+        eprint!("[cargo-brief] Install it now? [y/N] ");
+
+        let response = read_tty_line();
+        if !response
+            .as_ref()
+            .is_ok_and(|s| matches!(s.trim(), "y" | "Y"))
+        {
+            bail!(
+                "The '{toolchain}' toolchain is not installed.\n\
+                 Install it with: rustup toolchain install {toolchain}"
+            );
+        }
+
+        eprintln!("[cargo-brief] Installing '{toolchain}' toolchain...");
+        let install_status = Command::new("rustup")
+            .args(["toolchain", "install", toolchain])
+            .stderr(Stdio::inherit())
+            .stdout(Stdio::inherit())
+            .status()
+            .context("Failed to run `rustup toolchain install`")?;
+
+        if !install_status.success() {
+            bail!(
+                "Failed to install the '{toolchain}' toolchain.\n\
+                 Try manually: rustup toolchain install {toolchain}"
+            );
+        }
+
+        TOOLCHAIN_CHECKED.store(true, Ordering::Relaxed);
+        Ok(())
+    } else {
+        bail!(
+            "The '{toolchain}' toolchain is not installed.\n\
+             Install it with: rustup toolchain install {toolchain}"
+        );
+    }
+}
+
+/// Read a single line from the controlling terminal, bypassing stdin.
+fn read_tty_line() -> std::io::Result<String> {
+    #[cfg(unix)]
+    const TTY_PATH: &str = "/dev/tty";
+    #[cfg(windows)]
+    const TTY_PATH: &str = "CONIN$";
+    #[cfg(not(any(unix, windows)))]
+    return Err(std::io::Error::new(
+        std::io::ErrorKind::Unsupported,
+        "TTY input not supported on this platform",
+    ));
+
+    #[cfg(any(unix, windows))]
+    {
+        use std::io::BufRead;
+        let tty = std::fs::File::open(TTY_PATH)?;
+        let mut reader = std::io::BufReader::new(tty);
+        let mut line = String::new();
+        reader.read_line(&mut line)?;
+        Ok(line)
+    }
+}
+
 /// Invoke `cargo +nightly rustdoc` and return the path to the generated JSON file.
 ///
 /// When `verbose` is true, cargo's stderr (compilation progress) is streamed to
@@ -77,6 +178,8 @@ pub fn generate_rustdoc_json(
             return Ok(json_path);
         }
     }
+
+    ensure_toolchain_available(toolchain)?;
 
     let mut cmd = Command::new("cargo");
     cmd.arg(format!("+{toolchain}"));

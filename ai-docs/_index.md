@@ -155,7 +155,7 @@ Parsed via `rustdoc-types` 0.57. Post-macro-expansion output.
 - `default` → hidden (except impl items, delegated to parent type)
 
 ### Error Handling
-- Missing nightly toolchain: actionable install command
+- Missing nightly toolchain: proactive pre-check via `rustup which`; interactive install prompt when TTY, actionable error otherwise
 - Package not found: clear message with original cargo error
 - Module not found: lists available modules in the crate
 - Leaf item not found: lists available items in the parent module (visibility-filtered)
