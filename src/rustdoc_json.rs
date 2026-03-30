@@ -134,29 +134,23 @@ fn ensure_toolchain_available(toolchain: &str) -> Result<()> {
 /// Read a single line from the controlling terminal, bypassing stdin.
 fn read_tty_line() -> std::io::Result<String> {
     #[cfg(unix)]
-    {
-        use std::io::BufRead;
-        let tty = std::fs::File::open("/dev/tty")?;
-        let mut reader = std::io::BufReader::new(tty);
-        let mut line = String::new();
-        reader.read_line(&mut line)?;
-        Ok(line)
-    }
+    const TTY_PATH: &str = "/dev/tty";
     #[cfg(windows)]
+    const TTY_PATH: &str = "CONIN$";
+    #[cfg(not(any(unix, windows)))]
+    return Err(std::io::Error::new(
+        std::io::ErrorKind::Unsupported,
+        "TTY input not supported on this platform",
+    ));
+
+    #[cfg(any(unix, windows))]
     {
         use std::io::BufRead;
-        let tty = std::fs::File::open("CONIN$")?;
+        let tty = std::fs::File::open(TTY_PATH)?;
         let mut reader = std::io::BufReader::new(tty);
         let mut line = String::new();
         reader.read_line(&mut line)?;
         Ok(line)
-    }
-    #[cfg(not(any(unix, windows)))]
-    {
-        Err(std::io::Error::new(
-            std::io::ErrorKind::Unsupported,
-            "TTY input not supported on this platform",
-        ))
     }
 }
 
