@@ -2,6 +2,16 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.10.0] - 2026-04-04
+
+### Added
+
+- **Nightly toolchain auto-detection and install prompt.** Commands that require `rustdoc-json` output now check whether a nightly toolchain is installed. If missing, the user is prompted to install one interactively.
+
+### Fixed
+
+- **LSP daemon lifecycle.** Daemon now uses `setsid()` for proper detach and blocking `touch` with `WaitForReady`, preventing orphan processes and race conditions on startup.
+
 ## [0.9.2] - 2026-03-28
 
 ### Added
