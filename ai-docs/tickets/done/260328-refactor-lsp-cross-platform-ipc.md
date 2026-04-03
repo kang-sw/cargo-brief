@@ -4,8 +4,8 @@ status: done
 started: 2026-03-28
 completed: 2026-03-28
 plans:
-  phase2: 2603/28-1033-lsp-process-abstraction
-  phase3: 2603/28-1230-lsp-cfg-gate-removal
+  phase2: 2026-03/28-1033-lsp-process-abstraction
+  phase3: 2026-03/28-1230-lsp-cfg-gate-removal
 related:
   - 260326-feat-lsp-daemon-bootstrap  # original FIFO-based IPC
   - 260326-feat-lsp-windows-support   # runtime testing deferred until Windows env available

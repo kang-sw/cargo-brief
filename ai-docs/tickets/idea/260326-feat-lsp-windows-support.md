@@ -1,5 +1,7 @@
 ---
 title: "LSP daemon: Windows platform support"
+status: idea
+plans: null
 related:
   - 260326-feat-lsp-daemon-bootstrap  # original Unix-only implementation
   - 260326-bug-lsp-daemon-spawn-diagnostics  # spawn diagnostics (also Unix-only)

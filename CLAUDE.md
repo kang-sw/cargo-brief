@@ -1,6 +1,5 @@
 <!-- AI-maintained project state — read before work, update after -->
-<!-- - `ai-docs/_index.md` — architecture overview, conventions -->
-<!-- - `ai-docs/_memory.md` — recent work, workspace reference -->
+<!-- - `ai-docs/_index.md` — architecture, conventions, build/test, session notes -->
 
 # CLAUDE.md — cargo-brief
 
@@ -39,10 +38,11 @@ ai-docs/        — AI-maintained project docs, tickets, dependency API notes
 ## Project Knowledge
 
 Project state and cross-session context live in `ai-docs/`.
-Read `_index.md` and `_memory.md` at session start.
+Read `_index.md` at session start.
 Before creating or editing tickets, load `/write-ticket` for conventions.
 Reference tickets by **stem only** (e.g., `260115-feat-foo-bar`), never by
 full path — stems stay stable across status moves.
+When starting work on a ticket, move it to `wip/` immediately.
 
 **Language:** All AI-authored artifacts — documents, plans, commit messages, ticket entries,
 `### Result` entries, and inline code comments — must be in English regardless of
@@ -50,16 +50,15 @@ conversation language. Human-facing UI strings are exempt.
 
 ```
 ai-docs/
-  _index.md          — project architecture and stable conventions
-  _memory.md         — cross-session continuity, updated each session
+  _index.md          — single session-start read; project context
+  spec/              — external-facing feature specs (what the project does)
   mental-model/      — architecture docs, regenerable from source
   deps/              — external library API delta docs
   ref/               — static reference material (external specs, protocol docs, design notes)
   tickets/<status>/  — idea/ todo/ wip/ done/ dropped/
 ```
 
-**When to read:** Load `_index.md` and `_memory.md` at session start. Load relevant module
-docs before tasks.
+**When to read:** Load `_index.md` at session start. Load relevant module docs before tasks.
 **When to update:** After implementing changes that affect operational state or a module's
 public API. Update the specific section/doc, not everything.
 
@@ -67,8 +66,9 @@ public API. Update the specific section/doc, not everything.
 `YYMMDD` is the **creation date**; it never changes when the ticket moves between statuses.
 Categories: `bug`, `feat`, `refactor`, `chore`, `research`.
 
-- Frontmatter requires `title` and `status`. Add `started: YYYY-MM-DD` on move to
-  `wip/`; add `completed: YYYY-MM-DD` on move to `done/`.
+- Frontmatter requires `title` and `status`. Add `plans:` (use `null` for unplanned
+  phases). Add `started: YYYY-MM-DD` on move to `wip/`; add `completed: YYYY-MM-DD`
+  on move to `done/`. Add `parent:` for epic sub-tickets where applicable.
 - Status is directory-based: `idea/` → `todo/` → `wip/` → `done/` (or `dropped/`).
 - Phases requiring non-trivial design before coding are marked **(plan mode)** — use
   `EnterPlanMode`, explore + design, get user approval, then `ExitPlanMode` to implement.
@@ -81,10 +81,12 @@ Categories: `bug`, `feat`, `refactor`, `chore`, `research`.
    clear — judge scope by AI effort, not human-hours.
 2. **Surgical changes.** Change only what the task requires. Follow existing style. Every
    changed line must trace to the request.
-3. **Module structure.** Split files at ~300 lines. Extract an entry file
+3. **Responsibility check.** As you implement, ask whether each change
+   keeps the module's role clean. Split when responsibility drifts.
+4. **Module structure.** Split files at ~300 lines. Extract an entry file
    (e.g. `mod.rs`, `index.ts`, `__init__.py`) containing doc comments and public
    re-exports only — reading it alone conveys the module's interface.
-4. **Hot-path performance.** In performance-critical paths, prefer minimal allocation
+5. **Hot-path performance.** In performance-critical paths, prefer minimal allocation
    and data locality over convenience abstractions. Apply only when benefit clearly
    outweighs complexity cost.
 
@@ -117,16 +119,15 @@ alternatives considered, and trade-offs — focus on _why_ this approach was cho
 
 ### Session Start
 
-- Read `ai-docs/_index.md` and `ai-docs/_memory.md` for project context.
-- Run `git log --oneline -10` for recent changes. Read full messages
-  (`git show`) when a commit is relevant — they carry decision context.
+- Read `ai-docs/_index.md` for project context.
+- Run `git log -10` for recent changes. (without `--oneline`!)
 
 ### Dependency API Notes
 
 - **`ai-docs/deps/<package>[v<ver>].md`** stores verified API facts for libraries
   whose actual API differs from training knowledge or is too recent to be known.
 - **When to read:** Before writing code that uses a package listed in
-  `_memory.md → Documented Dependencies`. On compile/type errors resembling wrong
+  `_index.md → Documented Dependencies`. On compile/type errors resembling wrong
   signatures, missing types, or changed fields, consult `ai-docs/deps/` **before**
   exploring package source from scratch.
 - **When to write/update:** After discovering API drift (wrong arg count, renamed types,

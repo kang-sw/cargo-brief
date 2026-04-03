@@ -220,10 +220,40 @@ Domain-oriented operational knowledge in `ai-docs/mental-model/`:
 
 ---
 
-## In Progress
+## Build & Test
 
-No active items.
+- Build: `cargo build`
+- Test: `cargo test`
+- Lint: `cargo clippy`
+- Requires nightly toolchain for rustdoc JSON generation (`cargo +nightly rustdoc`)
 
-## Backlog
+## Spec Index
+
+No specs yet. Create specs in `ai-docs/spec/` as user-facing features are documented.
+
+## Conventions
+
+- **Tickets**: `ai-docs/tickets/<status>/YYMMDD-<category>-<name>.md`. Categories:
+  `bug`, `feat`, `refactor`, `chore`, `research`. `YYMMDD` is creation date (never changes).
+- **Plans**: `ai-docs/plans/YYYY-MM/DD-hhmm.<name>.md`.
+- **Dependency docs**: `ai-docs/deps/<package>[v<ver>].md` — verified API facts.
+
+## Workspace Reference
+
+- Crate name: `cargo-brief` (binary: `cargo-brief`, lib: `cargo_brief`)
+- Entry: `src/lib.rs` → `run_api_pipeline(args, remote)` + `run_search_pipeline(args, remote)` + `run_examples_pipeline(args, remote)` + `run_summary_pipeline(args, remote)` + `run_ts_pipeline(args, remote)` + `run_code_pipeline(args, remote)` + `run_lsp_command(args, remote)`, `src/main.rs` → `BriefDirect` parsing, `RemoteOpts` extraction, subcommand dispatch + `__lsp-daemon` early-exit
+- Pipeline: All pipelines take `(args, &RemoteOpts)`. Build `PipelineContext` (local or remote), then call shared pipeline. Remote branching: `if remote.crates { ... spec from args.target.crate_name ... }`
+- CLI types: `ApiArgs`, `SearchArgs`, `ExamplesArgs`, `SummaryArgs`, `TsArgs`, `CodeArgs`, `CleanArgs`, `LspArgs` + shared `TargetArgs`/`FilterArgs`/`GlobalArgs` + `RemoteOpts` (plain struct, not clap)
+- Modules: `cli`, `code`, `cross_crate`, `examples`, `lsp`, `remote`, `resolve`, `rustdoc_json`, `model`, `render`, `search`, `summary`, `ts`
+- Test fixture: `test_fixture/` (workspace with `glob-source`/`glob-inner`/`named-source` sub-crates for cross-crate glob and named re-export testing)
+- Integration tests: `tests/integration.rs` (224 tests)
+
+## Documented Dependencies
+
+(none yet — add entries here as API drift is discovered)
+
+## Session Notes
+
+<!-- Cross-session intent only, 2-5 lines max, delete when stale. -->
 
 No active items.
