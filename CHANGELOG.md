@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.10.1] - 2026-04-19
+
+### Fixed
+
+- **README rewritten** to reflect the current subcommand-based CLI. The previous README described the old single-command interface (`cargo brief <target> [OPTIONS]`) with a non-existent `--search` flag. All examples now use correct subcommand syntax.
+
 ## [0.10.0] - 2026-04-04
 
 ### Added
