@@ -26,104 +26,125 @@ rustup toolchain install nightly
 ## Usage
 
 ```sh
-cargo brief <target> [module_path] [OPTIONS]
+cargo brief [GLOBAL FLAGS] <subcommand> [ARGS...] [OPTIONS...]
 ```
 
-The first argument is flexible — it can be a crate name, `self`, a `crate::module` path, or even a file path:
+Global flags (`-C`, `-F`, `--no-cache`, …) must appear **before** the subcommand name.
+
+### Subcommands
+
+| Subcommand | Purpose |
+|---|---|
+| `api` | Extract API as pseudo-Rust documentation |
+| `search` | Search for items by name |
+| `summary` | Compact module overview with item counts |
+| `examples` | Grep example/test/bench source files |
+| `ts` | Run a tree-sitter structural query against source |
+| `code` | Look up definitions by kind and name |
+| `lsp` | Manage persistent rust-analyzer (references, call graph) |
+| `clean` | Clear cached remote crate workspaces |
+
+Run `cargo brief <subcommand> --help` for full options.
+
+---
+
+## Core Subcommands
+
+### `api` — render a crate's API
+
+```sh
+# Current package (run inside a Cargo project)
+cargo brief api
+
+# Specific module
+cargo brief api self::net::tcp
+
+# Recurse all submodules
+cargo brief api self --recursive
+
+# Limit depth
+cargo brief api self --depth 2
+
+# Exclude item kinds
+cargo brief api self --no-macros --no-traits
+
+# Compact output (no doc comments, collapsed bodies)
+cargo brief api self --compact
+
+# Show only what's visible from an external caller
+cargo brief api my-crate --at-package consumer-crate
+```
+
+**Target resolution** — the `[TARGET]` argument accepts:
 
 | Syntax | Resolves to |
-|--------|-------------|
-| `my-crate` | Named crate (hyphen/underscore normalized) |
-| `self` | Current package (detected from cwd) |
+|---|---|
+| `self` | Current package (cwd-based detection) |
 | `self::module` | Current package, specific module |
 | `crate::module` | Named crate + module in one arg |
 | `src/foo.rs` | File path → auto-converted to module path |
-| `unknown_name` | If not a workspace package → treated as self module |
+| `my-crate` | Named workspace package |
+| `unknown_name` | Treated as package name |
 
-### Examples
-
-```sh
-# Show the full API of a crate in your workspace
-cargo brief my-crate --recursive
-
-# Inspect the current package
-cargo brief self --recursive
-
-# Show a specific module (multiple syntaxes)
-cargo brief my-crate utils::helpers
-cargo brief self::utils
-cargo brief src/utils.rs
-
-# Show only what's visible from an external crate
-cargo brief my-crate --at-package other-crate
-
-# Limit recursion depth
-cargo brief my-crate --depth 2
-
-# Exclude certain item kinds
-cargo brief my-crate --no-macros --no-traits
-
-# Search for items by name (fuzzy / imprecise search)
-cargo brief my-crate --search spawn
-cargo brief --crates hecs --search "World spawn"
-cargo brief self --search "config timeout"
-```
-
-## Options
-
-| Flag | Description |
-|------|-------------|
-| `<target>` | Target to inspect: crate name, `self`, `crate::module`, or file path |
-| `[module_path]` | Module path within the crate (e.g., `my_mod::submod` or `src/my_mod.rs`) |
-| `--at-package <pkg>` | Caller's package name (for visibility resolution) |
-| `--at-mod <path>` | Caller's module path (determines what is visible) |
-| `--depth <n>` | How many submodule levels to recurse into (default: 1) |
-| `--recursive` | Recurse into all submodules (no depth limit) |
-| `--all` | Show all item kinds including blanket/auto-trait impls |
-| `--no-structs` | Exclude structs |
-| `--no-enums` | Exclude enums |
-| `--no-traits` | Exclude traits |
-| `--no-functions` | Exclude free functions |
-| `--no-aliases` | Exclude type aliases |
-| `--no-constants` | Exclude constants and statics |
-| `--no-unions` | Exclude unions |
-| `--no-macros` | Exclude macros |
-| `--search <pattern>` | Search leaf items by name (case-insensitive, multi-word AND) |
-| `--toolchain <name>` | Nightly toolchain name (default: `nightly`) |
-| `--manifest-path <path>` | Path to Cargo.toml |
-
-## Search Mode
-
-`--search` finds leaf items whose full path contains the given pattern (case-insensitive). Multiple words are AND-matched — all must appear somewhere in the path.
+### `search` — find items by name
 
 ```sh
-cargo brief --crates hecs --search component
+# Substring search (smart-case: all-lowercase = insensitive)
+cargo brief search self spawn
+
+# Multiple patterns are AND-matched
+cargo brief search self "spawn async"
+
+# Show methods/fields of a type
+cargo brief search self --methods-of Handle
+
+# OR-match with comma
+cargo brief search self "EventReader,EventWriter"
+
+# Glob and exact-match operators
+cargo brief search self "Shader*Ref"
+cargo brief search self "=Router"
 ```
 
-```rust
-// crate hecs — search: "component" (11 results)
+**Pattern DSL:** space = AND, comma = OR. Operators per token:
+- `word` — substring match
+- `w*ld` — glob (`*` = 0+ chars, `?` = 1 char)
+- `=Name` — exact final segment
+- `-term` — exclude (use `--` for patterns starting with `-`)
 
-/// A collection of component types
-struct query::ComponentSet;
+### `summary` — module overview
 
-enum world::ComponentError;
-
-field world::ArchetypeInfo::component_count: u32;
-
-variant world::WorldError::ComponentNotFound;
-variant world::WorldError::ComponentAlreadyBorrowed;
-
-/// Insert a component into an entity
-fn world::World::insert_component<T: Component>(&mut self, entity: Entity, component: T) -> Result<()>;
-fn world::World::remove_component<T: Component>(&mut self, entity: Entity) -> Result<T>;
-fn world::World::get_component<T: Component>(&self, entity: Entity) -> Result<ComponentRef<'_, T>>;
-
-type world::ComponentId = u32;
-const world::MAX_COMPONENTS: usize = ..;
-macro component_bundle!;
+```sh
+cargo brief summary self
+cargo brief summary self::net
 ```
 
-**Leaf items** included in search: functions, methods, struct fields, enum variants, constants, statics, type aliases, macros, associated types/consts. Container types (struct, enum, trait, union) appear when their name matches directly.
+One line per module showing counts of traits, structs, enums, functions, types, constants, macros, and unions.
+
+---
+
+## Remote Crates (`-C`)
+
+Pass `-C` **before the subcommand** to treat TARGET as a crates.io spec:
+
+```sh
+# Overview of a crates.io package
+cargo brief -C summary tokio@1
+
+# Browse a module
+cargo brief -C api tokio@1 net
+
+# Search
+cargo brief -C search serde@1 Serialize
+
+# Feature-gated APIs (omit -F and items are invisible)
+cargo brief -C -F rt,net api tokio@1 --compact
+```
+
+Crate spec syntax: `name` (latest), `name@1` (semver-compatible), `name@1.2.3` (exact pin).
+Downloaded crates are cached at `~/.cache/cargo-brief/crates/`. Run `cargo brief clean` to clear.
+
+---
 
 ## Output Format
 
@@ -151,51 +172,47 @@ mod utils {
 }
 ```
 
+---
+
 ## AI Agent Setup
 
 ### Claude Code
 
-Add a note to your project's `CLAUDE.md` so the AI knows to use cargo-brief when exploring crate APIs:
+Add to your project's `CLAUDE.md`:
 
 ```markdown
 ## Exploring Crate APIs
 
-Use `cargo brief` to inspect crate interfaces instead of reading source files directly:
+Use `cargo brief` to inspect crate interfaces instead of reading source files directly.
 
-# Current package API
-cargo brief self --recursive
+# Typical workflow
+cargo brief summary self                     # overview of modules
+cargo brief api self::some_module            # drill into a module
+cargo brief search self SomeType --members   # find a specific item
+cargo brief code fn some_function --refs     # read source + references
 
-# Specific module (by name or file path)
-cargo brief self::some_module --recursive
-cargo brief src/some_module.rs --recursive
+# Named workspace crate
+cargo brief api my-crate --recursive
 
-# Named crate in workspace
-cargo brief <crate> --recursive
+# External visibility only
+cargo brief api my-crate --at-package consumer-crate
 
-# Multi-workspace: specify manifest path
-cargo brief <crate> --manifest-path path/to/Cargo.toml --recursive
+# Remote crate from crates.io
+cargo brief -C summary tokio@1
+cargo brief -C search serde@1 Deserialize
 
-# External visibility only (what other crates can see)
-cargo brief <crate> --at-package consumer-crate --recursive
-
-# Search for items by name (imprecise / fuzzy)
-cargo brief <crate> --search "spawn entity"
-cargo brief --crates serde --search "deserialize"
+# Specify manifest when outside the workspace root
+cargo brief api self --manifest-path path/to/Cargo.toml
 ```
 
 ### Generic LLM Agent
 
-Pipe the output directly into your agent's context:
-
 ```sh
-# Current package API
-cargo brief self --recursive | your-agent-tool
-
-# Specific module
-cargo brief self::network::http --recursive | your-agent-tool
+cargo brief api self --recursive | your-agent-tool
+cargo brief api self::network::http | your-agent-tool
 ```
 
-Or use it as a tool call that returns the output as a string to the agent.
+---
 
 ## License
 
