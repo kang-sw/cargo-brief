@@ -6,7 +6,7 @@ use rustdoc_types::{
     Trait, Type, TypeAlias, Union, VariantKind, Visibility, WherePredicate,
 };
 
-use crate::cfg_parse::{format_cfg_predicate, parse_cfg_attribute};
+use crate::cfg_parse::{parse_cfg_attribute, reconstruct_cfg_attr};
 use crate::cli::{ApiArgs, FilterArgs};
 use crate::model::{CrateModel, ReachableInfo, is_visible_from};
 
@@ -1848,10 +1848,10 @@ fn render_attrs(item: &Item, indent: &str, verbose: bool, no_feature_gates: bool
             }
             Attribute::Other(raw) if !no_feature_gates && raw.contains("CfgTrace(") => {
                 match parse_cfg_attribute(raw) {
-                    Some(pred) => match format_cfg_predicate(&pred) {
-                        Some(text) => output.push_str(&format!("{indent}// {text}\n")),
-                        None => output.push_str(&format!("{indent}// cfg: {raw}\n")),
-                    },
+                    Some(pred) => {
+                        let attr = reconstruct_cfg_attr(&pred);
+                        output.push_str(&format!("{indent}{attr}\n"));
+                    }
                     None => output.push_str(&format!("{indent}// cfg: {raw}\n")),
                 }
             }

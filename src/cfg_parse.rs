@@ -1,11 +1,11 @@
 /// A parsed cfg predicate extracted from an `Attribute::Other` string.
 ///
-/// Only `NameValue { name: "feature", ... }` entries become `Feature`; all other
-/// NameValue shapes (unix, target_os, …) become `NonFeature`.
+/// `Feature` carries a concrete feature name. `NonFeature` carries the raw
+/// name/value so mixed predicates (e.g. `all(feature = "x", unix)`) round-trip.
 #[derive(Debug, PartialEq)]
 pub enum CfgPredicate {
     Feature(String),
-    NonFeature,
+    NonFeature { name: String, value: Option<String> },
     All(Vec<CfgPredicate>),
     Any(Vec<CfgPredicate>),
     Not(Box<CfgPredicate>),
@@ -32,75 +32,43 @@ pub fn parse_cfg_attribute(raw: &str) -> Option<CfgPredicate> {
     }
 }
 
-/// Render a `CfgPredicate` as a natural-language requires comment body.
+/// Reconstruct a `#[cfg(...)]` attribute string from a predicate tree.
 ///
-/// Returns `Some(text)` for pure-feature predicates and simple combinators;
-/// returns `None` for anything mixed (non-feature inside a combinator) or
-/// deeply nested — callers should fall back to the raw string.
-pub fn format_cfg_predicate(pred: &CfgPredicate) -> Option<String> {
+/// Total — every variant round-trips, so callers never need a fallback for
+/// shape reasons (only for upstream parse failure).
+pub fn reconstruct_cfg_attr(pred: &CfgPredicate) -> String {
+    let mut inner = String::new();
+    write_predicate(pred, &mut inner);
+    format!("#[cfg({inner})]")
+}
+
+fn write_predicate(pred: &CfgPredicate, out: &mut String) {
     match pred {
-        CfgPredicate::Feature(f) => Some(format!("requires feature \"{f}\"")),
-        CfgPredicate::NonFeature => None,
-        CfgPredicate::Not(inner) => match inner.as_ref() {
-            CfgPredicate::Feature(f) => Some(format!("requires feature \"{f}\" disabled")),
-            _ => None,
-        },
-        CfgPredicate::All(preds) => {
-            let features = pure_feature_names(preds)?;
-            Some(format_requires_all(&features))
+        CfgPredicate::Feature(f) => out.push_str(&format!("feature = \"{f}\"")),
+        CfgPredicate::NonFeature { name, value: None } => out.push_str(name),
+        CfgPredicate::NonFeature { name, value: Some(v) } => {
+            out.push_str(&format!("{name} = \"{v}\""))
         }
-        CfgPredicate::Any(preds) => {
-            let features = pure_feature_names(preds)?;
-            Some(format_requires_any(&features))
+        CfgPredicate::Not(inner) => {
+            out.push_str("not(");
+            write_predicate(inner, out);
+            out.push(')');
         }
+        CfgPredicate::All(ps) => write_list("all", ps, out),
+        CfgPredicate::Any(ps) => write_list("any", ps, out),
     }
 }
 
-/// Extract feature names from a predicate list if all are `Feature`; return `None` otherwise.
-fn pure_feature_names(preds: &[CfgPredicate]) -> Option<Vec<&str>> {
-    preds
-        .iter()
-        .map(|p| match p {
-            CfgPredicate::Feature(f) => Some(f.as_str()),
-            _ => None,
-        })
-        .collect()
-}
-
-fn format_requires_all(names: &[&str]) -> String {
-    match names.len() {
-        0 => "requires features".to_string(),
-        1 => format!("requires feature \"{}\"", names[0]),
-        2 => format!("requires features \"{}\" and \"{}\"", names[0], names[1]),
-        _ => {
-            let all_but_last = names[..names.len() - 1]
-                .iter()
-                .map(|n| format!("\"{n}\""))
-                .collect::<Vec<_>>()
-                .join(", ");
-            format!(
-                "requires features {}, and \"{}\"",
-                all_but_last,
-                names[names.len() - 1]
-            )
+fn write_list(combinator: &str, preds: &[CfgPredicate], out: &mut String) {
+    out.push_str(combinator);
+    out.push('(');
+    for (i, p) in preds.iter().enumerate() {
+        if i > 0 {
+            out.push_str(", ");
         }
+        write_predicate(p, out);
     }
-}
-
-fn format_requires_any(names: &[&str]) -> String {
-    match names.len() {
-        0 => "requires one of features".to_string(),
-        1 => format!("requires feature \"{}\"", names[0]),
-        2 => format!("requires feature \"{}\" or \"{}\"", names[0], names[1]),
-        _ => {
-            let joined = names
-                .iter()
-                .map(|n| format!("\"{n}\""))
-                .collect::<Vec<_>>()
-                .join(", ");
-            format!("requires one of features {joined}")
-        }
-    }
+    out.push(')');
 }
 
 // ── Parser internals ──────────────────────────────────────────────────────────
@@ -175,7 +143,7 @@ fn parse_pred_list(mut s: &str) -> Option<(Vec<CfgPredicate>, &str)> {
 }
 
 /// Parse `NameValue { name: "<name>", value: <val>, span: ... }` and return
-/// `(Feature(x) | NonFeature, remaining)`.
+/// `(Feature(x) | NonFeature { .. }, remaining)`.
 fn parse_namevalue(s: &str) -> Option<(CfgPredicate, &str)> {
     let s = s.strip_prefix("NameValue {")?;
     let s = s.trim_start();
@@ -198,10 +166,10 @@ fn parse_namevalue(s: &str) -> Option<(CfgPredicate, &str)> {
     let pred = if name == "feature" {
         match value {
             Some(v) => CfgPredicate::Feature(v),
-            None => CfgPredicate::NonFeature,
+            None => CfgPredicate::NonFeature { name: "feature".to_string(), value: None },
         }
     } else {
-        CfgPredicate::NonFeature
+        CfgPredicate::NonFeature { name: name.to_string(), value }
     };
 
     Some((pred, rest))
@@ -253,18 +221,29 @@ mod tests {
         let raw = wrap(&nv("feature", Some("net")));
         let pred = parse_cfg_attribute(&raw).unwrap();
         assert_eq!(pred, CfgPredicate::Feature("net".to_string()));
-        assert_eq!(
-            format_cfg_predicate(&pred),
-            Some("requires feature \"net\"".to_string())
-        );
+        assert_eq!(reconstruct_cfg_attr(&pred), "#[cfg(feature = \"net\")]");
     }
 
     #[test]
     fn non_feature_namevalue() {
         let raw = wrap(&nv("unix", None));
         let pred = parse_cfg_attribute(&raw).unwrap();
-        assert_eq!(pred, CfgPredicate::NonFeature);
-        assert_eq!(format_cfg_predicate(&pred), None);
+        assert_eq!(
+            pred,
+            CfgPredicate::NonFeature { name: "unix".to_string(), value: None }
+        );
+        assert_eq!(reconstruct_cfg_attr(&pred), "#[cfg(unix)]");
+    }
+
+    #[test]
+    fn non_feature_namevalue_with_value() {
+        let raw = wrap(&nv("target_os", Some("linux")));
+        let pred = parse_cfg_attribute(&raw).unwrap();
+        assert_eq!(
+            pred,
+            CfgPredicate::NonFeature { name: "target_os".to_string(), value: Some("linux".to_string()) }
+        );
+        assert_eq!(reconstruct_cfg_attr(&pred), "#[cfg(target_os = \"linux\")]");
     }
 
     #[test]
@@ -272,13 +251,13 @@ mod tests {
         let inner = format!("All([{}, {}], span)", nv("feature", Some("net")), nv("feature", Some("tls")));
         let pred = parse_cfg_attribute(&wrap(&inner)).unwrap();
         assert_eq!(
-            format_cfg_predicate(&pred),
-            Some("requires features \"net\" and \"tls\"".to_string())
+            reconstruct_cfg_attr(&pred),
+            "#[cfg(all(feature = \"net\", feature = \"tls\"))]"
         );
     }
 
     #[test]
-    fn all_three_features_oxford_comma() {
+    fn all_three_features() {
         let inner = format!(
             "All([{}, {}, {}], span)",
             nv("feature", Some("a")),
@@ -286,9 +265,10 @@ mod tests {
             nv("feature", Some("c"))
         );
         let pred = parse_cfg_attribute(&wrap(&inner)).unwrap();
-        let text = format_cfg_predicate(&pred).unwrap();
-        assert!(text.contains("and \"c\""), "{text}");
-        assert!(text.contains("\"a\""), "{text}");
+        assert_eq!(
+            reconstruct_cfg_attr(&pred),
+            "#[cfg(all(feature = \"a\", feature = \"b\", feature = \"c\"))]"
+        );
     }
 
     #[test]
@@ -296,8 +276,8 @@ mod tests {
         let inner = format!("Any([{}, {}], span)", nv("feature", Some("a")), nv("feature", Some("b")));
         let pred = parse_cfg_attribute(&wrap(&inner)).unwrap();
         assert_eq!(
-            format_cfg_predicate(&pred),
-            Some("requires feature \"a\" or \"b\"".to_string())
+            reconstruct_cfg_attr(&pred),
+            "#[cfg(any(feature = \"a\", feature = \"b\"))]"
         );
     }
 
@@ -310,26 +290,28 @@ mod tests {
             nv("feature", Some("c"))
         );
         let pred = parse_cfg_attribute(&wrap(&inner)).unwrap();
-        let text = format_cfg_predicate(&pred).unwrap();
-        assert!(text.starts_with("requires one of features"), "{text}");
+        assert_eq!(
+            reconstruct_cfg_attr(&pred),
+            "#[cfg(any(feature = \"a\", feature = \"b\", feature = \"c\"))]"
+        );
     }
 
     #[test]
     fn not_feature() {
         let inner = format!("Not({}, span)", nv("feature", Some("beta")));
         let pred = parse_cfg_attribute(&wrap(&inner)).unwrap();
-        assert_eq!(
-            format_cfg_predicate(&pred),
-            Some("requires feature \"beta\" disabled".to_string())
-        );
+        assert_eq!(reconstruct_cfg_attr(&pred), "#[cfg(not(feature = \"beta\"))]");
     }
 
     #[test]
-    fn mixed_all_returns_none_from_formatter() {
-        // all(feature = "net", unix) — NonFeature inside All → format returns None
+    fn mixed_all_reconstructs() {
+        // all(feature = "net", unix) — NonFeature inside All now reconstructs cleanly
         let inner = format!("All([{}, {}], span)", nv("feature", Some("net")), nv("unix", None));
         let pred = parse_cfg_attribute(&wrap(&inner)).unwrap();
-        assert_eq!(format_cfg_predicate(&pred), None);
+        assert_eq!(
+            reconstruct_cfg_attr(&pred),
+            "#[cfg(all(feature = \"net\", unix))]"
+        );
     }
 
     #[test]
@@ -358,6 +340,7 @@ mod tests {
         let raw = format!("#[attr = CfgTrace([{inner}])]");
         let pred = parse_cfg_attribute(&raw).unwrap();
         assert_eq!(pred, CfgPredicate::Feature("net".to_string()));
+        assert_eq!(reconstruct_cfg_attr(&pred), "#[cfg(feature = \"net\")]");
     }
 
     #[test]
@@ -368,8 +351,8 @@ mod tests {
         let raw = format!("#[attr = CfgTrace([{inner}])]");
         let pred = parse_cfg_attribute(&raw).unwrap();
         assert_eq!(
-            format_cfg_predicate(&pred),
-            Some("requires feature \"extra\" or \"experimental\"".to_string())
+            reconstruct_cfg_attr(&pred),
+            "#[cfg(any(feature = \"extra\", feature = \"experimental\"))]"
         );
     }
 
@@ -380,8 +363,8 @@ mod tests {
         let raw = format!("#[attr = CfgTrace([{inner}])]");
         let pred = parse_cfg_attribute(&raw).unwrap();
         assert_eq!(
-            format_cfg_predicate(&pred),
-            Some("requires feature \"experimental\" disabled".to_string())
+            reconstruct_cfg_attr(&pred),
+            "#[cfg(not(feature = \"experimental\"))]"
         );
     }
 }
