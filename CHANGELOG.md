@@ -2,6 +2,30 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.11.0] - 2026-04-20
+
+### Added
+
+- **`cargo brief features` subcommand.** Shows the feature graph for local workspace crates
+  or remote crates (`-C`). Output is pseudo-TOML (`[features]` section) with alphabetical
+  ordering, `default = [...]` first, and `# optional dep` comments for `dep:`-aliased entries.
+- **Feature-gate annotations on `api` output.** Items annotated with `#[cfg(feature = "...")]`
+  now emit a `// requires feature "..."` comment above the item signature — even when the
+  feature is currently enabled. Supports `all`, `any`, and `not` combinators with
+  natural-language formatting; mixed predicates fall back to `// cfg: <raw>`. Controlled by
+  the new `--no-feature-gates` flag on all commands that use `FilterArgs`.
+- **`-F` pre-validation with did-you-mean suggestions.** Unknown feature names passed via
+  `-F` now fail in <100ms with Jaro-Winkler-ranked suggestions (top 3, threshold 0.6) and
+  the full valid feature list, replacing the previous 30s opaque `cargo rustdoc failed:` error.
+- **Graceful offline degrade for remote feature graphs.** When crates.io is unreachable and no
+  cached payload exists, feature graph operations warn on stderr and proceed rather than
+  erroring (for `api`/`search`/`summary`) or bail cleanly (for `features`).
+
+### Changed
+
+- Help text updated: `--help` quick-guide includes a `features` row; remote-crate example
+  block shows `cargo brief -C features serde@1`; tips updated to reference feature discovery.
+
 ## [0.10.1] - 2026-04-19
 
 ### Fixed

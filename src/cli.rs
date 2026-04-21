@@ -27,6 +27,7 @@ QUICK GUIDE — which subcommand for which task:
   \"Show a module's full API surface\"   → api [--depth N] [--compact]
   \"Where is X defined? Show source\"    → code [--refs]
   \"What modules exist in this crate?\"  → summary
+  \"What features does crate X have?\"   → features [-C <crate>]
   \"How is X used in practice?\"         → examples [--tests]
   \"Find structural patterns in AST\"    → ts '<s-expr>'
   \"Who calls X? All references\"        → lsp references <symbol>
@@ -42,11 +43,13 @@ TYPICAL WORKFLOW:
 
 REMOTE CRATES (-C):
   cargo brief -C summary tokio@1              # explore an unfamiliar crate
+  cargo brief -C features serde@1             # inspect a crate's feature graph
   cargo brief -C -F rt,net api tokio@1 net    # feature-gated APIs need -F
   cargo brief -C search serde@1 Serialize     # search a crates.io dependency
 
 TIPS:
-  - Feature-gated items are invisible without -F. Try -F full if not found.
+  - Feature-gated items: run `features` to see what flags are available, then -F.
+  - api output annotates gated items (// requires feature \"...\") even when enabled.
   - Smart-case: all-lowercase pattern = case-insensitive, any uppercase = exact.
   - `code` searches ALL workspace members by default (not just current package).
   - `lsp` resolves symbols by name. Workspace items are found instantly;

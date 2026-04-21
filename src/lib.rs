@@ -249,10 +249,14 @@ fn build_remote_context_api(
 
     // Pre-validate -F features against the crate's feature graph.
     if let Some(requested) = remote.features.as_deref() {
-        if let Ok(Some(graph)) = remote::load_remote_feature_graph(actual_spec) {
-            features::validate_requested_features(&graph, requested)?;
+        match remote::load_remote_feature_graph(actual_spec) {
+            Ok(Some(graph)) => features::validate_requested_features(&graph, requested)?,
+            Ok(None) => eprintln!(
+                "warning: feature graph unavailable for '{name}'; \
+                 -F values will not be validated and feature gates will not be annotated"
+            ),
+            Err(_) => {} // network failure already handled inside load_remote_feature_graph
         }
-        // Ok(None) = graph unavailable offline; skip validation (warning lands in Step 5).
     }
 
     let metadata = resolve::load_cargo_metadata(Some(&manifest_path))
@@ -563,8 +567,13 @@ fn build_remote_context_search(
 
     // Pre-validate -F features against the crate's feature graph.
     if let Some(requested) = remote.features.as_deref() {
-        if let Ok(Some(graph)) = remote::load_remote_feature_graph(spec) {
-            features::validate_requested_features(&graph, requested)?;
+        match remote::load_remote_feature_graph(spec) {
+            Ok(Some(graph)) => features::validate_requested_features(&graph, requested)?,
+            Ok(None) => eprintln!(
+                "warning: feature graph unavailable for '{name}'; \
+                 -F values will not be validated and feature gates will not be annotated"
+            ),
+            Err(_) => {}
         }
     }
 
@@ -1208,8 +1217,13 @@ fn build_remote_context_summary(
 
     // Pre-validate -F features against the crate's feature graph.
     if let Some(requested) = remote.features.as_deref() {
-        if let Ok(Some(graph)) = remote::load_remote_feature_graph(actual_spec) {
-            features::validate_requested_features(&graph, requested)?;
+        match remote::load_remote_feature_graph(actual_spec) {
+            Ok(Some(graph)) => features::validate_requested_features(&graph, requested)?,
+            Ok(None) => eprintln!(
+                "warning: feature graph unavailable for '{name}'; \
+                 -F values will not be validated and feature gates will not be annotated"
+            ),
+            Err(_) => {}
         }
     }
 
