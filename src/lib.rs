@@ -1,3 +1,4 @@
+pub mod cfg_parse;
 pub mod cli;
 pub mod code;
 pub mod cross_crate;

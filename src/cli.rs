@@ -538,6 +538,10 @@ pub struct FilterArgs {
     /// Show all item kinds including blanket/auto-trait impls
     #[arg(long)]
     pub all: bool,
+
+    /// Suppress feature-gate annotations (// requires feature "...") from output
+    #[arg(long, help_heading = "Filtering")]
+    pub no_feature_gates: bool,
 }
 
 /// Global options shared across all subcommands.

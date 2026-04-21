@@ -47,6 +47,7 @@ fn default_filter() -> FilterArgs {
         compact: false,
         verbose_metadata: false,
         all: false,
+        no_feature_gates: false,
     }
 }
 
@@ -4317,4 +4318,88 @@ fn test_features_remote_serde() {
     assert!(output.contains("[features]"), "remote features should have [features] header:\n{output}");
     // serde always has a `derive` feature
     assert!(output.contains("derive"), "serde remote features should include 'derive':\n{output}");
+}
+
+// === cfg feature-gate annotation tests (Step 4) ===
+
+fn cfg_items_args() -> ApiArgs {
+    let mut args = default_args();
+    args.target.module_path = Some("cfg_items".to_string());
+    args
+}
+
+#[test]
+fn test_cfg_not_feature_annotation() {
+    // NotFeatureGated has #[cfg(not(feature = "experimental"))] — present in default build.
+    // Should get: // requires feature "experimental" disabled
+    let args = cfg_items_args();
+    let output = cargo_brief::run_api_pipeline(&args, &RemoteOpts::default()).unwrap();
+    assert!(
+        output.contains("requires feature \"experimental\" disabled"),
+        "NotFeatureGated should have 'disabled' annotation:\n{output}"
+    );
+}
+
+#[test]
+fn test_cfg_any_two_features_annotation() {
+    // AnyTwoFeatures has #[cfg(any(feature = "extra", feature = "experimental"))]
+    // extra is in default features so this item IS present; should get:
+    // // requires feature "extra" or "experimental"
+    let args = cfg_items_args();
+    let output = cargo_brief::run_api_pipeline(&args, &RemoteOpts::default()).unwrap();
+    assert!(
+        output.contains("requires feature \"extra\" or \"experimental\""),
+        "AnyTwoFeatures should have 'or' annotation:\n{output}"
+    );
+}
+
+#[test]
+fn test_cfg_no_gate_no_annotation() {
+    // NoGate has no cfg attribute — should not get any requires comment.
+    let args = cfg_items_args();
+    let output = cargo_brief::run_api_pipeline(&args, &RemoteOpts::default()).unwrap();
+    // Check that there's no requires comment on a line immediately before NoGate
+    let lines: Vec<&str> = output.lines().collect();
+    for (i, line) in lines.iter().enumerate() {
+        if line.contains("struct NoGate") {
+            if i > 0 {
+                assert!(
+                    !lines[i - 1].contains("requires"),
+                    "NoGate should not have a requires annotation:\n{output}"
+                );
+            }
+            return;
+        }
+    }
+    // NoGate must appear in the output
+    assert!(output.contains("struct NoGate"), "NoGate should appear in cfg_items:\n{output}");
+}
+
+#[test]
+fn test_cfg_no_feature_gates_flag_suppresses_annotations() {
+    let mut args = cfg_items_args();
+    args.filter.no_feature_gates = true;
+    let output = cargo_brief::run_api_pipeline(&args, &RemoteOpts::default()).unwrap();
+    assert!(
+        !output.contains("requires feature"),
+        "--no-feature-gates should suppress all requires annotations:\n{output}"
+    );
+}
+
+#[test]
+fn test_cfg_mixed_predicate_raw_fallback() {
+    // MixedPredicate has #[cfg(all(feature = "extra", unix))] — on unix this item IS present.
+    // The formatter should return None for mixed predicates → raw `// cfg: ...` fallback.
+    #[cfg(unix)]
+    {
+        let args = cfg_items_args();
+        let output = cargo_brief::run_api_pipeline(&args, &RemoteOpts::default()).unwrap();
+        if output.contains("MixedPredicate") {
+            assert!(
+                output.contains("// cfg:"),
+                "mixed predicate should use raw fallback:\n{output}"
+            );
+        }
+    }
+    // On non-unix, MixedPredicate is absent — test passes trivially.
 }
