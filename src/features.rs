@@ -1,3 +1,4 @@
+use anyhow::Result;
 
 /// The feature graph for a single crate — populated from `cargo metadata` or crates.io payload.
 pub struct FeatureGraph {
@@ -111,6 +112,48 @@ pub fn build_feature_graph(
     }
 }
 
+/// Validate each feature name in a comma-separated list against a FeatureGraph.
+///
+/// On any unknown feature, returns an error with Jaro-Winkler-ranked did-you-mean
+/// suggestions (top 3 above 0.6 threshold) and the full valid-feature list.
+pub fn validate_requested_features(graph: &FeatureGraph, requested: &str) -> Result<()> {
+    let mut errors: Vec<String> = Vec::new();
+
+    for raw in requested.split(',') {
+        let feat = raw.trim();
+        if feat.is_empty() {
+            continue;
+        }
+        if graph.is_valid_feature(feat) {
+            continue;
+        }
+
+        let mut ranked: Vec<(&str, f64)> = graph
+            .feature_names()
+            .map(|f| (f, strsim::jaro_winkler(feat, f)))
+            .filter(|(_, score)| *score >= 0.6)
+            .collect();
+        ranked.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+        ranked.truncate(3);
+
+        let mut msg = format!("unknown feature '{feat}' for crate '{}'", graph.crate_name);
+        if !ranked.is_empty() {
+            let suggestions: Vec<&str> = ranked.iter().map(|(f, _)| *f).collect();
+            msg.push_str(&format!("\n  did you mean: {}", suggestions.join(", ")));
+        }
+        let all_names: Vec<&str> = graph.feature_names().collect();
+        msg.push_str(&format!("\n  valid features: {}", all_names.join(", ")));
+
+        errors.push(msg);
+    }
+
+    if errors.is_empty() {
+        Ok(())
+    } else {
+        Err(anyhow::anyhow!("{}", errors.join("\n\n")))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -188,6 +231,43 @@ mod tests {
         let out = render_features(&g);
         assert!(out.contains("serde = [\"dep:serde\"] # optional dep"));
         assert!(!out.contains("net = [\"dep:net\"] # optional dep"));
+    }
+
+    #[test]
+    fn validate_valid_feature_succeeds() {
+        let g = make_graph("foo", &[("full", &[]), ("async", &[])]);
+        assert!(validate_requested_features(&g, "full").is_ok());
+        assert!(validate_requested_features(&g, "full,async").is_ok());
+    }
+
+    #[test]
+    fn validate_unknown_feature_errors() {
+        let g = make_graph("foo", &[("full", &[]), ("async", &[])]);
+        let err = validate_requested_features(&g, "typo").unwrap_err().to_string();
+        assert!(err.contains("unknown feature 'typo'"), "{err}");
+        assert!(err.contains("valid features:"), "{err}");
+    }
+
+    #[test]
+    fn validate_typo_with_suggestion() {
+        let g = make_graph("foo", &[("derive", &[]), ("std", &[])]);
+        let err = validate_requested_features(&g, "deriev").unwrap_err().to_string();
+        assert!(err.contains("did you mean"), "{err}");
+        assert!(err.contains("derive"), "{err}");
+    }
+
+    #[test]
+    fn validate_no_suggestion_below_threshold() {
+        let g = make_graph("foo", &[("alpha", &[]), ("beta", &[])]);
+        let err = validate_requested_features(&g, "zzznomatch").unwrap_err().to_string();
+        assert!(!err.contains("did you mean"), "should have no suggestions: {err}");
+        assert!(err.contains("valid features:"), "{err}");
+    }
+
+    #[test]
+    fn validate_empty_string_ok() {
+        let g = make_graph("foo", &[("full", &[])]);
+        assert!(validate_requested_features(&g, "").is_ok());
     }
 
     #[test]

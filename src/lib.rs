@@ -246,6 +246,14 @@ fn build_remote_context_api(
         .to_string_lossy()
         .into_owned();
 
+    // Pre-validate -F features against the crate's feature graph.
+    if let Some(requested) = remote.features.as_deref() {
+        if let Ok(Some(graph)) = remote::load_remote_feature_graph(actual_spec) {
+            features::validate_requested_features(&graph, requested)?;
+        }
+        // Ok(None) = graph unavailable offline; skip validation (warning lands in Step 5).
+    }
+
     let metadata = resolve::load_cargo_metadata(Some(&manifest_path))
         .context("Failed to load cargo metadata for remote crate")?;
 
@@ -551,6 +559,13 @@ fn build_remote_context_search(
         remote.no_cache,
     )
     .with_context(|| format!("Failed to create workspace for '{name}'"))?;
+
+    // Pre-validate -F features against the crate's feature graph.
+    if let Some(requested) = remote.features.as_deref() {
+        if let Ok(Some(graph)) = remote::load_remote_feature_graph(spec) {
+            features::validate_requested_features(&graph, requested)?;
+        }
+    }
 
     let manifest_path = workspace
         .path()
@@ -1189,6 +1204,13 @@ fn build_remote_context_summary(
         remote.no_cache,
     )
     .with_context(|| format!("Failed to create workspace for '{name}'"))?;
+
+    // Pre-validate -F features against the crate's feature graph.
+    if let Some(requested) = remote.features.as_deref() {
+        if let Ok(Some(graph)) = remote::load_remote_feature_graph(actual_spec) {
+            features::validate_requested_features(&graph, requested)?;
+        }
+    }
 
     let manifest_path = workspace
         .path()

@@ -114,6 +114,7 @@ dependencies = [
  "serde",
  "serde_json",
  "streaming-iterator",
+ "strsim",
  "tempfile",
  "tree-sitter",
  "tree-sitter-rust",
