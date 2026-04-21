@@ -1301,8 +1301,8 @@ fn render_item(
     same_crate: bool,
     output: &mut String,
 ) {
-    render_attrs(item, indent, args.verbose_metadata, args.no_feature_gates, output);
     render_docs(item, indent, args, output);
+    render_attrs(item, indent, args.verbose_metadata, args.no_feature_gates, output);
     let vis = format_visibility(&item.visibility);
 
     match &item.inner {
@@ -1742,8 +1742,8 @@ fn render_impl_item(item: &Item, indent: &str, args: &FilterArgs) -> Option<Stri
         ItemEnum::Function(f) => {
             let name = item.name.as_deref().unwrap_or("?");
             let vis = format_visibility(&item.visibility);
-            render_attrs(item, indent, args.verbose_metadata, args.no_feature_gates, &mut out);
             render_docs(item, indent, args, &mut out);
+            render_attrs(item, indent, args.verbose_metadata, args.no_feature_gates, &mut out);
             let sig = format_function_sig(name, f, &vis);
             let wc = format_where_clause(&f.generics, indent);
             out.push_str(&format!("{indent}{sig}{wc};\n"));
