@@ -391,6 +391,20 @@ PARENT SCOPING (--in <TYPE>):
   Top-level items (not inside any type) are excluded.")]
     Code(CodeArgs),
 
+    /// Show the feature graph for a crate (features, defaults, optional deps)
+    #[command(after_help = "\
+EXAMPLES:
+  # Show feature graph for the current workspace crate
+  cargo brief features
+
+  # Show feature graph for a specific workspace member
+  cargo brief features my-crate
+
+  # Show feature graph for a crates.io crate (requires -C)
+  cargo brief -C features serde@1
+  cargo brief -C features tokio@1")]
+    Features(FeaturesArgs),
+
     /// Clear cached remote crate workspaces
     #[command(after_help = "\
 EXAMPLES:
@@ -743,6 +757,21 @@ pub struct SummaryArgs {
 
     #[command(flatten)]
     pub global: GlobalArgs,
+}
+
+/// Arguments for the `features` subcommand.
+#[derive(Args, Debug, Clone)]
+pub struct FeaturesArgs {
+    /// Target crate name (defaults to current workspace package)
+    #[arg(value_name = "CRATE", default_value = "self")]
+    pub crate_name: String,
+
+    #[command(flatten)]
+    pub global: GlobalArgs,
+
+    /// Path to Cargo.toml
+    #[arg(long, help_heading = "Local Workspace")]
+    pub manifest_path: Option<String>,
 }
 
 /// Arguments for the `clean` subcommand.

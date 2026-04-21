@@ -2,6 +2,7 @@ pub mod cli;
 pub mod code;
 pub mod cross_crate;
 pub mod examples;
+pub mod features;
 pub mod lsp;
 pub mod model;
 pub mod remote;
@@ -15,6 +16,38 @@ pub mod ts;
 /// Clean cached remote crate workspaces. Empty spec = all.
 pub fn clean_cache(spec: &str) -> anyhow::Result<()> {
     remote::clean_cache(spec)
+}
+
+/// Run the features pipeline and return the rendered feature graph.
+pub fn run_features_pipeline(
+    args: &cli::FeaturesArgs,
+    remote: &cli::RemoteOpts,
+) -> anyhow::Result<String> {
+    use anyhow::{Context, bail};
+
+    if remote.crates {
+        bail!("remote (-C) feature graph support lands in the next step");
+    }
+
+    let metadata = resolve::load_cargo_metadata(args.manifest_path.as_deref())
+        .context("Failed to load cargo metadata")?;
+
+    let target = if args.crate_name == "self" {
+        metadata
+            .current_package
+            .as_deref()
+            .context("Cannot resolve 'self': no package found for current directory")?
+            .to_string()
+    } else {
+        args.crate_name.clone()
+    };
+
+    let graph = metadata
+        .feature_graphs
+        .get(&target)
+        .with_context(|| format!("No feature data found for crate '{target}'"))?;
+
+    Ok(features::render_features(graph))
 }
 
 /// Run an LSP daemon management command (touch/stop/status).

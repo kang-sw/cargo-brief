@@ -6,6 +6,12 @@ edition = "2021"
 [workspace]
 members = ["glob-source", "glob-inner", "named-source"]
 
+[features]
+default = ["full"]
+full = ["extra"]
+extra = []
+experimental = []
+
 [dependencies]
 glob-source = { path = "glob-source" }
 named-source = { path = "named-source" }

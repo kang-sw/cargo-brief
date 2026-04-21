@@ -1,6 +1,6 @@
 use cargo_brief::cli::{
-    ApiArgs, CodeArgs, ExamplesArgs, FilterArgs, GlobalArgs, RemoteOpts, SearchArgs, SummaryArgs,
-    TargetArgs, TsArgs,
+    ApiArgs, CodeArgs, ExamplesArgs, FeaturesArgs, FilterArgs, GlobalArgs, RemoteOpts, SearchArgs,
+    SummaryArgs, TargetArgs, TsArgs,
 };
 use cargo_brief::model::{CrateModel, compute_reachable_set};
 use cargo_brief::render::{render_leaf_item, render_leaf_not_found, render_module_api};
@@ -4257,4 +4257,60 @@ fn test_code_refs_only_ignores_kind() {
         output.contains('*'),
         "refs-only should find grep matches (kind ignored):\n{output}"
     );
+}
+
+// === features subcommand ===
+
+fn default_features_args() -> FeaturesArgs {
+    FeaturesArgs {
+        crate_name: "test-fixture".to_string(),
+        global: GlobalArgs {
+            toolchain: "nightly".to_string(),
+            verbose: false,
+        },
+        manifest_path: Some("test_fixture/Cargo.toml".to_string()),
+    }
+}
+
+#[test]
+fn test_features_local_renders_toml_section() {
+    let args = default_features_args();
+    let output = cargo_brief::run_features_pipeline(&args, &RemoteOpts::default()).unwrap();
+    assert!(output.contains("[features]"), "missing [features] header:\n{output}");
+    assert!(output.contains("default = ["), "missing default line:\n{output}");
+}
+
+#[test]
+fn test_features_local_default_group() {
+    let args = default_features_args();
+    let output = cargo_brief::run_features_pipeline(&args, &RemoteOpts::default()).unwrap();
+    // test_fixture has default = ["full"]
+    assert!(output.contains("\"full\""), "default should include 'full':\n{output}");
+}
+
+#[test]
+fn test_features_local_named_features_alphabetical() {
+    let args = default_features_args();
+    let output = cargo_brief::run_features_pipeline(&args, &RemoteOpts::default()).unwrap();
+    // experimental, extra, full should all appear
+    assert!(output.contains("experimental"), "missing 'experimental':\n{output}");
+    assert!(output.contains("extra"), "missing 'extra':\n{output}");
+    assert!(output.contains("full"), "missing 'full':\n{output}");
+    // Check alphabetical order: experimental < extra < full
+    let exp_pos = output.find("experimental = ").unwrap();
+    let extra_pos = output.find("extra = ").unwrap();
+    let full_pos = output.find("full = ").unwrap();
+    assert!(exp_pos < extra_pos, "experimental should come before extra");
+    assert!(extra_pos < full_pos, "extra should come before full");
+}
+
+#[test]
+fn test_features_remote_stub_errors() {
+    let args = default_features_args();
+    let mut remote = RemoteOpts::default();
+    remote.crates = true;
+    let result = cargo_brief::run_features_pipeline(&args, &remote);
+    assert!(result.is_err(), "remote path should return an error (step 2 stub)");
+    let msg = result.unwrap_err().to_string();
+    assert!(msg.contains("next step"), "should mention 'next step':\n{msg}");
 }

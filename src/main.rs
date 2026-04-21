@@ -38,6 +38,10 @@ fn main() -> Result<()> {
             let output = cargo_brief::run_code_pipeline(args, &remote)?;
             print!("{output}");
         }
+        BriefCommand::Features(args) => {
+            let output = cargo_brief::run_features_pipeline(args, &remote)?;
+            print!("{output}");
+        }
         BriefCommand::Clean(args) => {
             cargo_brief::clean_cache(args.spec.as_deref().unwrap_or(""))?;
         }
