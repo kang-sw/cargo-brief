@@ -10,10 +10,10 @@ All notable changes to this project will be documented in this file.
   or remote crates (`-C`). Output is pseudo-TOML (`[features]` section) with alphabetical
   ordering, `default = [...]` first, and `# optional dep` comments for `dep:`-aliased entries.
 - **Feature-gate annotations on `api` output.** Items annotated with `#[cfg(feature = "...")]`
-  now emit a `// requires feature "..."` comment above the item signature — even when the
-  feature is currently enabled. Supports `all`, `any`, and `not` combinators with
-  natural-language formatting; mixed predicates fall back to `// cfg: <raw>`. Controlled by
-  the new `--no-feature-gates` flag on all commands that use `FilterArgs`.
+  now emit a `#[cfg(...)]` attribute line above the item signature — even when the feature is
+  currently enabled. Supports `all`, `any`, `not`, and mixed predicates (e.g.
+  `#[cfg(all(feature = "x", unix))]`); unparseable attributes fall back to `// cfg: <raw>`.
+  Controlled by the new `--no-feature-gates` flag on all commands that use `FilterArgs`.
 - **`-F` pre-validation with did-you-mean suggestions.** Unknown feature names passed via
   `-F` now fail in <100ms with Jaro-Winkler-ranked suggestions (top 3, threshold 0.6) and
   the full valid feature list, replacing the previous 30s opaque `cargo rustdoc failed:` error.
