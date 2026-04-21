@@ -4304,13 +4304,17 @@ fn test_features_local_named_features_alphabetical() {
     assert!(extra_pos < full_pos, "extra should come before full");
 }
 
+/// Remote features test: requires network; use CARGO_BRIEF_TEST_REMOTE=1 to opt in.
 #[test]
-fn test_features_remote_stub_errors() {
-    let args = default_features_args();
+#[ignore]
+fn test_features_remote_serde() {
+    let mut args = default_features_args();
+    args.crate_name = "serde@1".to_string();
+    args.manifest_path = None;
     let mut remote = RemoteOpts::default();
     remote.crates = true;
-    let result = cargo_brief::run_features_pipeline(&args, &remote);
-    assert!(result.is_err(), "remote path should return an error (step 2 stub)");
-    let msg = result.unwrap_err().to_string();
-    assert!(msg.contains("next step"), "should mention 'next step':\n{msg}");
+    let output = cargo_brief::run_features_pipeline(&args, &remote).unwrap();
+    assert!(output.contains("[features]"), "remote features should have [features] header:\n{output}");
+    // serde always has a `derive` feature
+    assert!(output.contains("derive"), "serde remote features should include 'derive':\n{output}");
 }

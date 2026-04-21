@@ -23,10 +23,20 @@ pub fn run_features_pipeline(
     args: &cli::FeaturesArgs,
     remote: &cli::RemoteOpts,
 ) -> anyhow::Result<String> {
-    use anyhow::{Context, bail};
+    use anyhow::Context;
 
     if remote.crates {
-        bail!("remote (-C) feature graph support lands in the next step");
+        let spec = &args.crate_name;
+        match remote::load_remote_feature_graph(spec)? {
+            Some(graph) => return Ok(features::render_features(&graph)),
+            None => {
+                eprintln!(
+                    "warning: feature graph unavailable for '{spec}'; \
+                     crates.io unreachable and no cached payload found"
+                );
+                anyhow::bail!("Cannot show features for '{spec}': no data available offline");
+            }
+        }
     }
 
     let metadata = resolve::load_cargo_metadata(args.manifest_path.as_deref())
