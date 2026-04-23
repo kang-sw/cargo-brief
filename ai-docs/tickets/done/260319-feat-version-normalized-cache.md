@@ -1,7 +1,8 @@
 ---
 title: "Version-normalized cache directories + crates.io version resolution"
-status: wip
+status: done
 started: 2026-03-19
+completed: 2026-03-19
 ---
 
 # Version-normalized cache directories + crates.io version resolution
