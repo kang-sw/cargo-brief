@@ -1,582 +1,422 @@
 ---
 title: CLI Surface
-summary: All subcommands, flags, positional arguments, and behavioral contracts for the cargo-brief CLI.
-
+summary: All subcommands, flags, positional arguments, target resolution rules, and behavioral contracts for the cargo-brief CLI.
 features:
   - Invocation Modes
   - Global Flags
-    - `-C` / `--crates`
-    - `-F` / `--features <FEATURES>`
-    - `--no-default-features`
-    - `--no-cache`
-    - `--toolchain <NAME>`
-    - `-v` / `--verbose`
+    - -C / --crates
+    - -F / --features \<FEATURES\>
+    - --no-default-features
+    - --no-cache
+    - --toolchain \<NAME\>
+    - -v / --verbose
   - Target Resolution
-    - Resolution Rules (Local Mode)
-    - Key Behaviors
-    - Resolution Rules (Remote Mode, `-C`)
     - Smart Leaf Resolution
-  - Subcommands
-    - `api`
-    - `search`
-      - Pattern DSL
-      - Member Suppression
-      - Collapsed Display
-      - `--methods-of`
-    - `examples`
-    - `summary`
-    - `ts`
-    - `code`
-    - `clean`
-    - `lsp`
-      - `lsp touch`
-      - `lsp stop`
-      - `lsp status`
-      - `lsp references <SYMBOL>`
-      - `lsp blast-radius <SYMBOL>`
-      - `lsp call-hierarchy <SYMBOL>`
-      - Symbol Resolution
+  - api Subcommand
+  - search Subcommand
+    - Pattern DSL
+    - Member Display
+  - examples Subcommand
+  - summary Subcommand
+  - ts Subcommand
+  - code Subcommand
+    - Dependency Search Modes
+  - clean Subcommand
+  - lsp Subcommand — Lifecycle Commands
+  - lsp Subcommand — Query Commands
   - Shared Option Groups
     - FilterArgs
     - GlobalArgs
     - TargetArgs
   - Behavioral Contracts
-    - Visibility Filtering
-    - Cross-Crate Accessible Paths
-    - Crate-Level Documentation
-    - Trait Impl Collapsing
-    - Re-Export Expansion
-    - Nightly Toolchain Requirement
+    - Nightly Toolchain Detection
+    - AI Agent Quick Guide
     - Error Messages
-    - Remote Crate Caching
-    - Pagination (`--limit`)
 ---
 
 # CLI Surface
 
-`cargo-brief` is invoked as either `cargo brief <subcommand>` (via Cargo) or
-`cargo-brief <subcommand>` (direct). Global flags appear before the subcommand;
-subcommand-specific flags appear after.
+`cargo-brief` is invoked as either a Cargo subcommand (`cargo brief`) or a standalone binary (`cargo-brief`). All eight subcommands share a common set of global flags and shared option groups; each subcommand defines its own positional arguments and subcommand-specific flags.
 
-```
-cargo brief [GLOBAL FLAGS] <subcommand> [ARGS...] [OPTIONS...]
-```
+## Invocation Modes {#260423-invocation-modes}
 
-## Invocation Modes
+Two invocation forms produce identical behavior:
 
-The binary accepts two invocation forms:
+- `cargo brief <subcommand> [args…]` — Cargo plugin form. Cargo passes all arguments after `brief` to the binary.
+- `cargo-brief <subcommand> [args…]` — Direct binary form.
 
-- **Cargo subcommand**: `cargo brief <args>` -- Cargo passes `brief` as the first arg.
-  Parsed as `Cargo { Brief(BriefDirect) }`.
-- **Direct binary**: `cargo-brief <args>` -- Parsed directly as `BriefDirect`.
+The binary detects the form by inspecting whether the first argument equals `"brief"`.
 
-Both forms produce identical behavior. Detection is based on whether `args[1] == "brief"`.
-
-A hidden entry point `cargo-brief __lsp-daemon` re-execs into the LSP daemon main loop.
-This is not a user-facing subcommand.
+A hidden re-exec entry point `cargo-brief __lsp-daemon` starts the LSP daemon as a detached child process. It is not surfaced in `--help` and is not intended for direct user invocation, but it must remain stable because the client process re-execs the same binary with this argument.
 
 ## Global Flags
 
-These flags are declared with `global = true` on the top-level `BriefDirect` struct.
-They must appear **before** the subcommand name.
+Global flags appear on `BriefDirect` with `global = true`. They must be placed **before** the subcommand name on the command line.
 
-### `-C` / `--crates`
+### -C / --crates {#260423-global-flag-crates}
 
-Interpret TARGET as a crates.io package spec instead of a local workspace package.
-When active, the tool downloads and caches the crate source, then runs the pipeline
-against the cached workspace.
+Switches to remote crates.io mode. When set, `TARGET` is interpreted as a crate spec rather than a local package name. Crate spec syntax:
 
-Crate spec syntax: `name` (latest), `name@1` (semver-compatible), `name@1.0.200`
-(exact pin, 3-component versions get `=` prefix).
+| Form | Meaning |
+|---|---|
+| `name` | Latest published version |
+| `name@1` | Highest semver-compatible with `^1` |
+| `name@1.2` | Highest semver-compatible with `^1.2` |
+| `name@1.0.200` | Exact pin (`=1.0.200`) |
 
-### `-F` / `--features <FEATURES>`
+The `::module` suffix is supported in remote mode (e.g. `tokio@1::net`).
 
-Comma-separated list of features to enable. Requires `-C`. Feature-gated items are
-invisible in the output without the corresponding features enabled.
+### -F / --features \<FEATURES\> {#260423-global-flag-features}
 
-### `--no-default-features`
+Comma-separated list of Cargo features to enable. Requires `-C`.
 
-Disable the crate's default features. Requires `-C`. Combine with `-F` to select
-an exact feature set.
+### --no-default-features {#260423-global-flag-no-default-features}
 
-### `--no-cache`
+Disables the crate's default feature set. Requires `-C`.
 
-Skip the persistent cache directory and use a temporary workspace. Requires `-C`.
-Useful for forcing a fresh download.
+### --no-cache {#260423-global-flag-no-cache}
 
-### `--toolchain <NAME>`
+Forces a fresh workspace rather than reusing the persistent cache. Requires `-C`.
 
-Name of the nightly toolchain to use for rustdoc JSON generation. Default: `nightly`.
-All subcommands that invoke rustdoc (api, search, summary, and the default dep mode of
-code) use this value as `cargo +<toolchain> rustdoc ...`.
+### --toolchain \<NAME\> {#260423-global-flag-toolchain}
 
-### `-v` / `--verbose`
+Nightly toolchain name passed to `rustup` and `cargo +<toolchain>`. Default: `nightly`.
 
-Print progress messages to stderr during pipeline execution. Useful for diagnosing
-slow operations (rustdoc generation, cross-crate pre-warming, etc.).
+Consumed by `api`, `search`, `summary`, and `code` (default dep mode). Subcommands that do not invoke `cargo rustdoc` (`ts`, `examples`, `code --no-deps`, `lsp`, `clean`) accept the flag but ignore it.
 
-## Target Resolution
+### -v / --verbose {#260423-global-flag-verbose}
 
-Most subcommands accept a TARGET positional argument that identifies which crate (and
-optionally which module) to operate on. The resolution algorithm lives in `resolve.rs`
-and follows a priority-ordered set of rules.
+Prints pipeline progress to stderr at key stages: target resolution, `cargo rustdoc` invocation, cache hits, and cross-crate discovery.
 
-### Resolution Rules (Local Mode)
+## Target Resolution {#260423-target-resolution}
 
-| Input                  | Package              | Module          |
-|------------------------|----------------------|-----------------|
-| `self`                 | Current package (cwd)| None            |
-| `self::foo::bar`       | Current package      | `foo::bar`      |
-| `self` + `foo::bar`    | Current package      | `foo::bar`      |
-| `crate_name::mod`      | `crate_name`         | `mod`           |
-| `crate_name` + `mod`   | `crate_name`         | `mod`           |
-| `src/foo.rs`           | Current package      | `foo`           |
-| `src/foo/bar.rs`       | Current package      | `foo::bar`      |
-| `src/foo/mod.rs`       | Current package      | `foo`           |
-| `src/lib.rs`           | Current package      | None (root)     |
-| `known_workspace_pkg`  | That package         | None            |
-| `unknown_name`         | Treated as package   | None            |
+Target resolution maps the `TARGET` positional argument (and optional `MODULE_PATH`) to a `(package, optional_module)` pair. The algorithm runs in `src/resolve.rs`.
 
-### Key Behaviors
+| Input form | Package | Module |
+|---|---|---|
+| _(omitted)_ | current package | none |
+| `self` | current package | none |
+| `self::foo::bar` | current package | `foo::bar` |
+| `crate::foo::bar` | `crate` package | `foo::bar` |
+| `name` (bare) | `name` package | none |
+| `name::foo` | `name` package | `foo` |
+| `src/foo.rs` | current package | `foo` |
+| `src/foo/mod.rs` | current package | `foo` |
+| `src/lib.rs` | current package | none (crate root) |
+| `name foo::bar` (two args) | `name` | `foo::bar` |
 
-- **Bare name always resolves as package.** A single arg without `::` that is not a file
-  path is always treated as a package name (workspace-first, then external). Use
-  `self::module` for own modules.
-- **Hyphen/underscore normalization.** `my_crate` matches workspace package `my-crate`.
-- **File path detection.** Strings containing `/` or ending with `.rs` are treated as file
-  paths. Fallback search order: cwd-relative, then `<package>/src/`-relative, then
-  `<package>/`-relative.
-- **`self` requires cwd to be inside a package directory.** Virtual workspace roots
-  (with no package) produce an error.
+Key behaviors:
 
-### Resolution Rules (Remote Mode, `-C`)
+- A bare single argument always resolves as a **package name**, never as a module path.
+- Hyphen and underscore are normalized interchangeably when looking up workspace packages.
+- File path detection: a string is treated as a file path if it contains `/` or ends with `.rs`. The tool searches cwd-relative, then `src/<file>`, then `<pkg>/<file>`.
+- `self` in a virtual workspace root (no package in cwd) produces: `"Cannot resolve 'self': no package found for the current directory. Are you in a package directory? (Virtual workspace roots have no package.)"`
+- A `self::` prefix in the `MODULE_PATH` second argument is stripped automatically.
 
-With `-C`, TARGET is a crates.io spec. The `::module` suffix is supported:
-`tokio@1::net` resolves to crate `tokio@1`, module `net`.
+### Smart Leaf Resolution {#260423-smart-leaf-resolution}
 
-### Smart Leaf Resolution
+When the final segment of a resolved path does not name a module, the tool interprets it as a leaf item (struct, enum, trait, fn, type alias, etc.). It renders the parent module filtered to show only that item with full impl and method detail.
 
-When the final path segment resolves to a leaf item (struct, enum, trait, function, etc.)
-rather than a module, the tool resolves the parent module and renders just that item with
-full detail (definition + impls). Module names take priority (backward compatible).
+Module names take priority over leaf names when both exist. `pub use` chains are followed across crate boundaries.
 
-## Subcommands
+## api Subcommand {#260423-api-subcommand}
 
-### `api`
+Renders a crate or module's API as pseudo-Rust documentation.
 
-Extract and render a crate's API as pseudo-Rust documentation. This is the primary
-subcommand.
-
-**Positional arguments:**
-- `[TARGET]` -- Package/module to inspect (default: `self`)
-- `[MODULE_PATH]` -- Optional module path within the crate
-
-**Subcommand-specific flags:**
-
-| Flag                 | Default | Description                                         |
-|----------------------|---------|-----------------------------------------------------|
-| `--depth <N>`        | `1`     | How many submodule levels to recurse into            |
-| `--recursive`        | off     | Recurse into all submodules (no depth limit)         |
-| `--no-expand-glob`   | off     | Show `pub use` lines instead of inlining definitions |
-| `--at-package <PKG>` | auto    | Override the observer's package for visibility       |
-| `--at-mod <MOD>`     | auto    | Override the observer's module path for visibility   |
-| `--manifest-path`    | auto    | Path to Cargo.toml                                   |
-
-Plus shared FilterArgs and GlobalArgs (see below).
-
-**Output format:** Pseudo-Rust text with module headers, doc comments, item definitions.
-Function bodies replaced with `;`. Hidden fields shown as `..`. Grouped by module.
-
-### `search`
-
-Search for items by name across a crate. Returns a compact one-line-per-item listing
-with kind prefix and full path.
-
-**Positional arguments:**
-- `[TARGET]` -- Crate to search (default: `self`)
-- `[PATTERN...]` -- Search patterns (0 or more; multiple args are AND-matched)
-
-**Subcommand-specific flags:**
-
-| Flag                    | Default | Description                                      |
-|-------------------------|---------|--------------------------------------------------|
-| `--limit [OFFSET:]N`   | none    | Limit/paginate results                           |
-| `--methods-of <TYPE>`  | none    | Show methods/fields of the named type            |
-| `--members`            | off     | Show all members of matched types                |
-| `--search-kind <KINDS>`| none    | Filter by item kind (comma-separated)            |
-| `--at-package <PKG>`   | auto    | Override observer's package                      |
-| `--at-mod <MOD>`       | auto    | Override observer's module path                  |
-| `--manifest-path`      | auto    | Path to Cargo.toml                               |
-
-Plus shared FilterArgs and GlobalArgs.
-
-#### Pattern DSL
-
-Patterns follow a mini-DSL with smart-case matching, combinators, and operators.
-
-**Combinators:**
-- **Space** between tokens = AND (all must match)
-- **Comma** between tokens = OR (any group can match)
-- Multiple positional args are joined with spaces (AND semantics)
-
-**Smart-case matching:**
-- All-lowercase pattern = case-insensitive
-- Any uppercase character = case-sensitive
-
-**Operators (per token):**
-
-| Operator  | Syntax       | Behavior                                           |
-|-----------|--------------|----------------------------------------------------|
-| Substring | `word`       | Path contains "word"                               |
-| Glob      | `w*ld`, `?`  | `*` matches 0+ chars, `?` matches 1 char. Anchored to full path |
-| Exact     | `=Name`      | Final `::` segment equals "Name" exactly           |
-| Exclude   | `-term`      | Remove matches (global across all OR groups)       |
-
-Exclusion can be combined with other operators: `-=Name` excludes exact matches,
-`-*test*` excludes glob matches.
-
-**Note:** Patterns starting with `-` require `--` before them on the command line.
-
-#### Member Suppression
-
-By default, member items (fields, variants, impl methods, associated types/consts) are
-suppressed unless a search token exactly matches the member's name. The `--members` flag
-expands all members of matched types.
-
-#### Collapsed Display
-
-Consecutive items sharing a parent path render with `-::member` continuation lines
-rather than repeating the full path.
-
-#### `--methods-of`
-
-Exact parent-type matching: shows only methods/fields of the named type (not substring
-matches). Bypasses member suppression. Zero-result sub-crate headers are suppressed.
-
-### `examples`
-
-Grep example, test, and bench source files from a crate.
-
-**Positional arguments:**
-- `[TARGET]` -- Crate to scan (default: `self`)
-- `[PATTERN...]` -- Grep patterns (0 or more; multiple args are AND-matched)
-
-**Modes:**
-- **List mode** (no pattern): Enumerates `.rs` files with their `//!` doc comments.
-- **Grep mode** (pattern given): Shows matching lines with context and `*` markers on
-  match lines.
-
-**Subcommand-specific flags:**
-
-| Flag                  | Default | Description                                       |
-|-----------------------|---------|---------------------------------------------------|
-| `--context <N or B:A>`| `2`     | Lines of context around matches. `N` for symmetric, `B:A` for asymmetric |
-| `--tests [DEPTH]`     | off     | Include `tests/` directory. Optional depth (default: unlimited) |
-| `--benches [DEPTH]`   | off     | Include `benches/` directory. Optional depth (default: unlimited) |
-| `--manifest-path`     | auto    | Path to Cargo.toml                                 |
-
-Plus GlobalArgs.
-
-**Matching:** Smart-case (all-lowercase = insensitive, any uppercase = sensitive).
-Multiple pattern arguments are AND-matched.
-
-**Scope:** By default, only the `examples/` directory is scanned. `--tests` and
-`--benches` extend the scope to include those directories.
-
-### `summary`
-
-Show a compact module-level overview with item counts per kind.
-
-**Positional arguments:**
-- `[TARGET]` -- Crate to summarize (default: `self`)
-- `[MODULE_PATH]` -- Optional module path to start from
-
-Plus shared TargetArgs (including `--at-package`, `--at-mod`, `--manifest-path`) and GlobalArgs.
-
-**Output format:** One line per module showing counts of traits, structs, enums,
-functions, types, constants, macros, and unions.
-
-### `ts`
-
-Run a tree-sitter structural query against crate source files.
-
-**Positional arguments:**
-- `<TARGET>` -- Crate to query (required)
-- `<QUERY>` -- Tree-sitter S-expression pattern (required)
-
-**Subcommand-specific flags:**
-
-| Flag                  | Default | Description                                        |
-|-----------------------|---------|----------------------------------------------------|
-| `--captures`          | off     | Show capture name + text pairs instead of full nodes |
-| `--context <N or B:A>`| `0`     | Lines of context around matched nodes               |
-| `--src-only`          | off     | Only search `src/` (skip examples, tests, benches)  |
-| `--limit [OFFSET:]N`  | none    | Limit/paginate results                              |
-| `-q` / `--quiet`      | off     | Output only `@file:line` locations, no source text   |
-| `--manifest-path`     | auto    | Path to Cargo.toml                                   |
-
-Plus GlobalArgs.
-
-**Scan scope:** By default scans `src/`, `examples/`, `tests/`, and `benches/`.
-`--src-only` restricts to `src/` only.
-
-**Capture behavior:** Queries without captures are auto-augmented with `@_match`
-so they still produce output. With `--captures`, each named capture is printed as
-`@name: <text>`.
-
-**Query syntax:** Standard tree-sitter S-expression patterns. Predicates supported:
-`#eq?`, `#match?`, `#not-eq?`, `#any-of?`.
-
-### `code`
-
-Look up code definitions by kind and name using pre-crafted tree-sitter queries.
-Bridges the gap between `search` (API shape, no source) and `ts` (raw S-expressions).
-
-**Positional arguments (1-3):**
-
-The positional argument parsing is context-sensitive:
-
-| Form                        | TARGET   | KIND   | NAME   |
-|-----------------------------|----------|--------|--------|
-| `code NAME`                 | `self`   | all    | NAME   |
-| `code KIND NAME`            | `self`   | KIND   | NAME   |
-| `code TARGET NAME`          | TARGET   | all    | NAME   |
-| `code TARGET KIND NAME`     | TARGET   | KIND   | NAME   |
-
-**Disambiguation:** When exactly 2 args are given, the first is treated as KIND if it
-matches a kind keyword; otherwise it is treated as TARGET. A single arg that is a kind
-keyword produces an error (use the 2-arg form).
-
-**Item kinds:** `fn`, `struct`, `enum`, `trait`, `field`, `type`, `impl`, `macro`,
-`const`, `use`. Omitting KIND searches all kinds except `use` (to reduce noise).
-
-**Subcommand-specific flags:**
-
-| Flag                  | Default      | Description                                       |
-|-----------------------|--------------|---------------------------------------------------|
-| `--src-only`          | off          | Only search `src/`                                |
-| `--no-deps`           | off          | Target crate only (no dependency search)          |
-| `--all-deps`          | off          | All direct deps via cargo metadata (no nightly)   |
-| `--limit [OFFSET:]N`  | none         | Limit/paginate results                            |
-| `-q` / `--quiet`      | off          | Location + module context only, no source text    |
-| `--refs`              | off          | Also show grep-based references after definitions |
-| `--refs-only`         | off          | Skip definitions, only show references            |
-| `--in <TYPE>`         | none         | Scope to items inside a specific type/impl block  |
-| `--manifest-path`     | auto         | Path to Cargo.toml                                |
-
-Plus GlobalArgs.
-
-**Dependency search modes:**
-- **Default:** Workspace members + accessible dependencies discovered via rustdoc JSON
-  reachability BFS. Requires nightly.
-- **`--no-deps`:** Target crate (or all workspace members if TARGET is `self`) only.
-- **`--all-deps`:** Workspace members + all direct dependencies resolved via cargo
-  metadata. No nightly needed; wider but noisier.
-
-**`self` behavior for `code`:** Unlike other subcommands where `self` = current package,
-`code self` searches ALL workspace members. This is because code lookup is a source-level
-tool where project-wide search is the common case.
-
-**Name matching:** Smart-case. The name must match the item's identifier (not a
-substring).
-
-**Output format:**
 ```
-@<file>:<line>
-  in <crate>::<module>[, <parent>]
-<source text>
+cargo brief api [TARGET] [MODULE_PATH] [OPTIONS]
 ```
 
-With `--quiet`, only the location and module-path lines are shown.
+Positionals: `[TARGET]` (default `self`), `[MODULE_PATH]` (optional).
 
-**Reference search (`--refs`, `--refs-only`):** After definitions, grep for literal name
-occurrences across the same source files. Match lines marked with `*`, 2 lines of
-surrounding context. `--refs-only` skips definitions entirely. `--limit` applies to
-definitions (with `--refs`) or grep matches (with `--refs-only`).
+Subcommand-specific flags:
 
-**Parent scoping (`--in`):** Filters to items inside a specific type, impl block, or
-trait. Uses smart-case matching on the type identifier. Top-level items are excluded.
+| Flag | Default | Description |
+|---|---|---|
+| `--depth <N>` | `1` | Submodule recursion depth |
+| `--recursive` | off | Recurse into all submodules (unlimited depth) |
+| `--no-expand-glob` | off | Show raw `pub use` lines instead of inlining glob re-exports |
 
-### `clean`
+Also accepts FilterArgs and GlobalArgs. TargetArgs (`--at-package`, `--at-mod`, `--manifest-path`) are bundled via the shared group.
 
-Clear cached remote crate workspaces.
+## search Subcommand {#260423-search-subcommand}
 
-**Positional arguments:**
-- `[SPEC]` -- Crate spec to clean (omit to clean all)
+Searches all visible items by name. Outputs one line per item.
 
-No other flags. Does not use GlobalArgs or FilterArgs.
+```
+cargo brief search [TARGET] [PATTERN…] [OPTIONS]
+```
 
-**Cache location:** `$CARGO_BRIEF_CACHE_DIR`, or `$XDG_CACHE_HOME/cargo-brief/crates`,
-or `~/.cache/cargo-brief/crates`.
+Positionals: `[TARGET]` (default `self`), `[PATTERN…]` (zero or more, joined with spaces).
 
-### `lsp`
+Subcommand-specific flags:
 
-Manage a persistent rust-analyzer daemon for cross-reference queries.
+| Flag | Description |
+|---|---|
+| `--limit [OFFSET:]N` | Paginate results |
+| `--methods-of <TYPE>` | Show only items whose direct parent is `TYPE` (exact match) |
+| `--search-kind <KINDS>` | Comma-separated kind filter: `fn`, `struct`, `enum`, `trait`, `field`, `variant`, `const`, `static`, `type`, `macro`, `use` |
+| `--members` | Expand all members (fields, methods, trait impls) of matched types |
+| `--at-package`, `--at-mod` | Visibility observer override |
+| `--manifest-path` | Path to `Cargo.toml` |
 
-The `lsp` subcommand has its own sub-subcommands. The daemon auto-starts on first query
-and has a 10-minute idle timeout (override: `CARGO_BRIEF_LSP_TIMEOUT` env var).
+Also accepts FilterArgs and GlobalArgs.
 
-**Rejects `-C`** -- LSP commands operate on the local workspace only.
+### Pattern DSL {#260423-search-pattern-dsl}
 
-One daemon per workspace root.
+Multiple tokens on the command line join with spaces (no quoting needed for multi-word AND). Comma separates OR groups.
 
-**Shared flags:** GlobalArgs, `--manifest-path`.
+| Operator | Example | Meaning |
+|---|---|---|
+| Substring (default) | `reader` | Any item whose path contains `reader` |
+| Glob | `Camera*` | Glob match against the **full** item path |
+| Exact | `=Router` | Final `::` segment equals `Router` exactly |
+| Exclude | `-test` | Exclude items matching `test`; applies across all OR groups |
+| Combined | `-=Internal`, `-*test*` | Combine exclude with other operators |
 
-#### `lsp touch`
+Smart-case applies to all operators: an all-lowercase pattern is case-insensitive; any uppercase letter makes the match case-sensitive.
 
-Ensure the LSP daemon is running. By default blocks until rust-analyzer finishes
-indexing.
+Patterns beginning with `-` require `--` on the command line to prevent flag parsing.
 
-| Flag         | Description                              |
-|--------------|------------------------------------------|
-| `--no-wait`  | Return immediately (fire-and-forget)     |
+> [!note] Implementation Gap · 2026-04-23
+> Glob patterns are matched against the full item path, so `Camera*` returns zero results unless the crate name itself starts with `Camera`. The intended behavior is to match against the final `::` segment by default. Current workaround: use a substring pattern (`camera`) instead.
 
-#### `lsp stop`
+### Member Display {#260423-search-member-display}
 
-Gracefully shut down the daemon.
+By default, member items (fields, methods, variants) are suppressed in search results unless a pattern token exactly matches the member name.
 
-#### `lsp status`
+`--members` expands all members of every matched type, showing fields, inherent methods, and trait impl methods.
 
-Show daemon PID, rust-analyzer state, and uptime.
+`--methods-of <TYPE>` bypasses member suppression for the named type and shows only its items. `TYPE` is an exact parent-type match, not a substring.
 
-#### `lsp references <SYMBOL>`
+Consecutive items sharing a parent path use a `-::member` continuation line to avoid repeating the full path.
 
-Find all references to a symbol via rust-analyzer.
+Zero-result sub-crate headers are suppressed in multi-crate searches unless `--verbose` is set.
 
-| Flag          | Description                     |
-|---------------|---------------------------------|
-| `-q` / `--quiet` | Location-only output format |
+## examples Subcommand {#260423-examples-subcommand}
 
-#### `lsp blast-radius <SYMBOL>`
+Lists or greps `examples/`, `tests/`, and `benches/` source files.
 
-Show direct and transitive callers of a symbol (BFS).
+```
+cargo brief examples [TARGET] [PATTERN…] [OPTIONS]
+```
 
-| Flag             | Default | Description                           |
-|------------------|---------|---------------------------------------|
-| `--depth <N>`    | `1`     | Depth of transitive caller search (max 10). 1 = direct only |
-| `-q` / `--quiet` | off     | Location-only output format           |
+Positionals: `[TARGET]` (default `self`), `[PATTERN…]` (zero or more).
 
-#### `lsp call-hierarchy <SYMBOL>`
+Two modes:
+- **List mode** (no pattern): enumerates `.rs` files with their `//!` module-level doc comment (first line).
+- **Grep mode** (pattern present): finds matching lines with context. Match lines are prefixed with `*`; context lines with a space; non-adjacent groups separated by `…`.
 
-Show incoming or outgoing call hierarchy for a symbol.
+Flags:
 
-| Flag              | Default | Description                          |
-|-------------------|---------|--------------------------------------|
-| `--outgoing`      | off     | Show outgoing calls instead of incoming |
-| `-q` / `--quiet`  | off     | Location-only output format          |
+| Flag | Default | Description |
+|---|---|---|
+| `--context <N or B:A>` | `2` | Context lines before and after each match (`B:A` for asymmetric) |
+| `--tests [DEPTH]` | off | Include `tests/` up to DEPTH levels deep (omit DEPTH = unlimited) |
+| `--benches [DEPTH]` | off | Include `benches/` up to DEPTH levels deep (omit DEPTH = unlimited) |
+| `--manifest-path` | auto | Path to `Cargo.toml` |
 
-#### Symbol Resolution
+Default scope: `examples/` only. Smart-case matching applies.
 
-Symbols are resolved in two stages:
-1. **Workspace/symbol search** -- fast, finds workspace-defined items.
-2. **Fallback:** grep workspace source for usage sites, then resolve via
-   `textDocument/definition` -- slower, finds external deps.
+When no examples exist, an informative message is printed — not an error exit.
 
-Qualified names work: `hecs::World`, `App::new`, `MyStruct::method`.
-Common names like `new` may be ambiguous.
+## summary Subcommand {#260423-summary-subcommand}
+
+Prints a compact module-level table of contents showing item counts per kind.
+
+```
+cargo brief summary [TARGET] [MODULE_PATH] [OPTIONS]
+```
+
+Output: one line per visible submodule, annotated with counts: `mod io; // 4 traits, 15 structs, 8 fns`. Zero-count kinds are omitted. The visibility system and reachable set are respected.
+
+Uses TargetArgs and GlobalArgs only. No FilterArgs.
+
+## ts Subcommand {#260423-ts-subcommand}
+
+Runs tree-sitter S-expression structural queries against crate source files.
+
+```
+cargo brief ts <TARGET> '<QUERY>' [OPTIONS]
+```
+
+Both positionals are required; `TARGET` has no default.
+
+Output modes (mutually exclusive):
+
+| Mode | Flag | Output |
+|---|---|---|
+| Verbatim (default) | — | Matched node source with `@file:line` header |
+| Captures | `--captures` | `@name: <text>` pairs for each named capture |
+| Context | `--context <N or B:A>` | Matched node with surrounding source lines (default 0) |
+| Quiet | `-q` / `--quiet` | Location only: `@file:line` |
+
+Other flags:
+
+| Flag | Description |
+|---|---|
+| `--src-only` | Restrict scan to `src/` (skip `examples/`, `tests/`, `benches/`) |
+| `--limit [OFFSET:]N` | Paginate results |
+
+Default scan scope: `src/`, `examples/`, `tests/`, `benches/`.
+
+Queries without explicit captures are auto-augmented with `@_match` to return the full matched node.
+
+Supported predicates: `#eq?`, `#match?`, `#not-eq?`, `#any-of?`.
+
+Works with `-C` for remote crates.
+
+## code Subcommand {#260423-code-subcommand}
+
+Looks up code definitions by item kind and name using pre-crafted tree-sitter queries.
+
+```
+cargo brief code [TARGET] [KIND] <NAME> [OPTIONS]
+```
+
+Accepts 1–3 positional arguments with context-sensitive disambiguation:
+
+| Arg count | Interpretation |
+|---|---|
+| 1 | `NAME` — search all workspace members, all kinds |
+| 2 | If first arg is a kind keyword: `KIND NAME` with `self` target. Otherwise: `TARGET NAME`, all kinds. |
+| 3 | `TARGET KIND NAME` |
+
+A single argument that is a valid kind keyword alone is an error — use the 2-arg or 3-arg form.
+
+Supported kinds: `fn`, `struct`, `enum`, `trait`, `field`, `type`, `impl`, `macro`, `const`, `use`. Omitting KIND also excludes `use` from results.
+
+Output per match: `@<file>:<line>`, `in <crate>::<module>[, in <parent>]`, then the matched source block.
+
+Flags:
+
+| Flag | Description |
+|---|---|
+| `--refs` | Append grep-based reference sites after each definition |
+| `--refs-only` | Show only references, skip definitions (conflicts with `--refs`) |
+| `--in <TYPE>` | Scope results to items inside a specific type, impl block, or trait |
+| `--src-only` | Skip non-`src/` files |
+| `--limit [OFFSET:]N` | Paginate. For `--refs`, applies to definitions; for `--refs-only`, to grep matches. |
+| `-q` / `--quiet` | Location only |
+| `--manifest-path` | Path to `Cargo.toml` |
+
+Name matching is smart-case and must match a complete identifier, not a substring.
+
+`self` as `TARGET` searches **all workspace members** simultaneously (unlike other subcommands where `self` means the current package only).
+
+### Dependency Search Modes {#260423-code-dep-search-modes}
+
+| Mode | Flag | Scope | Nightly required |
+|---|---|---|---|
+| Default | — | Workspace members + BFS-reachable deps via rustdoc JSON | Yes |
+| No deps | `--no-deps` | Target crate only (or all workspace members when `TARGET=self`) | No |
+| All deps | `--all-deps` | Workspace members + all direct deps via cargo metadata | No |
+
+Works with `-C` for remote crates.
+
+## clean Subcommand {#260423-clean-subcommand}
+
+Deletes cached remote crate workspaces.
+
+```
+cargo brief clean [SPEC]
+```
+
+`SPEC` is optional. Omitting it cleans all cached workspaces. Providing a spec prefix cleans matching entries only.
+
+Does not accept FilterArgs or GlobalArgs.
+
+## lsp Subcommand — Lifecycle Commands {#260423-lsp-subcommand-lifecycle}
+
+Manages a persistent rust-analyzer daemon per Cargo workspace. The daemon is keyed by the workspace root path. Idle timeout defaults to 10 minutes (`CARGO_BRIEF_LSP_TIMEOUT` env var, in seconds).
+
+The `lsp` subcommand rejects `-C`.
+
+```
+cargo brief lsp touch [--no-wait]
+cargo brief lsp stop
+cargo brief lsp status
+```
+
+- **`touch`** — Starts the daemon if not running; blocks until rust-analyzer finishes indexing by default. `--no-wait` returns immediately after spawn.
+- **`stop`** — Graceful daemon shutdown.
+- **`status`** — Shows daemon PID, rust-analyzer indexing state, and uptime.
+
+All `lsp` sub-subcommands accept `--manifest-path` and `GlobalArgs`.
+
+## lsp Subcommand — Query Commands {#260423-lsp-subcommand-queries}
+
+Semantic analysis commands that require a running daemon (auto-started if absent).
+
+```
+cargo brief lsp references <SYMBOL> [-q]
+cargo brief lsp blast-radius <SYMBOL> [--depth <N>] [-q]
+cargo brief lsp call-hierarchy <SYMBOL> [--outgoing] [-q]
+```
+
+- **`references`** — All reference sites for `SYMBOL`, grouped by file with surrounding source context. `-q` outputs locations only.
+- **`blast-radius`** — Transitive incoming callers via BFS. `--depth N` controls traversal depth (default 1, max 10). `-q` for locations only.
+- **`call-hierarchy`** — Direct incoming or outgoing call tree. `--outgoing` flips to callers of `SYMBOL`'s callees. `-q` for locations only.
+
+Symbol resolution is two-stage: `workspace/symbol` LSP request first; if that returns nothing, a grep-based fallback scans `.rs` files and resolves the definition via `textDocument/definition`. Qualified names are supported (`hecs::World`, `App::new`).
 
 ## Shared Option Groups
 
-### FilterArgs
+### FilterArgs {#260423-filter-args}
 
-Available on `api` and `search` subcommands. Controls which item kinds appear in output
-and output density.
+Available on `api` and `search`. Two categories:
 
-**Item kind exclusion (subtractive model -- all shown by default):**
+**Item-kind exclusion (subtractive — omit to include):**
 
-| Flag              | Excludes          |
-|-------------------|-------------------|
-| `--no-structs`    | Structs           |
-| `--no-enums`      | Enums             |
-| `--no-traits`     | Traits            |
-| `--no-functions`  | Free functions    |
-| `--no-aliases`    | Type aliases      |
-| `--no-constants`  | Constants AND statics (grouped) |
-| `--no-unions`     | Unions            |
-| `--no-macros`     | Macros            |
+`--no-structs`, `--no-enums`, `--no-traits`, `--no-functions`, `--no-aliases`, `--no-constants` (also hides statics), `--no-unions`, `--no-macros`
 
 **Output density:**
 
-| Flag                    | Effect                                              |
-|-------------------------|-----------------------------------------------------|
-| `--no-docs`             | Suppress all doc comments                           |
-| `--no-crate-docs`       | Suppress crate-level `//!` documentation only       |
-| `--doc-lines <N>`       | Limit doc comments to first N lines (0 = suppress)  |
-| `--compact`             | Suppress docs, collapse struct fields/enum variants/trait items |
-| `--verbose-metadata`    | Show all attributes (`#[must_use]`, `#[repr(...)]`, etc.) |
-| `--all`                 | Show blanket/auto-trait impls (normally collapsed)   |
+| Flag | Effect |
+|---|---|
+| `--no-docs` | Strip all doc comment lines |
+| `--no-crate-docs` | Strip only the crate-level `//!` block |
+| `--doc-lines <N>` | Limit each doc comment to first N lines; `0` equals `--no-docs` |
+| `--compact` | Collapse struct fields, enum variants, and trait items to `{ .. }`; implies `--no-docs` |
+| `--verbose-metadata` | Render `#[repr(…)]`, `#[must_use]`, `#[no_mangle]`, etc. |
+| `--all` | Include blanket impls and auto-trait impls; disable trait impl collapsing |
 
-**Default attribute rendering:** `#[deprecated]` and `#[non_exhaustive]` are always shown.
-`--verbose-metadata` adds `#[repr]`, `#[must_use]`, and others.
+Default attribute rendering (always on): `#[deprecated]`, `#[non_exhaustive]`.
 
-### GlobalArgs
+### GlobalArgs {#260423-global-args}
 
-Available on all subcommands except `clean`. Contains `--toolchain` and `-v`/`--verbose`
-(see Global Flags section above for details).
+Available on all subcommands except `clean`. Contains `--toolchain` and `-v` / `--verbose` (described under [Global Flags](#260423-global-flag-toolchain)).
 
-### TargetArgs
+### TargetArgs {#260423-target-args}
 
-Used by `api` and `summary`. Bundles TARGET, MODULE_PATH, `--at-package`, `--at-mod`,
-and `--manifest-path`.
+Used by `api` and `summary`. Bundles `TARGET`, `MODULE_PATH`, `--at-package`, `--at-mod`, and `--manifest-path`.
+
+`--at-package <PKG>` and `--at-mod <PATH>` override the visibility observer position. See the [Visibility Semantics](visibility.md) spec for full semantics.
 
 ## Behavioral Contracts
 
-### Visibility Filtering
+### Nightly Toolchain Detection {#260423-nightly-toolchain-detection}
 
-All output respects the observer's visibility perspective:
-- **External crates:** Only `pub` items are shown.
-- **Same crate (auto-detected from cwd):** `pub(crate)` items are included.
-- **`--at-mod` override:** `pub(super)`, `pub(in path)` items are included when the
-  observer is in scope.
+Before the first `cargo +nightly rustdoc` invocation in a process, the tool checks toolchain availability via `rustup which rustdoc --toolchain <toolchain>`. This check runs at most once per process.
 
-### Cross-Crate Accessible Paths
+| Condition | Behavior |
+|---|---|
+| `rustup` not installed | Error: `"rustup is not installed. Install it from https://rustup.rs/"` |
+| Toolchain missing, TTY available | Interactive prompt `"Install it now? [y/N]"`, reads from `/dev/tty` (Unix) or `CONIN$` (Windows). Runs `rustup toolchain install` on `y`/`Y`. |
+| Toolchain missing, non-TTY | Error with install command: `"Install it with: rustup toolchain install <toolchain>"` |
+| Toolchain present | Silent; proceeds to invocation |
 
-For facade crates (bevy, axum), items are shown with their user-facing re-export paths
-rather than internal module paths. A `CrossCrateIndex` maps items to their shortest
-accessible path.
+### AI Agent Quick Guide {#260423-ai-agent-quick-guide}
 
-### Crate-Level Documentation
+`cargo brief --help` (long form) appends an AI agent quick guide after the standard flag list. The guide maps common situations to subcommands and describes a recommended workflow. `-h` (short form) omits the guide and shows concise flag help only.
 
-Root module `//!` comments are rendered after the `// crate <name>` header.
-`--no-crate-docs` suppresses them independently of `--no-docs`.
+### Error Messages {#260423-error-messages}
 
-### Trait Impl Collapsing
-
-Simple trait impls (no associated items) are collapsed into per-type summary comments
-by default. `--all` expands them.
-
-### Re-Export Expansion
-
-By default, glob re-exports (`pub use foo::*`) are expanded inline -- the referenced
-items appear as if defined locally. Named re-exports (`pub use foo::Bar`) are also
-expanded. `--no-expand-glob` on the `api` subcommand reverts to showing raw `pub use`
-lines.
-
-Re-export lines include kind annotations as comments: `pub use foo::Bar; // struct`.
-
-### Nightly Toolchain Requirement
-
-Subcommands that generate rustdoc JSON (`api`, `search`, `summary`, and `code` in
-default dep mode) require a nightly Rust toolchain. The tool runs a pre-check via
-`rustup which` and, when on a TTY, offers an interactive install prompt if the toolchain
-is missing. Non-TTY contexts get an actionable error message.
-
-### Error Messages
-
-- **Package not found:** Shows the original cargo error.
-- **Module not found:** Lists available modules in the crate.
-- **Leaf item not found:** Lists available items in the parent module (visibility-filtered).
-- **`self` in workspace root:** Explains that virtual workspace roots have no package.
-
-### Remote Crate Caching
-
-Cached workspaces are stored at `~/.cache/cargo-brief/crates/` with version-normalized
-directory names (`name[version]` or `name[version]+feat1+feat2`). Bare specs (no
-`@version`) auto-update. Exact versions are resolved via the crates.io API with 24-hour
-cache. `cargo brief clean [SPEC]` manages disk usage.
-
-### Pagination (`--limit`)
-
-Available on `search`, `ts`, and `code`. Syntax: `N` (first N results) or `OFFSET:N`
-(skip OFFSET, then show N). Applies to definitions for `code --refs`, or to grep matches
-for `code --refs-only`.
+| Situation | Message |
+|---|---|
+| Module not found | Lists available modules at the resolved package; appends `--search` tip for remote/facade crates |
+| Leaf item not found | Lists available items in the parent module, filtered by visibility |
+| Package not found | Echoes the original cargo error; appends `--features` tip |
+| File path not found | Lists all three searched locations: cwd-relative, `src/`-relative, pkg-relative |
+| `self` in virtual workspace root | Explains the virtual workspace root limitation |
+| Ambiguous crate version | Auto-selects highest semver candidate; falls back to `"Use name@version to disambiguate"` |
