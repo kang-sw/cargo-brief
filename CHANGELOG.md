@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.11.1] - 2026-04-23
+
+### Changed
+
+- Internal lint cleanup (clippy fixes); no user-visible behaviour changes.
+
 ## [0.11.0] - 2026-04-20
 
 ### Added
