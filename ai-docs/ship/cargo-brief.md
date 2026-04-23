@@ -22,6 +22,9 @@ Agent-determined semver bump. Derive the new version before touching any files:
 Run in order after the version bump; any failure aborts the ship:
 
 - `cargo clippy -- -D warnings`
+  - If fixes are required: apply them, commit, then **re-run both clippy and
+    `cargo test` before continuing**. Do not proceed to the confirm gate until
+    both pass on the same source tree.
 - `cargo test`
 - Verify `CHANGELOG.md` contains an entry `## [<version>]`. If missing: write the entry
   (summarise commits since baseline tag; use `### Added`, `### Fixed`, `### Changed`
