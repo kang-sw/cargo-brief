@@ -38,8 +38,11 @@ pub fn render_features(graph: &FeatureGraph) -> String {
     }
 
     // Named features alphabetically
-    let optional_set: std::collections::HashSet<&str> =
-        graph.optional_dep_features.iter().map(|s| s.as_str()).collect();
+    let optional_set: std::collections::HashSet<&str> = graph
+        .optional_dep_features
+        .iter()
+        .map(|s| s.as_str())
+        .collect();
 
     for (name, enables) in &graph.features {
         if name == "default" {
@@ -66,10 +69,7 @@ pub fn render_features(graph: &FeatureGraph) -> String {
 /// for a single package.
 ///
 /// `raw_features`: the `packages[].features` JSON object (feature_name → [enables]).
-pub fn build_feature_graph(
-    crate_name: String,
-    raw_features: &serde_json::Value,
-) -> FeatureGraph {
+pub fn build_feature_graph(crate_name: String, raw_features: &serde_json::Value) -> FeatureGraph {
     let mut features: Vec<(String, Vec<String>)> = Vec::new();
     let mut defaults: Vec<String> = Vec::new();
     let mut optional_dep_features: Vec<String> = Vec::new();
@@ -89,8 +89,7 @@ pub fn build_feature_graph(
                 defaults = enables.clone();
             } else {
                 // A feature is an optional-dep alias if all enables are `dep:*` entries.
-                let all_dep = !enables.is_empty()
-                    && enables.iter().all(|e| e.starts_with("dep:"));
+                let all_dep = !enables.is_empty() && enables.iter().all(|e| e.starts_with("dep:"));
                 if all_dep {
                     optional_dep_features.push(name.clone());
                 }
@@ -243,7 +242,9 @@ mod tests {
     #[test]
     fn validate_unknown_feature_errors() {
         let g = make_graph("foo", &[("full", &[]), ("async", &[])]);
-        let err = validate_requested_features(&g, "typo").unwrap_err().to_string();
+        let err = validate_requested_features(&g, "typo")
+            .unwrap_err()
+            .to_string();
         assert!(err.contains("unknown feature 'typo'"), "{err}");
         assert!(err.contains("valid features:"), "{err}");
     }
@@ -251,7 +252,9 @@ mod tests {
     #[test]
     fn validate_typo_with_suggestion() {
         let g = make_graph("foo", &[("derive", &[]), ("std", &[])]);
-        let err = validate_requested_features(&g, "deriev").unwrap_err().to_string();
+        let err = validate_requested_features(&g, "deriev")
+            .unwrap_err()
+            .to_string();
         assert!(err.contains("did you mean"), "{err}");
         assert!(err.contains("derive"), "{err}");
     }
@@ -259,8 +262,13 @@ mod tests {
     #[test]
     fn validate_no_suggestion_below_threshold() {
         let g = make_graph("foo", &[("alpha", &[]), ("beta", &[])]);
-        let err = validate_requested_features(&g, "zzznomatch").unwrap_err().to_string();
-        assert!(!err.contains("did you mean"), "should have no suggestions: {err}");
+        let err = validate_requested_features(&g, "zzznomatch")
+            .unwrap_err()
+            .to_string();
+        assert!(
+            !err.contains("did you mean"),
+            "should have no suggestions: {err}"
+        );
         assert!(err.contains("valid features:"), "{err}");
     }
 

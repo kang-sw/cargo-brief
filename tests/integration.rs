@@ -4277,8 +4277,14 @@ fn default_features_args() -> FeaturesArgs {
 fn test_features_local_renders_toml_section() {
     let args = default_features_args();
     let output = cargo_brief::run_features_pipeline(&args, &RemoteOpts::default()).unwrap();
-    assert!(output.contains("[features]"), "missing [features] header:\n{output}");
-    assert!(output.contains("default = ["), "missing default line:\n{output}");
+    assert!(
+        output.contains("[features]"),
+        "missing [features] header:\n{output}"
+    );
+    assert!(
+        output.contains("default = ["),
+        "missing default line:\n{output}"
+    );
 }
 
 #[test]
@@ -4286,7 +4292,10 @@ fn test_features_local_default_group() {
     let args = default_features_args();
     let output = cargo_brief::run_features_pipeline(&args, &RemoteOpts::default()).unwrap();
     // test_fixture has default = ["full"]
-    assert!(output.contains("\"full\""), "default should include 'full':\n{output}");
+    assert!(
+        output.contains("\"full\""),
+        "default should include 'full':\n{output}"
+    );
 }
 
 #[test]
@@ -4294,7 +4303,10 @@ fn test_features_local_named_features_alphabetical() {
     let args = default_features_args();
     let output = cargo_brief::run_features_pipeline(&args, &RemoteOpts::default()).unwrap();
     // experimental, extra, full should all appear
-    assert!(output.contains("experimental"), "missing 'experimental':\n{output}");
+    assert!(
+        output.contains("experimental"),
+        "missing 'experimental':\n{output}"
+    );
     assert!(output.contains("extra"), "missing 'extra':\n{output}");
     assert!(output.contains("full"), "missing 'full':\n{output}");
     // Check alphabetical order: experimental < extra < full
@@ -4315,9 +4327,15 @@ fn test_features_remote_serde() {
     let mut remote = RemoteOpts::default();
     remote.crates = true;
     let output = cargo_brief::run_features_pipeline(&args, &remote).unwrap();
-    assert!(output.contains("[features]"), "remote features should have [features] header:\n{output}");
+    assert!(
+        output.contains("[features]"),
+        "remote features should have [features] header:\n{output}"
+    );
     // serde always has a `derive` feature
-    assert!(output.contains("derive"), "serde remote features should include 'derive':\n{output}");
+    assert!(
+        output.contains("derive"),
+        "serde remote features should include 'derive':\n{output}"
+    );
 }
 
 // === cfg feature-gate annotation tests (Step 4) ===
@@ -4368,7 +4386,10 @@ fn test_cfg_no_gate_no_annotation() {
             return;
         }
     }
-    assert!(output.contains("struct NoGate"), "NoGate should appear in cfg_items:\n{output}");
+    assert!(
+        output.contains("struct NoGate"),
+        "NoGate should appear in cfg_items:\n{output}"
+    );
 }
 
 #[test]

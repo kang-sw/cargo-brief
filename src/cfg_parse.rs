@@ -46,9 +46,10 @@ fn write_predicate(pred: &CfgPredicate, out: &mut String) {
     match pred {
         CfgPredicate::Feature(f) => out.push_str(&format!("feature = \"{f}\"")),
         CfgPredicate::NonFeature { name, value: None } => out.push_str(name),
-        CfgPredicate::NonFeature { name, value: Some(v) } => {
-            out.push_str(&format!("{name} = \"{v}\""))
-        }
+        CfgPredicate::NonFeature {
+            name,
+            value: Some(v),
+        } => out.push_str(&format!("{name} = \"{v}\"")),
         CfgPredicate::Not(inner) => {
             out.push_str("not(");
             write_predicate(inner, out);
@@ -166,10 +167,16 @@ fn parse_namevalue(s: &str) -> Option<(CfgPredicate, &str)> {
     let pred = if name == "feature" {
         match value {
             Some(v) => CfgPredicate::Feature(v),
-            None => CfgPredicate::NonFeature { name: "feature".to_string(), value: None },
+            None => CfgPredicate::NonFeature {
+                name: "feature".to_string(),
+                value: None,
+            },
         }
     } else {
-        CfgPredicate::NonFeature { name: name.to_string(), value }
+        CfgPredicate::NonFeature {
+            name: name.to_string(),
+            value,
+        }
     };
 
     Some((pred, rest))
@@ -230,7 +237,10 @@ mod tests {
         let pred = parse_cfg_attribute(&raw).unwrap();
         assert_eq!(
             pred,
-            CfgPredicate::NonFeature { name: "unix".to_string(), value: None }
+            CfgPredicate::NonFeature {
+                name: "unix".to_string(),
+                value: None
+            }
         );
         assert_eq!(reconstruct_cfg_attr(&pred), "#[cfg(unix)]");
     }
@@ -241,14 +251,21 @@ mod tests {
         let pred = parse_cfg_attribute(&raw).unwrap();
         assert_eq!(
             pred,
-            CfgPredicate::NonFeature { name: "target_os".to_string(), value: Some("linux".to_string()) }
+            CfgPredicate::NonFeature {
+                name: "target_os".to_string(),
+                value: Some("linux".to_string())
+            }
         );
         assert_eq!(reconstruct_cfg_attr(&pred), "#[cfg(target_os = \"linux\")]");
     }
 
     #[test]
     fn all_two_features() {
-        let inner = format!("All([{}, {}], span)", nv("feature", Some("net")), nv("feature", Some("tls")));
+        let inner = format!(
+            "All([{}, {}], span)",
+            nv("feature", Some("net")),
+            nv("feature", Some("tls"))
+        );
         let pred = parse_cfg_attribute(&wrap(&inner)).unwrap();
         assert_eq!(
             reconstruct_cfg_attr(&pred),
@@ -273,7 +290,11 @@ mod tests {
 
     #[test]
     fn any_two_features() {
-        let inner = format!("Any([{}, {}], span)", nv("feature", Some("a")), nv("feature", Some("b")));
+        let inner = format!(
+            "Any([{}, {}], span)",
+            nv("feature", Some("a")),
+            nv("feature", Some("b"))
+        );
         let pred = parse_cfg_attribute(&wrap(&inner)).unwrap();
         assert_eq!(
             reconstruct_cfg_attr(&pred),
@@ -300,13 +321,20 @@ mod tests {
     fn not_feature() {
         let inner = format!("Not({}, span)", nv("feature", Some("beta")));
         let pred = parse_cfg_attribute(&wrap(&inner)).unwrap();
-        assert_eq!(reconstruct_cfg_attr(&pred), "#[cfg(not(feature = \"beta\"))]");
+        assert_eq!(
+            reconstruct_cfg_attr(&pred),
+            "#[cfg(not(feature = \"beta\"))]"
+        );
     }
 
     #[test]
     fn mixed_all_reconstructs() {
         // all(feature = "net", unix) — NonFeature inside All now reconstructs cleanly
-        let inner = format!("All([{}, {}], span)", nv("feature", Some("net")), nv("unix", None));
+        let inner = format!(
+            "All([{}, {}], span)",
+            nv("feature", Some("net")),
+            nv("unix", None)
+        );
         let pred = parse_cfg_attribute(&wrap(&inner)).unwrap();
         assert_eq!(
             reconstruct_cfg_attr(&pred),
@@ -346,7 +374,13 @@ mod tests {
     #[test]
     fn real_span_any_two_features() {
         let a = real_nv("feature", Some("extra"), "src/lib.rs", "1:15", "1:32");
-        let b = real_nv("feature", Some("experimental"), "src/lib.rs", "1:34", "1:58");
+        let b = real_nv(
+            "feature",
+            Some("experimental"),
+            "src/lib.rs",
+            "1:34",
+            "1:58",
+        );
         let inner = format!("Any([{a}, {b}], src/lib.rs:1:14: 1:59 (#0))");
         let raw = format!("#[attr = CfgTrace([{inner}])]");
         let pred = parse_cfg_attribute(&raw).unwrap();
@@ -358,7 +392,13 @@ mod tests {
 
     #[test]
     fn real_span_not_feature() {
-        let nv = real_nv("feature", Some("experimental"), "src/lib.rs", "1:15", "1:39");
+        let nv = real_nv(
+            "feature",
+            Some("experimental"),
+            "src/lib.rs",
+            "1:15",
+            "1:39",
+        );
         let inner = format!("Not({nv}, src/lib.rs:1:14: 1:40 (#0))");
         let raw = format!("#[attr = CfgTrace([{inner}])]");
         let pred = parse_cfg_attribute(&raw).unwrap();

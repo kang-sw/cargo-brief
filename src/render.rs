@@ -783,7 +783,13 @@ fn render_inline_children(
                         output,
                     );
                 } else {
-                    render_attrs(child, &child_indent, args.verbose_metadata, args.no_feature_gates, output);
+                    render_attrs(
+                        child,
+                        &child_indent,
+                        args.verbose_metadata,
+                        args.no_feature_gates,
+                        output,
+                    );
                     output.push_str(&format!("{child_indent}mod {name} {{ /* ... */ }}\n"));
                 }
             }
@@ -848,7 +854,13 @@ fn render_module_contents(
     let indent = "    ".repeat(current_depth.saturating_sub(1) as usize);
 
     if current_depth > 0 {
-        render_attrs(module_item, &indent, args.verbose_metadata, args.no_feature_gates, output);
+        render_attrs(
+            module_item,
+            &indent,
+            args.verbose_metadata,
+            args.no_feature_gates,
+            output,
+        );
         output.push_str(&format!("{indent}mod {} {{\n", last_segment(display_path)));
     }
 
@@ -903,7 +915,13 @@ fn render_module_contents(
                         output,
                     );
                 } else {
-                    render_attrs(child, &child_indent, args.verbose_metadata, args.no_feature_gates, output);
+                    render_attrs(
+                        child,
+                        &child_indent,
+                        args.verbose_metadata,
+                        args.no_feature_gates,
+                        output,
+                    );
                     output.push_str(&format!("{child_indent}mod {name} {{ /* ... */ }}\n"));
                 }
             }
@@ -1302,7 +1320,13 @@ fn render_item(
     output: &mut String,
 ) {
     render_docs(item, indent, args, output);
-    render_attrs(item, indent, args.verbose_metadata, args.no_feature_gates, output);
+    render_attrs(
+        item,
+        indent,
+        args.verbose_metadata,
+        args.no_feature_gates,
+        output,
+    );
     let vis = format_visibility(&item.visibility);
 
     match &item.inner {
@@ -1743,7 +1767,13 @@ fn render_impl_item(item: &Item, indent: &str, args: &FilterArgs) -> Option<Stri
             let name = item.name.as_deref().unwrap_or("?");
             let vis = format_visibility(&item.visibility);
             render_docs(item, indent, args, &mut out);
-            render_attrs(item, indent, args.verbose_metadata, args.no_feature_gates, &mut out);
+            render_attrs(
+                item,
+                indent,
+                args.verbose_metadata,
+                args.no_feature_gates,
+                &mut out,
+            );
             let sig = format_function_sig(name, f, &vis);
             let wc = format_where_clause(&f.generics, indent);
             out.push_str(&format!("{indent}{sig}{wc};\n"));
@@ -1755,7 +1785,13 @@ fn render_impl_item(item: &Item, indent: &str, args: &FilterArgs) -> Option<Stri
             type_,
         } => {
             let name = item.name.as_deref().unwrap_or("?");
-            render_attrs(item, indent, args.verbose_metadata, args.no_feature_gates, &mut out);
+            render_attrs(
+                item,
+                indent,
+                args.verbose_metadata,
+                args.no_feature_gates,
+                &mut out,
+            );
             if let Some(ty) = type_ {
                 out.push_str(&format!("{indent}type {name} = {};\n", format_type(ty)));
             }
@@ -1763,7 +1799,13 @@ fn render_impl_item(item: &Item, indent: &str, args: &FilterArgs) -> Option<Stri
         }
         ItemEnum::AssocConst { type_, value } => {
             let name = item.name.as_deref().unwrap_or("?");
-            render_attrs(item, indent, args.verbose_metadata, args.no_feature_gates, &mut out);
+            render_attrs(
+                item,
+                indent,
+                args.verbose_metadata,
+                args.no_feature_gates,
+                &mut out,
+            );
             let val = value.as_deref().unwrap_or("_");
             out.push_str(&format!(
                 "{indent}const {name}: {} = {val};\n",
@@ -1775,7 +1817,13 @@ fn render_impl_item(item: &Item, indent: &str, args: &FilterArgs) -> Option<Stri
     }
 }
 
-fn render_attrs(item: &Item, indent: &str, verbose: bool, no_feature_gates: bool, output: &mut String) {
+fn render_attrs(
+    item: &Item,
+    indent: &str,
+    verbose: bool,
+    no_feature_gates: bool,
+    output: &mut String,
+) {
     // Deprecation (always rendered)
     if let Some(dep) = &item.deprecation {
         match (&dep.since, &dep.note) {
