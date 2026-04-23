@@ -4,6 +4,8 @@ use std::process::Command;
 
 use anyhow::{Context, Result, bail};
 
+use crate::features::{FeatureGraph, build_feature_graph};
+
 /// Metadata extracted from `cargo metadata`.
 pub struct CargoMetadataInfo {
     /// Names of all packages in the workspace.
@@ -18,6 +20,8 @@ pub struct CargoMetadataInfo {
     pub package_manifest_dirs: HashMap<String, PathBuf>,
     /// The workspace root directory (from `workspace_root` in cargo metadata).
     pub workspace_root: PathBuf,
+    /// Feature graph for each workspace package (name → graph).
+    pub feature_graphs: HashMap<String, FeatureGraph>,
 }
 
 /// A resolved target for the pipeline.
@@ -61,6 +65,7 @@ pub fn load_cargo_metadata(manifest_path: Option<&str>) -> Result<CargoMetadataI
     let mut current_package = None;
     let mut current_package_manifest_dir = None;
     let mut package_manifest_dirs = HashMap::new();
+    let mut feature_graphs = HashMap::new();
 
     if let Some(packages) = metadata["packages"].as_array() {
         for pkg in packages {
@@ -81,6 +86,9 @@ pub fn load_cargo_metadata(manifest_path: Option<&str>) -> Result<CargoMetadataI
                         current_package_manifest_dir = Some(manifest_canonical);
                     }
                 }
+
+                let graph = build_feature_graph(name.to_string(), &pkg["features"]);
+                feature_graphs.insert(name.to_string(), graph);
             }
         }
     }
@@ -92,6 +100,7 @@ pub fn load_cargo_metadata(manifest_path: Option<&str>) -> Result<CargoMetadataI
         target_dir: PathBuf::from(target_dir),
         package_manifest_dirs,
         workspace_root: PathBuf::from(workspace_root),
+        feature_graphs,
     })
 }
 
@@ -468,6 +477,7 @@ mod tests {
             target_dir: PathBuf::from("/tmp/target"),
             package_manifest_dirs: HashMap::new(),
             workspace_root: PathBuf::from("/tmp"),
+            feature_graphs: HashMap::new(),
         }
     }
 
@@ -483,6 +493,7 @@ mod tests {
             target_dir: PathBuf::from("/tmp/target"),
             package_manifest_dirs: HashMap::new(),
             workspace_root: PathBuf::from("/tmp"),
+            feature_graphs: HashMap::new(),
         }
     }
 

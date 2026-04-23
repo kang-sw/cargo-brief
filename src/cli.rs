@@ -27,6 +27,7 @@ QUICK GUIDE — which subcommand for which task:
   \"Show a module's full API surface\"   → api [--depth N] [--compact]
   \"Where is X defined? Show source\"    → code [--refs]
   \"What modules exist in this crate?\"  → summary
+  \"What features does crate X have?\"   → features [-C <crate>]
   \"How is X used in practice?\"         → examples [--tests]
   \"Find structural patterns in AST\"    → ts '<s-expr>'
   \"Who calls X? All references\"        → lsp references <symbol>
@@ -42,11 +43,13 @@ TYPICAL WORKFLOW:
 
 REMOTE CRATES (-C):
   cargo brief -C summary tokio@1              # explore an unfamiliar crate
+  cargo brief -C features serde@1             # inspect a crate's feature graph
   cargo brief -C -F rt,net api tokio@1 net    # feature-gated APIs need -F
   cargo brief -C search serde@1 Serialize     # search a crates.io dependency
 
 TIPS:
-  - Feature-gated items are invisible without -F. Try -F full if not found.
+  - Feature-gated items: run `features` to see what flags are available, then -F.
+  - api output annotates gated items (// requires feature \"...\") even when enabled.
   - Smart-case: all-lowercase pattern = case-insensitive, any uppercase = exact.
   - `code` searches ALL workspace members by default (not just current package).
   - `lsp` resolves symbols by name. Workspace items are found instantly;
@@ -391,6 +394,20 @@ PARENT SCOPING (--in <TYPE>):
   Top-level items (not inside any type) are excluded.")]
     Code(CodeArgs),
 
+    /// Show the feature graph for a crate (features, defaults, optional deps)
+    #[command(after_help = "\
+EXAMPLES:
+  # Show feature graph for the current workspace crate
+  cargo brief features
+
+  # Show feature graph for a specific workspace member
+  cargo brief features my-crate
+
+  # Show feature graph for a crates.io crate (requires -C)
+  cargo brief -C features serde@1
+  cargo brief -C features tokio@1")]
+    Features(FeaturesArgs),
+
     /// Clear cached remote crate workspaces
     #[command(after_help = "\
 EXAMPLES:
@@ -524,6 +541,10 @@ pub struct FilterArgs {
     /// Show all item kinds including blanket/auto-trait impls
     #[arg(long)]
     pub all: bool,
+
+    /// Suppress feature-gate annotations (// requires feature "...") from output
+    #[arg(long, help_heading = "Filtering")]
+    pub no_feature_gates: bool,
 }
 
 /// Global options shared across all subcommands.
@@ -743,6 +764,21 @@ pub struct SummaryArgs {
 
     #[command(flatten)]
     pub global: GlobalArgs,
+}
+
+/// Arguments for the `features` subcommand.
+#[derive(Args, Debug, Clone)]
+pub struct FeaturesArgs {
+    /// Target crate name (defaults to current workspace package)
+    #[arg(value_name = "CRATE", default_value = "self")]
+    pub crate_name: String,
+
+    #[command(flatten)]
+    pub global: GlobalArgs,
+
+    /// Path to Cargo.toml
+    #[arg(long, help_heading = "Local Workspace")]
+    pub manifest_path: Option<String>,
 }
 
 /// Arguments for the `clean` subcommand.

@@ -22,6 +22,7 @@ features:
   - Attribute Rendering
     - Default Attributes (always shown)
     - Verbose Attributes (`--verbose-metadata`)
+  - Feature-Gate Annotations
   - Item-Kind Filtering
   - Search Output Format
     - Member Display
@@ -296,6 +297,38 @@ These render regardless of `--verbose-metadata`.
 ```
 
 `AutomaticallyDerived` and `Other` attribute variants are always suppressed.
+
+## Feature-Gate Annotations {#260423-feature-gate-annotations}
+
+Items that are conditionally compiled behind a `cfg(feature = "...")` predicate emit a `#[cfg(...)]` line in the output. The annotation appears immediately after the item's doc comment and before any other attributes:
+
+```rust
+/// Enables async runtime support.
+#[cfg(feature = "async")]
+pub fn spawn<F: Future>(f: F) -> JoinHandle<F::Output>;
+```
+
+Complex predicates round-trip faithfully:
+
+```rust
+#[cfg(all(feature = "serde", feature = "std"))]
+pub struct SerdeValue { .. }
+
+#[cfg(any(feature = "net", feature = "io"))]
+pub mod runtime;
+```
+
+If the raw cfg attribute cannot be parsed, a fallback comment is emitted instead of a `#[cfg(...)]` line:
+
+```rust
+// cfg: #[attr = CfgTrace([...])]
+```
+
+`--no-feature-gates` (a FilterArgs flag) suppresses all feature-gate annotation lines from the output. No other attributes are affected.
+
+> [!note] Constraints
+> - Feature-gate annotations are informational only — they do not affect which items are visible. An item that fails the observer-position visibility check is still suppressed regardless of any cfg predicate.
+> - Only `cfg(feature = "...")` predicates and their compositions (`all`, `any`, `not`) are annotated. Platform predicates (`cfg(unix)`, `cfg(target_arch = "x86_64")`) are included when they appear in the same cfg expression.
 
 ## Item-Kind Filtering {#260423-item-kind-filtering}
 

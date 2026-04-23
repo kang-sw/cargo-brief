@@ -5,6 +5,8 @@ use std::time::Duration;
 use anyhow::{Context, Result, bail};
 use tempfile::TempDir;
 
+use crate::features::{FeatureGraph, build_feature_graph};
+
 /// Parse a crate spec like "name@version" into (name, version_req).
 ///
 /// - `"serde"` → `("serde", "*")`
@@ -309,6 +311,65 @@ pub fn resolve_crate_version(workspace_dir: &Path, crate_name: &str) -> Option<S
     }
 
     None
+}
+
+/// Extract the features map for a specific version from a crates.io API JSON response.
+///
+/// Merges `features2` into `features` so that `dep:` weak-dependency aliases are included.
+fn extract_features_from_api_response(json_str: &str, version: &str) -> Option<serde_json::Value> {
+    let parsed: serde_json::Value = serde_json::from_str(json_str).ok()?;
+    let versions = parsed.get("versions")?.as_array()?;
+    for entry in versions {
+        if entry.get("num")?.as_str() == Some(version) {
+            let mut features = entry
+                .get("features")
+                .and_then(|v| v.as_object())
+                .cloned()
+                .unwrap_or_default();
+            if let Some(features2) = entry.get("features2").and_then(|v| v.as_object()) {
+                for (k, v) in features2 {
+                    features.entry(k.clone()).or_insert_with(|| v.clone());
+                }
+            }
+            return Some(serde_json::Value::Object(features));
+        }
+    }
+    None
+}
+
+/// Load the feature graph for a remote crate spec (e.g., "serde@1").
+///
+/// Returns `Ok(Some(graph))` on success, `Ok(None)` when the network is unreachable
+/// and no cached payload exists (graceful degrade — caller emits a warning).
+pub fn load_remote_feature_graph(spec: &str) -> Result<Option<FeatureGraph>> {
+    let (name, version_req) = parse_crate_spec(spec);
+
+    let resolved = match fetch_resolved_version(&name, &version_req) {
+        Ok(v) => v,
+        Err(_) => return Ok(None),
+    };
+
+    let cache_path = cache_dir().join("versions").join(format!("{name}.json"));
+
+    let json_str = if let Some(cached) = read_version_cache(&cache_path, true) {
+        cached
+    } else {
+        match fetch_crates_io_api(&name) {
+            Ok(resp) => {
+                let _ = std::fs::create_dir_all(cache_path.parent().unwrap());
+                let _ = std::fs::write(&cache_path, &resp);
+                resp
+            }
+            Err(_) => return Ok(None),
+        }
+    };
+
+    let features_val = match extract_features_from_api_response(&json_str, &resolved) {
+        Some(v) => v,
+        None => return Ok(None),
+    };
+
+    Ok(Some(build_feature_graph(name, &features_val)))
 }
 
 /// Clean cached workspace(s). Empty spec = all, otherwise glob-match on crate name prefix.

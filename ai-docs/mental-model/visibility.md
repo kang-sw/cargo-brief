@@ -20,6 +20,7 @@ related:
 - `model::is_visible_from()` guarantees: given correct `observer_module_path` and `same_crate`, it returns whether the item would compile if `use`d from that position. All visibility decisions in the codebase must flow through this function.
 - `lib.rs` guarantees: `same_crate` is computed once and threaded to all downstream consumers. It checks `obs == resolved.package_name || obs.replace('-', "_") == model.crate_name()` (direct equality OR hyphen-normalized).
 - `render.rs` guarantees: every item emitted to output has passed an `is_visible_from()` check. This is enforced by convention, not by the type system.
+- Feature-gate annotations: `render_attrs()` in `render.rs` emits `#[cfg(feature = "...")]` before items that rustdoc recorded as requiring a specific feature (via `CfgTrace(...)` in the raw attribute list). It reconstructs the attribute by calling `parse_cfg_attribute()` / `reconstruct_cfg_attr()` from `cfg_parse.rs`. The doc comment (if any) is emitted **before** the `#[cfg(...)]` line, matching Rust convention. The `--no-feature-gates` flag on `FilterArgs` suppresses all `CfgTrace`-derived annotations. Feature-gate annotations are a rendering concern only — they do not affect `is_visible_from()` or the items included in output.
 
 ## Coupling
 - `same_crate` (lib.rs:68) ↔ `document_private_items` (rustdoc_json call): These MUST be consistent. If `same_crate=true`, JSON must be generated with `document_private_items=true`, otherwise `pub(crate)` items are absent from JSON and silently hidden. Currently both local and remote pipelines pass `true` — the remote pipeline does so to expose internal re-export chains for cross-crate following. `same_crate` is always `false` in the remote pipeline regardless.
@@ -33,6 +34,7 @@ related:
 
 ## Common Mistakes
 - Calling `is_visible_from()` with a non-qualified observer path (e.g., `"utils"` instead of `"crate_name::utils"`) → `is_ancestor_or_equal()` fails, restricted items silently hidden.
+- Feature-gate annotations are emitted by `render_attrs()` regardless of whether the user passed `-F <feature>`. An item gated on `feature = "tokio"` will show `#[cfg(feature = "tokio")]` in output even when `tokio` is enabled — this is informational annotation, not a visibility filter. Do not confuse with `is_visible_from()` filtering.
 - Resolving a glob source name in `walk_public` using only the bare source (e.g., `find_module_entry("bind_group")`) without prefixing the current `module_path` → lookup misses modules that exist only as children of a private parent; glob silently skipped, all items inside unreachable.
 - Setting `same_crate=true` without generating JSON with `--document-private-items` → `pub(crate)` items absent from JSON, silently filtered.
 - Glob expansion hardcodes `same_crate=false` and observer=source crate name (render.rs:93, 137). Inlined items are always filtered as cross-crate, even when the facade crate is the same crate. This is correct for external crates but wrong if applied to same-workspace globs.

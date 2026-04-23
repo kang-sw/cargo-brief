@@ -297,4 +297,24 @@ pub use glob_source::*;
 
 // --- Named cross-crate re-exports (NOT via glob) ---
 pub use named_source::NamedSourceItem;
+
+/// Module exercising cfg(feature = "...") attribute shapes for Step 4 tests.
+pub mod cfg_items {
+    #[cfg(feature = "experimental")]
+    pub struct SingleFeatureGated;
+
+    #[cfg(all(feature = "extra", feature = "experimental"))]
+    pub struct AllTwoFeatures;
+
+    #[cfg(any(feature = "extra", feature = "experimental"))]
+    pub struct AnyTwoFeatures;
+
+    #[cfg(not(feature = "experimental"))]
+    pub struct NotFeatureGated;
+
+    #[cfg(all(feature = "extra", unix))]
+    pub struct MixedPredicate;
+
+    pub struct NoGate;
+}
 pub use named_source::NamedSourceTrait;

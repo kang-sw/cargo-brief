@@ -1,7 +1,9 @@
+pub mod cfg_parse;
 pub mod cli;
 pub mod code;
 pub mod cross_crate;
 pub mod examples;
+pub mod features;
 pub mod lsp;
 pub mod model;
 pub mod remote;
@@ -15,6 +17,48 @@ pub mod ts;
 /// Clean cached remote crate workspaces. Empty spec = all.
 pub fn clean_cache(spec: &str) -> anyhow::Result<()> {
     remote::clean_cache(spec)
+}
+
+/// Run the features pipeline and return the rendered feature graph.
+pub fn run_features_pipeline(
+    args: &cli::FeaturesArgs,
+    remote: &cli::RemoteOpts,
+) -> anyhow::Result<String> {
+    use anyhow::Context;
+
+    if remote.crates {
+        let spec = &args.crate_name;
+        match remote::load_remote_feature_graph(spec)? {
+            Some(graph) => return Ok(features::render_features(&graph)),
+            None => {
+                eprintln!(
+                    "warning: feature graph unavailable for '{spec}'; \
+                     crates.io unreachable and no cached payload found"
+                );
+                anyhow::bail!("Cannot show features for '{spec}': no data available offline");
+            }
+        }
+    }
+
+    let metadata = resolve::load_cargo_metadata(args.manifest_path.as_deref())
+        .context("Failed to load cargo metadata")?;
+
+    let target = if args.crate_name == "self" {
+        metadata
+            .current_package
+            .as_deref()
+            .context("Cannot resolve 'self': no package found for current directory")?
+            .to_string()
+    } else {
+        args.crate_name.clone()
+    };
+
+    let graph = metadata
+        .feature_graphs
+        .get(&target)
+        .with_context(|| format!("No feature data found for crate '{target}'"))?;
+
+    Ok(features::render_features(graph))
 }
 
 /// Run an LSP daemon management command (touch/stop/status).
@@ -202,6 +246,18 @@ fn build_remote_context_api(
         .join("Cargo.toml")
         .to_string_lossy()
         .into_owned();
+
+    // Pre-validate -F features against the crate's feature graph.
+    if let Some(requested) = remote.features.as_deref() {
+        match remote::load_remote_feature_graph(actual_spec) {
+            Ok(Some(graph)) => features::validate_requested_features(&graph, requested)?,
+            Ok(None) => eprintln!(
+                "warning: feature graph unavailable for '{name}'; \
+                 -F values will not be validated and feature gates will not be annotated"
+            ),
+            Err(_) => {} // network failure already handled inside load_remote_feature_graph
+        }
+    }
 
     let metadata = resolve::load_cargo_metadata(Some(&manifest_path))
         .context("Failed to load cargo metadata for remote crate")?;
@@ -508,6 +564,18 @@ fn build_remote_context_search(
         remote.no_cache,
     )
     .with_context(|| format!("Failed to create workspace for '{name}'"))?;
+
+    // Pre-validate -F features against the crate's feature graph.
+    if let Some(requested) = remote.features.as_deref() {
+        match remote::load_remote_feature_graph(spec) {
+            Ok(Some(graph)) => features::validate_requested_features(&graph, requested)?,
+            Ok(None) => eprintln!(
+                "warning: feature graph unavailable for '{name}'; \
+                 -F values will not be validated and feature gates will not be annotated"
+            ),
+            Err(_) => {}
+        }
+    }
 
     let manifest_path = workspace
         .path()
@@ -1146,6 +1214,18 @@ fn build_remote_context_summary(
         remote.no_cache,
     )
     .with_context(|| format!("Failed to create workspace for '{name}'"))?;
+
+    // Pre-validate -F features against the crate's feature graph.
+    if let Some(requested) = remote.features.as_deref() {
+        match remote::load_remote_feature_graph(actual_spec) {
+            Ok(Some(graph)) => features::validate_requested_features(&graph, requested)?,
+            Ok(None) => eprintln!(
+                "warning: feature graph unavailable for '{name}'; \
+                 -F values will not be validated and feature gates will not be annotated"
+            ),
+            Err(_) => {}
+        }
+    }
 
     let manifest_path = workspace
         .path()

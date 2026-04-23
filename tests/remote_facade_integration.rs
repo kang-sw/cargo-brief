@@ -32,6 +32,7 @@ fn hecs_args() -> (ApiArgs, RemoteOpts) {
             compact: false,
             verbose_metadata: false,
             all: false,
+            no_feature_gates: false,
         },
         global: GlobalArgs {
             toolchain: "nightly".to_string(),
@@ -149,6 +150,7 @@ fn hecs_search_no_pub_crate() {
             compact: false,
             verbose_metadata: false,
             all: false,
+            no_feature_gates: false,
         },
         global: GlobalArgs {
             toolchain: "nightly".to_string(),

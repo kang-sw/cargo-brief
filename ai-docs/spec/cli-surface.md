@@ -21,6 +21,7 @@ features:
   - ts Subcommand
   - code Subcommand
     - Dependency Search Modes
+  - features Subcommand
   - clean Subcommand
   - lsp Subcommand — Lifecycle Commands
   - lsp Subcommand — Query Commands
@@ -69,6 +70,15 @@ The `::module` suffix is supported in remote mode (e.g. `tokio@1::net`).
 ### -F / --features \<FEATURES\> {#260423-global-flag-features}
 
 Comma-separated list of Cargo features to enable. Requires `-C`.
+
+Feature names are validated against the crate's feature graph before invoking `cargo rustdoc`. {#260423-feature-flag-validation} If an unknown name is passed, cargo-brief exits with an error and suggests the closest valid name using Jaro-Winkler similarity:
+
+```
+error: unknown feature "asynch"
+  --> did you mean: "async"?
+```
+
+If no feature graph is available (network failure in remote mode), validation is skipped and the raw `-F` list is forwarded to cargo unchanged.
 
 ### --no-default-features {#260423-global-flag-no-default-features}
 
@@ -314,6 +324,33 @@ Name matching is smart-case and must match a complete identifier, not a substrin
 
 Works with `-C` for remote crates.
 
+## features Subcommand {#260423-features-subcommand}
+
+Shows the Cargo feature graph for a crate as pseudo-TOML.
+
+```
+cargo brief features [CRATE] [OPTIONS]
+cargo brief -C features <CRATE_SPEC> [OPTIONS]
+```
+
+Positional: `[CRATE]` — a local package name or `self` (default). In remote mode (`-C`), the positional is a crate spec.
+
+Flags: `GlobalArgs`, `--manifest-path`. No FilterArgs.
+
+Output format: a `[features]` TOML block. `default = [...]` appears first; all other features follow alphabetically. Features that correspond to optional dependencies are annotated with `# optional dep`:
+
+```toml
+[features]
+default = ["std"]
+derive = []
+serde1 = ["dep:serde"]  # optional dep
+std = ["alloc"]
+```
+
+In remote mode (`-C`), the feature graph is fetched from the crates.io API (see [Remote Feature Graph](#260423-remote-feature-graph) in the Remote Crates spec). If the network is unavailable, the subcommand exits with an error.
+
+In local mode, the feature graph is extracted from `cargo metadata` output. `self` resolves to the current package; a package name selects a specific workspace member.
+
 ## clean Subcommand {#260423-clean-subcommand}
 
 Deletes cached remote crate workspaces.
@@ -380,6 +417,7 @@ Available on `api` and `search`. Two categories:
 | `--compact` | Collapse struct fields, enum variants, and trait items to `{ .. }`; implies `--no-docs` |
 | `--verbose-metadata` | Render `#[repr(…)]`, `#[must_use]`, `#[no_mangle]`, etc. |
 | `--all` | Include blanket impls and auto-trait impls; disable trait impl collapsing |
+| `--no-feature-gates` | Suppress `#[cfg(feature = "...")]` annotations on items (see [Feature-Gate Annotations](output-format.md#260423-feature-gate-annotations)) |
 
 Default attribute rendering (always on): `#[deprecated]`, `#[non_exhaustive]`.
 
