@@ -279,7 +279,7 @@ fn path_components_to_module(relative: &Path) -> Result<Option<String>> {
         .context("Invalid file name")?;
 
     // lib.rs at root → crate root (no module path)
-    if file_name == "lib.rs" && relative.parent().map_or(true, |p| p == Path::new("")) {
+    if file_name == "lib.rs" && relative.parent().is_none_or(|p| p == Path::new("")) {
         return Ok(None);
     }
 
@@ -411,10 +411,11 @@ pub fn load_dep_package_dirs(
                 all_dirs.insert(name.to_string(), dir);
 
                 // Match root package by name (with normalization)
-                if root_pkg_id.is_none() && name.replace('-', "_") == normalized_root {
-                    if let Some(id) = pkg["id"].as_str() {
-                        root_pkg_id = Some(id.to_string());
-                    }
+                if root_pkg_id.is_none()
+                    && name.replace('-', "_") == normalized_root
+                    && let Some(id) = pkg["id"].as_str()
+                {
+                    root_pkg_id = Some(id.to_string());
                 }
             }
         }
@@ -423,31 +424,31 @@ pub fn load_dep_package_dirs(
     // Find root package's node in resolve.nodes[] using the exact id
     let mut direct_dep_names = Vec::new();
 
-    if let Some(ref root_id) = root_pkg_id {
-        if let Some(nodes) = metadata["resolve"]["nodes"].as_array() {
-            let root_node = nodes
-                .iter()
-                .find(|node| node["id"].as_str() == Some(root_id.as_str()));
+    if let Some(ref root_id) = root_pkg_id
+        && let Some(nodes) = metadata["resolve"]["nodes"].as_array()
+    {
+        let root_node = nodes
+            .iter()
+            .find(|node| node["id"].as_str() == Some(root_id.as_str()));
 
-            if let Some(node) = root_node {
-                if let Some(deps) = node["deps"].as_array() {
-                    for dep in deps {
-                        if let Some(dep_name) = dep["name"].as_str() {
-                            // dep.name is Rust-identifier form (underscores).
-                            // Try exact match first, then hyphen fallback.
-                            let cargo_name = if all_dirs.contains_key(dep_name) {
-                                dep_name.to_string()
-                            } else {
-                                let hyphenated = dep_name.replace('_', "-");
-                                if all_dirs.contains_key(&hyphenated) {
-                                    hyphenated
-                                } else {
-                                    continue;
-                                }
-                            };
-                            direct_dep_names.push(cargo_name);
+        if let Some(node) = root_node
+            && let Some(deps) = node["deps"].as_array()
+        {
+            for dep in deps {
+                if let Some(dep_name) = dep["name"].as_str() {
+                    // dep.name is Rust-identifier form (underscores).
+                    // Try exact match first, then hyphen fallback.
+                    let cargo_name = if all_dirs.contains_key(dep_name) {
+                        dep_name.to_string()
+                    } else {
+                        let hyphenated = dep_name.replace('_', "-");
+                        if all_dirs.contains_key(&hyphenated) {
+                            hyphenated
+                        } else {
+                            continue;
                         }
-                    }
+                    };
+                    direct_dep_names.push(cargo_name);
                 }
             }
         }

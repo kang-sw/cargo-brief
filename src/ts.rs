@@ -169,10 +169,10 @@ pub fn run_query(source_root: &Path, query_src: &str, args: &TsArgs) -> Result<S
                     if match_count <= offset {
                         continue;
                     }
-                    if let Some(n) = limit {
-                        if emitted >= n {
-                            break 'files;
-                        }
+                    if let Some(n) = limit
+                        && emitted >= n
+                    {
+                        break 'files;
                     }
                     emitted += 1;
 
@@ -209,10 +209,10 @@ pub fn run_query(source_root: &Path, query_src: &str, args: &TsArgs) -> Result<S
                 if match_count <= offset {
                     continue;
                 }
-                if let Some(n) = limit {
-                    if emitted >= n {
-                        break 'files;
-                    }
+                if let Some(n) = limit
+                    && emitted >= n
+                {
+                    break 'files;
                 }
                 emitted += 1;
 

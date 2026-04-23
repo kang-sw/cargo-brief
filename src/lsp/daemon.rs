@@ -223,17 +223,18 @@ fn handle_ra_message(
     active_progress: &mut HashSet<String>,
     had_progress: &mut bool,
 ) {
-    if let Some(new_status) = process_ra_notification(msg, active_progress, had_progress) {
-        if *ra_status != new_status {
-            eprintln!("[lsp-daemon] ra status: {new_status}");
-            *ra_status = new_status;
-        }
+    if let Some(new_status) = process_ra_notification(msg, active_progress, had_progress)
+        && *ra_status != new_status
+    {
+        eprintln!("[lsp-daemon] ra status: {new_status}");
+        *ra_status = new_status;
     }
     // Reply to server-initiated requests (e.g. window/workDoneProgress/create)
-    if msg.get("id").is_some() && msg.get("method").is_some() {
-        if let Some(id) = msg.get("id").cloned() {
-            let _ = transport.send_raw_response(id, serde_json::json!(null));
-        }
+    if msg.get("id").is_some()
+        && msg.get("method").is_some()
+        && let Some(id) = msg.get("id").cloned()
+    {
+        let _ = transport.send_raw_response(id, serde_json::json!(null));
     }
 }
 

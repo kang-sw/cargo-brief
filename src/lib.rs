@@ -1353,11 +1353,10 @@ fn pre_warm_cross_crate_json(model: &CrateModel, ctx: &PipelineContext) {
             for sub_name in cross_crate::collect_external_crate_names(&sub_model) {
                 if let Some(pkg_name) =
                     normalize_to_lockfile_name(&sub_name, &ctx.available_packages)
+                    && !seen.contains(&pkg_name)
                 {
-                    if !seen.contains(&pkg_name) {
-                        seen.insert(pkg_name.clone());
-                        next_batch.push(pkg_name);
-                    }
+                    seen.insert(pkg_name.clone());
+                    next_batch.push(pkg_name);
                 }
             }
         }
@@ -1416,11 +1415,11 @@ fn discover_accessible_deps(
             };
             let sub_model = CrateModel::from_crate(krate);
             for sub_name in cross_crate::collect_external_crate_names(&sub_model) {
-                if let Some(pkg_name) = normalize_to_lockfile_name(&sub_name, &packages) {
-                    if !seen.contains(&pkg_name) {
-                        seen.insert(pkg_name.clone());
-                        next_batch.push(pkg_name);
-                    }
+                if let Some(pkg_name) = normalize_to_lockfile_name(&sub_name, &packages)
+                    && !seen.contains(&pkg_name)
+                {
+                    seen.insert(pkg_name.clone());
+                    next_batch.push(pkg_name);
                 }
             }
         }
@@ -1586,8 +1585,8 @@ fn try_generate_rustdoc_json(
     }
     // Fallback: try hyphenated name (glob_source → glob-source)
     let hyphenated = source.replace('_', "-");
-    if hyphenated != source {
-        if let Ok(path) = rustdoc_json::generate_rustdoc_json(
+    if hyphenated != source
+        && let Ok(path) = rustdoc_json::generate_rustdoc_json(
             &hyphenated,
             toolchain,
             manifest_path,
@@ -1595,9 +1594,9 @@ fn try_generate_rustdoc_json(
             target_dir,
             verbose,
             use_cache,
-        ) {
-            return Some(path);
-        }
+        )
+    {
+        return Some(path);
     }
     None
 }
@@ -1766,6 +1765,7 @@ fn expand_glob_reexports(
 /// - Non-glob Use: collect the re-exported name
 /// - Direct item (non-module): collect the item name
 /// - Module: skip (same as top-level expansion)
+#[allow(clippy::too_many_arguments)]
 fn collect_glob_items_recursive(
     source_model: &CrateModel,
     toolchain: &str,

@@ -295,18 +295,15 @@ pub fn resolve_crate_version(workspace_dir: &Path, crate_name: &str) -> Option<S
             in_target_package = false;
             continue;
         }
-        if in_target_package {
-            if let Some(version) = line.strip_prefix("version = \"") {
-                return version.strip_suffix('"').map(|v| v.to_string());
-            }
+        if in_target_package && let Some(version) = line.strip_prefix("version = \"") {
+            return version.strip_suffix('"').map(|v| v.to_string());
         }
         // Match name = "<crate_name>" (underscore-normalized)
-        if let Some(name) = line.strip_prefix("name = \"") {
-            if let Some(name) = name.strip_suffix('"') {
-                if name == crate_name || name.replace('-', "_") == crate_name.replace('-', "_") {
-                    in_target_package = true;
-                }
-            }
+        if let Some(name) = line.strip_prefix("name = \"")
+            && let Some(name) = name.strip_suffix('"')
+            && (name == crate_name || name.replace('-', "_") == crate_name.replace('-', "_"))
+        {
+            in_target_package = true;
         }
     }
 

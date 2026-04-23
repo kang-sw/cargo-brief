@@ -63,8 +63,8 @@ impl CrateModel {
         module_index: &mut HashMap<String, Id>,
         item_module_path: &mut HashMap<Id, String>,
     ) {
-        module_index.insert(current_path.to_string(), item_id.clone());
-        item_module_path.insert(item_id.clone(), current_path.to_string());
+        module_index.insert(current_path.to_string(), *item_id);
+        item_module_path.insert(*item_id, current_path.to_string());
 
         if let ItemEnum::Module(module) = &item.inner {
             for child_id in &module.items {
@@ -75,7 +75,7 @@ impl CrateModel {
                         continue;
                     };
 
-                    item_module_path.insert(child_id.clone(), current_path.to_string());
+                    item_module_path.insert(*child_id, current_path.to_string());
 
                     if matches!(child_item.inner, ItemEnum::Module(_)) {
                         Self::walk_modules(

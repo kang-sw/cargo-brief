@@ -130,8 +130,8 @@ fn parse_pred_list(mut s: &str) -> Option<(Vec<CfgPredicate>, &str)> {
 
     loop {
         s = s.trim_start();
-        if s.starts_with(']') {
-            return Some((preds, &s[1..]));
+        if let Some(rest) = s.strip_prefix(']') {
+            return Some((preds, rest));
         }
         if !preds.is_empty() {
             // consume comma separator

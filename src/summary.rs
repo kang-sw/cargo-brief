@@ -105,6 +105,7 @@ fn is_item_visible(
 }
 
 /// Recursively walk the module tree, collecting item counts per module.
+#[allow(clippy::too_many_arguments)]
 fn count_module_items(
     model: &CrateModel,
     module_item: &Item,

@@ -527,7 +527,7 @@ pub fn render_leaf_not_found(
             continue;
         }
 
-        let name = child.name.as_deref().or_else(|| {
+        let name = child.name.as_deref().or({
             if let ItemEnum::Use(u) = &child.inner {
                 Some(u.name.as_str())
             } else {
@@ -754,7 +754,7 @@ fn render_inline_children(
             continue;
         }
 
-        let name = child.name.as_deref().or_else(|| {
+        let name = child.name.as_deref().or({
             if let ItemEnum::Use(u) = &child.inner {
                 Some(u.name.as_str())
             } else {
@@ -879,7 +879,7 @@ fn render_module_contents(
         }
 
         // Use items may have name=None at the item level; name is inside inner.use
-        let name = child.name.as_deref().or_else(|| {
+        let name = child.name.as_deref().or({
             if let ItemEnum::Use(u) = &child.inner {
                 Some(u.name.as_str())
             } else {
@@ -1547,14 +1547,14 @@ fn render_enum(
                     } => {
                         output.push_str(&format!("{indent}    {vname} {{\n"));
                         for field_id in fields {
-                            if let Some(field_item) = model.krate.index.get(field_id) {
-                                if let ItemEnum::StructField(ty) = &field_item.inner {
-                                    let fname = field_item.name.as_deref().unwrap_or("?");
-                                    output.push_str(&format!(
-                                        "{indent}        {fname}: {},\n",
-                                        format_type(ty)
-                                    ));
-                                }
+                            if let Some(field_item) = model.krate.index.get(field_id)
+                                && let ItemEnum::StructField(ty) = &field_item.inner
+                            {
+                                let fname = field_item.name.as_deref().unwrap_or("?");
+                                output.push_str(&format!(
+                                    "{indent}        {fname}: {},\n",
+                                    format_type(ty)
+                                ));
                             }
                         }
                         if *has_stripped_fields {
@@ -1687,6 +1687,7 @@ fn render_static(item: &Item, s: &Static, indent: &str, vis: &str, output: &mut 
     ));
 }
 
+#[allow(clippy::too_many_arguments)]
 fn render_union(
     model: &CrateModel,
     item: &Item,
