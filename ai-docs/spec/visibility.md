@@ -1,318 +1,169 @@
 ---
 title: Visibility Semantics
-summary: >
-  How cargo-brief determines which items to show based on the observer's
-  position.  Covers --at-mod, --at-package, same-crate inference, cross-crate
-  filtering, visibility levels, re-export interaction, and glob inlining.
-
+summary: How cargo-brief determines which items to show based on the observer's position — covering observer setup, visibility levels, re-export interaction, and canonical path selection for facade crates.
 features:
   - Observer Position
   - Same-Crate Auto-Detection
     - Effect of same_crate
   - The `--at-mod` Flag
-    - What --at-mod changes
   - The `--at-package` Flag
   - Visibility Levels
     - `pub`
     - `pub(crate)`
-    - `pub(super)`
-    - `pub(in path)`
-    - Default (no visibility keyword)
+    - `pub(super)` and `pub(in path)`
+    - Private (Default visibility)
+    - Struct and Union Fields
   - Cross-Crate View
-  - How Re-Exports Affect Visibility
-    - Named Re-Exports
-    - Glob Re-Exports
+  - Named Re-Export Visibility
   - Glob Re-Export Inlining
-    - Example
+  - Canonical Path Selection
   - Visibility by Item Kind
-    - Modules
-    - Structs, Enums, Unions
-    - Traits
-    - Functions, Constants, Statics, Type Aliases
-    - Impl Blocks
-    - Re-Exports (use items)
 ---
 
 # Visibility Semantics
 
-cargo-brief's core differentiator is **visibility-aware output**: rather than
-dumping every `pub` item, it shows only the items that would compile if `use`d
-from the observer's position. This mirrors the Rust compiler's own visibility
-rules and gives users an accurate picture of what they can actually reach.
+Every item cargo-brief renders is evaluated against an **observer position** — the module from which the caller conceptually reads the API. Items that would not be accessible to `use` statements from that position are hidden. This spec describes how the observer is determined and how each Rust visibility level maps to a show/hide decision.
 
-The guiding invariant: **if `use <path>` would not compile from the observer's
-module, the item does not appear in the output.**
+## Observer Position {#260423-observer-position}
 
+The observer position consists of two components:
 
-## Observer Position
+- **Package** — which crate is making the observation. Controls whether `pub(crate)` items are accessible.
+- **Module** — which module path within the package. Controls whether `pub(super)` and `pub(in path)` items are accessible.
 
-Every cargo-brief invocation has an implicit or explicit **observer** -- the
-module position from which visibility is evaluated. Two flags control this:
+These are set via `--at-package` and `--at-mod`. Both flags apply to `api`, `summary`, and `search` subcommands only.
 
-- **`--at-package <name>`** -- which package the observer is in.
-- **`--at-mod <path>`** -- which module within the target crate the observer
-  occupies (e.g., `outer::inner`).
+## Same-Crate Auto-Detection {#260423-same-crate-detection}
 
-These flags only apply to the `api` and `summary` subcommands (which render
-module-level views) and the `search` subcommand.
+Before evaluating visibility, cargo-brief determines whether the observer is in the same crate as the target. The determination uses a three-step priority chain:
 
-When neither flag is given, the observer defaults to an external caller looking
-at the crate's public API surface (cross-crate view). When the tool detects the
-observer is inside the same crate, it automatically switches to same-crate mode
-and shows `pub(crate)` and restricted-visibility items as appropriate.
+1. **Explicit `--at-package`** — if provided, the observer package is set to that value. `same_crate` is true when this package matches the target crate name (hyphen/underscore equivalent).
+2. **cwd inference** — if the working directory matches a workspace member's manifest directory, that package is the observer. `same_crate` is set accordingly.
+3. **Default** — if neither of the above resolves, the observer is external. `same_crate` is false.
 
+### Effect of same_crate {#260423-same-crate-effects}
 
-## Same-Crate Auto-Detection
+| `same_crate` | `pub(crate)` items | `--at-mod` honored |
+|---|---|---|
+| true | Visible | Yes |
+| false | Hidden | No (silently ignored) |
 
-cargo-brief infers whether the observer is inside the target crate by comparing
-the **observer package** with the **target package**:
+## The `--at-mod` Flag {#260423-at-mod-flag}
 
-1. If `--at-package` is provided, its value is the observer package.
-2. Otherwise, `cargo metadata` identifies which workspace package's manifest
-   directory matches the current working directory. If found, that package
-   name becomes the observer package.
-3. If no package matches the cwd (e.g., running from a virtual workspace root
-   or outside any package), the observer package is unset and the view defaults
-   to cross-crate.
+Sets the observer's module path within the target crate. Uses `::` as separator. The crate name prefix may be omitted — `render::pass` and `my_crate::render::pass` are equivalent when `my_crate` is the target.
 
-The tool then compares the observer package name with the target crate name.
-Comparison accounts for Rust's hyphen-underscore equivalence (`my-crate` ==
-`my_crate`). If they match, `same_crate` is true.
+When `--at-mod` is omitted in same-crate mode, the observer defaults to the crate root.
 
-### Effect of same_crate
+`--at-mod` has no effect in cross-crate mode (`same_crate = false`). It is accepted but silently ignored.
 
-| same_crate | Behavior |
-|------------|----------|
-| `true`     | `pub(crate)` items visible. `--at-mod` is honored. Restricted visibility (`pub(super)`, `pub(in path)`) evaluated against observer module. |
-| `false`    | Only `pub` items visible. `--at-mod` has no effect. Output filtered by reachability from the crate root. |
+What `--at-mod` controls in same-crate mode:
 
+- **`pub(super)`** — visible when the observer is within the parent module's subtree.
+- **`pub(in path)`** — visible when the observer path is a descendant-or-equal of the restricted path.
+- **`pub(crate)`** — visible regardless of the specific module path (same-crate only).
+- **`pub`** — always visible.
 
-## The `--at-mod` Flag
+> [!note] Implementation Gap · 2026-04-23
+> `--at-mod` is not propagated into the cross-crate facade rendering path (`render_virtual_tree`). When rendering a facade crate, the observer is fixed to the source crate root with `same_crate = false`. Specifying `--at-mod` on a facade crate target has no visible effect.
 
-`--at-mod` sets the observer's module path within the target crate. It is only
-meaningful when `same_crate` is true (i.e., the observer is inside the target
-crate). When the view is cross-crate, `--at-mod` is silently ignored.
+## The `--at-package` Flag {#260423-at-package-flag}
 
-The path should be relative to the crate root, using `::` separators:
+Three common uses:
 
-```
-cargo brief api self --at-mod utils::helpers
-```
+- **Virtual workspace root** — when running from a workspace root with no package in cwd, `self` cannot be inferred. `--at-package <name>` selects the observer package explicitly.
+- **Dependency perspective** — view a dependency as it appears from a specific package (e.g. a package that enables extra features or uses a patched version).
+- **Force cross-crate** — specifying a package that does not match the target forces `same_crate = false` even when cwd would otherwise resolve to the target.
 
-This tells the tool: "show me the API as it looks from `my_crate::utils::helpers`."
+## Visibility Levels {#260423-visibility-levels}
 
-### What --at-mod changes
-
-- **`pub(super)` items**: visible only if the observer is a direct child of the
-  item's parent module. For example, a `pub(super)` function in `foo::bar` is
-  visible when `--at-mod` is `foo::bar` or `foo::bar::baz`, but not when it is
-  `foo::qux`.
-
-- **`pub(in path)` items**: visible only if the observer is within the scope
-  named by `path`. For example, `pub(in crate::foo)` is visible when the
-  observer is `my_crate::foo` or any descendant, but not from `my_crate::bar`.
-
-- **`pub(crate)` items**: always visible in same-crate mode regardless of
-  `--at-mod`.
-
-- **`pub` items**: always visible regardless of `--at-mod`.
-
-When `--at-mod` is omitted in same-crate mode, the observer defaults to the
-crate root. This means `pub(super)` and `pub(in path)` items are evaluated
-from the root perspective.
-
-
-## The `--at-package` Flag
-
-`--at-package` overrides the auto-detected observer package. Use cases:
-
-- **Running from a virtual workspace root** where no package is auto-detected:
-  `--at-package my-crate` forces same-crate mode.
-- **Viewing a dependency as if from a specific package**: useful in workspaces
-  where one package depends on another and you want the same-crate perspective.
-- **Forcing cross-crate mode**: `--at-package some-other-crate` ensures the
-  view is external even if you happen to be inside the target crate's directory.
-
-
-## Visibility Levels
-
-Rust has five visibility levels. cargo-brief maps each to a filtering decision:
+Rust has five visibility forms that cargo-brief evaluates in order:
 
 ### `pub`
 
-Always visible. Shown in both same-crate and cross-crate views.
+Always visible. Shown to both internal and external observers.
 
 ### `pub(crate)`
 
-Visible only in same-crate mode. Hidden from external observers. This is the
-most common restricted visibility in practice.
+Visible only when `same_crate = true`. Hidden from all external observers.
 
-### `pub(super)`
+### `pub(super)` and `pub(in path)`
 
-A shorthand for `pub(in <parent_module>)`. Visible if the observer module is
-within the parent module's subtree. Only evaluated in same-crate mode; always
-hidden cross-crate.
+Rustdoc JSON encodes `pub(super)` as `Restricted { parent: <module_id>, path: "super" }` and `pub(in path)` as `Restricted { parent: <module_id>, path: "<full_path>" }`.
 
-### `pub(in path)`
+Visible only in same-crate mode, and only when the observer module path is a descendant-or-equal of the restricted parent module.
 
-Visible if the observer module is an ancestor-or-equal to, or a descendant of,
-the module named by `path`. Only evaluated in same-crate mode.
+> [!note] Implementation Gap · 2026-04-23
+> `pub(super)` items are formatted in output as `pub(in super)` rather than the canonical Rust spelling `pub(super)`. This is a cosmetic inconsistency; the visibility filtering logic is correct. The `path` string from rustdoc JSON is forwarded verbatim to `format_visibility`.
 
-The check is: does the `path` module's fully-qualified name form a prefix of the
-observer's fully-qualified module path? If yes, the observer is "inside" the
-restricted scope and the item is visible.
+### Private (Default visibility)
 
-### Default (no visibility keyword)
+Items with no visibility keyword carry `Visibility::Default` in rustdoc JSON. These are treated as private and hidden. One exception applies: **impl blocks and their methods are always rendered**, regardless of their `Default` visibility marker. {#260423-default-visibility-impl-bypass}
 
-Items with no explicit visibility are private. cargo-brief hides them entirely.
+This exception exists because rustdoc JSON assigns `Default` visibility to impl blocks as a structural convention, not as a true access-level signal. Impl block items inherit effective visibility from their parent type — if the type is visible, its impl items are shown.
 
-**Exception -- impl items**: methods and associated items in `impl` blocks have
-default visibility in rustdoc JSON. Their visibility is delegated to the parent
-type: if the type is visible, its inherent impl methods are shown. Trait impl
-items follow the trait's visibility.
+### Struct and Union Fields {#260423-field-visibility}
 
+Fields are individually visibility-checked. Fields that do not pass the visibility gate are suppressed; a `// .. private fields` placeholder is inserted when at least one field is hidden.
 
-## Cross-Crate View
+Enum variants have no independent visibility keyword — they are always shown when the enum itself is visible.
 
-When `same_crate` is false, cargo-brief uses **reachability-based filtering**
-rather than per-item visibility checks. It computes a `ReachableInfo` set by
-walking from the crate root and following only `pub` items.
+## Cross-Crate View {#260423-cross-crate-view}
 
-This means the output for cross-crate views:
+When the observer is external (`same_crate = false`), cargo-brief builds a **reachable set** by walking the crate from its root and collecting every item reachable via `Visibility::Public` edges only. The walk includes:
 
-- Shows all items reachable through public module paths
-- Includes items re-exported via `pub use` chains (even if the original
-  definition lives in a private module)
-- Hides `pub(crate)`, `pub(super)`, `pub(in path)`, and private items
-- Shows items in private modules that are reachable through glob re-exports
-  (see Glob Re-Export Inlining below)
+- Public items in public modules.
+- Items made public via `pub use` (named and glob re-exports). Their target items and all ancestor modules along the path are marked reachable.
+- Impl blocks whose target type is reachable.
 
-The reachability walk also marks impl blocks of reachable types as reachable, so
-methods on a public struct are included even though impl blocks themselves have
-default visibility.
+Output gates use the reachable set: an item not in the set is hidden from the rendered output. Error suggestion lists (e.g. for a not-found module or leaf item) are also filtered through the reachable set to prevent leaking private item names.
 
+Local workspace crates receive the same cross-crate discovery treatment as remote crates — facade expansion and canonical-path resolution run for both.
 
-## How Re-Exports Affect Visibility
+## Named Re-Export Visibility {#260423-named-reexport-visibility}
 
-Re-exports (`pub use`) are the primary mechanism by which items from private or
-nested modules become part of a crate's public API.
+A `pub use source::Name;` statement makes `Name` accessible from the re-exporting module. The reachability walk marks the target item and all its ancestor modules as reachable. This enables items in otherwise-private modules to surface at their re-exported path.
 
-### Named Re-Exports
+## Glob Re-Export Inlining {#260423-glob-reexport-inlining}
 
-A `pub use inner::Foo;` in a public module makes `Foo` accessible from that
-module regardless of `inner`'s visibility. cargo-brief:
+`pub use inner::*` with `inner` being a private module triggers **inlining**: the private module block is suppressed from output, and its items appear directly at the parent module level as if defined there.
 
-- Shows the re-export as a `pub use` line in Phase 1 (default rendering)
-- In Phase 2 (with `--no-expand-glob` disabled, the default), inlines the
-  full definition at the re-export site, replacing the `pub use` line with
-  the actual struct/enum/trait definition
-- Annotates re-export lines with kind comments (`// struct`, `// trait`, etc.)
+The mechanism:
 
-### Glob Re-Exports
+1. `compute_reachable_set` records the glob in `glob_inlined` and marks `inner` in `glob_private_modules`.
+2. The render loop skips the private module block.
+3. In place of the `pub use inner::*;` line, `render_inline_children` emits `inner`'s items at the current indent level.
 
-A `pub use inner::*;` re-exports all public items from `inner`. This is
-commonly used in facade crates (e.g., `bevy`) where the public module structure
-differs from the internal organization.
+The private module segment does not appear in the canonical path of the inlined items — items inherit the re-exporting module's path.
 
-cargo-brief follows glob chains up to depth 8 with cycle detection. When a glob
-re-exports from a private module, the private module's items appear inlined at
-the re-export site.
+When a glob targets a **public** module, no inlining occurs: the public module renders normally and its items appear nested inside it.
 
+When a glob targets an **external crate** module, the walk cannot follow into the external module's internals; the `pub use source::*;` line is emitted verbatim. The `CrossCrateIndex` pipeline handles deeper expansion for known facade crates.
 
-## Glob Re-Export Inlining
+Glob chains are followed recursively up to depth 8 with cycle detection. {#260423-cross-crate-depth-guard}
 
-When a public module contains `pub use private_mod::*;` and `private_mod` is
-not itself public, cargo-brief applies **glob inlining**:
+> [!note] Implementation Gap · 2026-04-23
+> `pub(crate)` items from a re-exported source crate are suppressed during inlining. The inlining renderer hardcodes `same_crate = false` when expanding items from an external model, which hides `pub(crate)` items even in contexts where the source crate is the same as the target. This affects cross-crate named and glob re-export expansion only; intra-crate glob inlining is unaffected.
 
-- The private module is **not** rendered as a `mod private_mod { ... }` block
-- Instead, all public items from the private module appear directly in the
-  parent module that contains the glob re-export
-- The `pub use private_mod::*;` line itself is suppressed
-- The items appear as if they were defined directly in the parent module
+## Canonical Path Selection {#260423-canonical-path-selection}
 
-This is tracked via `ReachableInfo`:
+When an item is reachable via multiple re-export paths (as is common in facade crates like bevy or axum), cargo-brief selects the **canonical path** for display using these rules:
 
-- `glob_private_modules` -- the set of private modules reached only through glob
-  re-exports. The renderer skips these as module blocks.
-- `glob_inlined` -- maps each glob `pub use` item to the private module it
-  inlines. The renderer replaces the `use` line with the module's contents.
+1. **Prelude paths are deprioritized** — non-prelude paths win regardless of length.
+2. **Shortest path wins** — among non-prelude paths, the shortest accessible path is selected.
 
-The behavior can be suppressed with `--no-expand-glob`, which reverts to showing
-the raw `pub use path::*;` lines without inlining.
+The canonical path is what appears in `api`, `search`, and `summary` output. For example, `bevy::render::render_resource::AsBindGroup` rather than `bevy_render::render_resource::bind_group::AsBindGroup`.
 
-### Example
-
-Given this internal structure:
-
-```rust
-// src/lib.rs
-mod internal {
-    pub struct Widget { pub name: String }
-    pub fn create_widget() -> Widget;
-}
-pub use internal::*;
-```
-
-The cross-crate output is:
-
-```rust
-// crate my_crate
-pub struct Widget {
-    pub name: String,
-}
-pub fn create_widget() -> Widget;
-```
-
-The private `internal` module does not appear. Its items surface at the crate
-root where the glob re-export lives.
-
+This canonicalization is built by `CrossCrateIndex` / `build_cross_crate_index`, which walks the facade crate's public API top-down and tracks paths through both glob and named re-exports. Each item is deduplicated by `(source_crate, item_id)` pair.
 
 ## Visibility by Item Kind
 
-### Modules
-
-Modules are rendered as `mod name { ... }` blocks when within the recursion
-depth, or `mod name { /* ... */ }` stubs when at the depth limit. Visibility
-filtering applies to the module itself -- a `pub(crate)` module and all its
-contents are hidden in cross-crate view.
-
-Glob-private modules (private modules reached only through `pub use mod::*`)
-are a special case: the module block is suppressed and its contents are inlined
-at the parent.
-
-### Structs, Enums, Unions
-
-The type itself is visibility-checked. If visible:
-
-- **Struct fields**: each field is individually visibility-checked. Hidden fields
-  are replaced with `..` to indicate their presence without exposing details.
-- **Enum variants**: always shown if the enum is visible (variants have no
-  independent visibility in Rust).
-- **Union fields**: treated like struct fields.
-
-### Traits
-
-Visible if the trait item passes the visibility check. All associated items
-(methods, types, constants) within a visible trait are shown -- they inherit the
-trait's visibility.
-
-### Functions, Constants, Statics, Type Aliases
-
-Each is individually visibility-checked. Shown if visible from the observer.
-
-### Impl Blocks
-
-Impl blocks in rustdoc JSON have default visibility. Their rendering depends on
-the parent type:
-
-- **Inherent impls**: methods and associated items are individually
-  visibility-checked against the observer.
-- **Trait impls**: if the trait and the type are both visible, the impl is shown.
-  Simple trait impls (no associated items) are collapsed into per-type summary
-  comments unless `--all` is passed.
-
-### Re-Exports (use items)
-
-`pub use` items are shown if they are reachable (cross-crate view) or visible
-(same-crate view). In Phase 2 expansion (default), named re-exports are replaced
-by the full definition; glob re-exports are replaced by inlined contents.
+| Item kind | Visibility rule |
+|---|---|
+| Module | Checked against observer. Glob-private modules are suppressed entirely; their items are inlined at the parent. |
+| Struct / Enum / Union | Type checked first. Struct and union fields checked individually. Enum variants have no independent visibility. |
+| Trait | Checked against observer. Associated items inherit the trait's visibility. |
+| Fn / Const / Static / Type alias | Each item individually checked. |
+| Impl block | Always rendered when parent type is visible (Default-visibility bypass). Methods individually checked only for `pub` gate (field access). |
+| `pub use` (named) | Shown if reachable (cross-crate) or visible (same-crate). In default mode, replaced by the inlined full definition of the target item. |
+| `pub use` (glob, private source) | Suppressed; source items inlined at parent level. |
+| `pub use` (glob, public/external source) | Shown as `pub use source::*;` or rendered via `CrossCrateIndex`. |

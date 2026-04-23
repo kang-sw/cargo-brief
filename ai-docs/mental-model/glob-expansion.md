@@ -1,3 +1,14 @@
+---
+domain: Glob Re-Export Expansion
+description: String-based glob detection, Phase 1/2 inlining, coupling with render output
+sources:
+  - src/lib.rs
+  - src/render.rs
+related:
+  - visibility.md
+  - remote-pipeline.md
+---
+
 # Glob Re-Export Expansion
 
 ## Entry Points

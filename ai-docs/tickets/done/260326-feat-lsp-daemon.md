@@ -1,12 +1,13 @@
 ---
 title: "LSP daemon integration via rust-analyzer"
-related:
-  - 260326-feat-lsp-daemon-bootstrap  # sub-ticket: daemon bootstrap (done)
-  - 260326-feat-lsp-file-watcher      # sub-ticket: file watcher (done)
-  - 260326-feat-lsp-query-commands    # sub-ticket: query commands (done)
-  - 260327-refactor-lsp-fifo-ipc      # IPC refactor: UDS → FIFO (done)
+status: done
 started: 2026-03-26
 completed: 2026-03-27
+related:
+  260326-feat-lsp-daemon-bootstrap: "sub-ticket: daemon bootstrap (done)"
+  260326-feat-lsp-file-watcher: "sub-ticket: file watcher (done)"
+  260326-feat-lsp-query-commands: "sub-ticket: query commands (done)"
+  260327-refactor-lsp-fifo-ipc: "IPC refactor: UDS → FIFO (done)"
 ---
 
 # LSP daemon integration via rust-analyzer

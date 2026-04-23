@@ -4,3 +4,4 @@ test_workspace/target/
 /.claude/*
 !/.claude/skills/
 ai-docs/usability-baselines/
+ai-docs/**/*.local.md

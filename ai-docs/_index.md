@@ -1,3 +1,8 @@
+<!-- Memory policy: prune aggressively as project advances. Completed
+     work belongs in git history, not here. Keep only what an AI session
+     needs to orient itself and pick up work. If it's derivable from
+     code or git log, delete it from this file. -->
+
 # cargo-brief — Project State & Architecture
 
 ## What This Tool Is
@@ -75,15 +80,17 @@ Parsed via `rustdoc-types` 0.57. Post-macro-expansion output.
 
 ## Mental Model Documents
 
-Domain-oriented operational knowledge in `ai-docs/mental-model/`:
+Top-level index: `ai-docs/mental-model.md` (pipeline architecture, module contracts, coupling, extension points).
+
+Domain docs in `ai-docs/mental-model/`:
 
 | Document | Domain |
 |----------|--------|
-| `overview.md` | Pipeline paths (local/remote), module graph, shared coupling patterns |
 | `visibility.md` | Visibility resolution: `is_visible_from`, `same_crate` inference, observer normalization |
 | `target-resolution.md` | CLI → package/module resolution: 4-case algorithm, dual invocation, `--crates` bypass |
 | `remote-pipeline.md` | `--crates` lifecycle: TempDir borrow chain, version semantics, remote-only constraints |
 | `glob-expansion.md` | Glob re-export expansion: string-based detection, Phase 1/2 inlining, coupling with render |
+| `search.md` | Pattern parsing, leaf item walker, one-line-per-item renderer, cross-crate index search |
 | `testing.md` | Test infrastructure: BriefArgs coupling, fixture contracts, visibility test patterns |
 | `lsp-daemon.md` | LSP daemon: re-exec contract, FIFO IPC, flock serialization, idle timeout |
 

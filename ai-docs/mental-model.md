@@ -1,4 +1,4 @@
-# Overview
+# cargo-brief Mental Model
 
 ## Entry Points
 - `src/lib.rs` — `run_api_pipeline`, `run_search_pipeline`, `run_examples_pipeline`, `run_summary_pipeline`, `run_ts_pipeline`, and `run_code_pipeline` are the six pipeline entry points; `run_lsp_command` is the LSP entry point (cross-platform). Start here.

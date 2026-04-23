@@ -1,3 +1,17 @@
+---
+domain: Testing Infrastructure
+description: BriefArgs coupling, fixture contracts, visibility test patterns, in-process vs subprocess
+sources:
+  - tests/integration.rs
+  - tests/subprocess_integration.rs
+  - tests/workspace_integration.rs
+  - tests/external_crate_integration.rs
+  - tests/facade_crate_integration.rs
+  - tests/remote_crate_integration.rs
+related:
+  - visibility.md
+---
+
 # Testing Infrastructure
 
 ## Entry Points

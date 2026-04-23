@@ -7,9 +7,9 @@ plans:
   phase2: 2026-03/28-1033-lsp-process-abstraction
   phase3: 2026-03/28-1230-lsp-cfg-gate-removal
 related:
-  - 260326-feat-lsp-daemon-bootstrap  # original FIFO-based IPC
-  - 260326-feat-lsp-windows-support   # runtime testing deferred until Windows env available
-  - 260327-refactor-lsp-fifo-ipc      # prior FIFO refactoring
+  260326-feat-lsp-daemon-bootstrap: original FIFO-based IPC
+  260326-feat-lsp-windows-support: runtime testing deferred until Windows env available
+  260327-refactor-lsp-fifo-ipc: prior FIFO refactoring
 ---
 
 # LSP IPC refactoring: platform abstraction for cross-platform support

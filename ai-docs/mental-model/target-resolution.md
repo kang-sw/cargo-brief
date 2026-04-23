@@ -1,3 +1,13 @@
+---
+domain: Target Resolution
+description: "CLI to package/module resolution: 4-case algorithm, dual invocation, --crates bypass"
+sources:
+  - src/resolve.rs
+  - src/main.rs
+related:
+  - remote-pipeline.md
+---
+
 # Target Resolution
 
 ## Entry Points

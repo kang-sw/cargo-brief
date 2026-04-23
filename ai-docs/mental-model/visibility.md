@@ -1,3 +1,14 @@
+---
+domain: Visibility Resolution
+description: "is_visible_from() semantics, same_crate inference, observer normalization"
+sources:
+  - src/model.rs
+  - src/lib.rs
+  - src/render.rs
+related:
+  - target-resolution.md
+---
+
 # Visibility Resolution
 
 ## Entry Points

@@ -1,7 +1,6 @@
 ---
 title: "lsp: daemon dies silently within seconds of spawn"
 status: idea
-plans: null
 reported: 2026-03-29
 ---
 

@@ -1,9 +1,12 @@
 ---
 title: "LSP daemon: track rust-analyzer indexing status via $/progress"
+status: done
 started: 2026-03-27
 completed: 2026-03-27
+plans:
+  phase1: 2026-03/27-2130-lsp-indexing-status
 related:
-  - 260326-feat-lsp-windows-support  # same subsystem
+  260326-feat-lsp-windows-support: same subsystem
 ---
 
 ## Problem

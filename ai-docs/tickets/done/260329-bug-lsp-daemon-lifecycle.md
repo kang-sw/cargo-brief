@@ -1,12 +1,13 @@
 ---
 title: "Fix LSP daemon lifecycle: setsid + blocking touch"
-related:
-  - 260326-feat-lsp-daemon  # original daemon bootstrap
-  - 260327-feat-lsp-indexing-status  # indexing status tracking
-  - 260328-refactor-lsp-cross-platform-ipc  # cross-platform IPC
+status: done
+completed: 2026-03-29
 plans:
   phase-1-and-2: 2026-03/29-1500.lsp-daemon-lifecycle
-completed: 2026-03-29
+related:
+  260326-feat-lsp-daemon: original daemon bootstrap
+  260327-feat-lsp-indexing-status: indexing status tracking
+  260328-refactor-lsp-cross-platform-ipc: cross-platform IPC
 ---
 
 # Fix LSP daemon lifecycle: setsid + blocking touch

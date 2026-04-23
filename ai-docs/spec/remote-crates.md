@@ -1,262 +1,186 @@
 ---
-title: Remote Crate Support
-summary: >
-  Fetching, caching, and querying crates.io packages via the -C flag.
-  Covers crate spec syntax, version resolution, feature flags,
-  cache management, and cross-crate path discovery for facade crates.
-
+title: Remote Crates
+summary: How cargo-brief fetches and queries crates from crates.io — covering the -C flag, crate spec syntax, version resolution, cache directory structure and TTL semantics, feature selection, nightly toolchain detection, multi-version disambiguation, and cross-crate facade expansion.
 features:
   - The `-C` Flag
-    - Subcommand Compatibility
+  - Subcommand Compatibility
   - Crate Spec Syntax
-    - Module Path in Crate Specs
-  - Version Resolution
-    - 24-Hour API Cache
-    - Offline Fallback
-    - Ambiguous Version Resolution
+  - Module Path in Crate Spec
   - Feature Flags
-    - `--no-default-features`
-  - Cache Management
-    - Cache Location
-    - Cache Directory Naming
-    - Cache Contents
-    - `cargo brief clean [SPEC]`
-    - `--no-cache`
-  - Cross-Crate Accessible Paths
-    - How It Works
-    - Batch Pre-Warming
-    - Path Deduplication
-    - Affected Subcommands
+  - `--no-cache` Flag
+  - Version Resolution
+  - Cache Directory Location
+  - Cache Directory Naming
+  - Cache Invalidation and TTL
+  - Nightly Toolchain Detection
+  - Multi-Version Disambiguation
+  - Cross-Crate Facade Expansion
+  - Verbose Progress Reporting
 ---
 
-# Remote Crate Support
+# Remote Crates
 
-`cargo brief -C` switches the tool into remote mode, where the TARGET positional
-argument is interpreted as a crates.io package spec instead of a local workspace
-crate. A temporary or cached workspace is created with the requested crate as a
-dependency, and then the normal pipeline runs against it.
+`cargo brief` can query any crate from crates.io without adding it to the local workspace. The `-C` flag activates remote mode: cargo-brief resolves the crate version, creates a workspace in a persistent cache directory, generates rustdoc JSON via `cargo +nightly rustdoc`, and runs the same rendering pipeline used for local crates.
 
-## The `-C` Flag
+## The `-C` Flag {#260423-remote-mode-flag}
 
-`-C` (long form `--crates`) is a boolean global flag on `cargo brief`. It does
-not carry a value -- the crate spec comes from the TARGET positional argument of
-each subcommand.
+`-C` (long form `--crates`) is a global boolean flag that activates remote mode. When set, the TARGET positional argument is interpreted as a **crate spec** (see [Crate Spec Syntax](#260423-crate-spec-syntax)) rather than a local workspace package name.
 
 ```
-cargo brief -C api serde@1
+cargo brief -C api serde
 cargo brief -C search tokio@1 spawn
-cargo brief -C summary bevy@0.15
+cargo brief -C summary bevy
 ```
 
-When `-C` is active, TARGET resolution skips local workspace lookup entirely.
-The `self` and file-path syntaxes (`src/foo.rs`) are not valid in remote mode.
+`-C` is a global flag and applies to every subcommand. It must precede the subcommand name when used with `cargo brief -C <subcommand>`.
 
-### Subcommand Compatibility
+## Subcommand Compatibility {#260423-subcommand-compatibility}
 
-| Subcommand | `-C` supported | Notes |
-|------------|:-:|---|
-| `api`      | yes | Full pipeline including cross-crate resolution |
-| `search`   | yes | Full pipeline including cross-crate resolution |
-| `summary`  | yes | Full pipeline including cross-crate resolution |
-| `examples` | yes | Disk-only pipeline -- reads source files directly, no rustdoc JSON |
-| `ts`       | yes | Disk-only pipeline -- runs tree-sitter queries on source files |
-| `code`     | yes | Supports dep recursion into accessible dependencies |
-| `clean`    | n/a | Manages remote crate cache; does not take `-C` |
-| `lsp`      | no  | Rejects `-C` with an error |
+| Subcommand | `-C` support |
+|---|---|
+| `api` | Yes |
+| `search` | Yes |
+| `summary` | Yes |
+| `code` | Yes |
+| `examples` | Yes — scans source files of the fetched crate |
+| `ts` | Yes |
+| `lsp` | **No** — rejected at startup with an error |
+| `clean` | N/A — `clean` manages the cache itself; `-C` is not used |
 
-## Crate Spec Syntax
+## Crate Spec Syntax {#260423-crate-spec-syntax}
 
-The TARGET positional doubles as the crate spec when `-C` is active. Three
-forms are supported:
+Three spec forms are accepted:
 
-| Form | Example | Version requirement | Resolution |
-|------|---------|---------------------|------------|
-| Bare name | `serde` | `*` (latest non-yanked) | Resolved via crates.io API |
-| Partial version | `serde@1`, `tokio@1.0` | Semver range (`>=1.0.0, <2.0.0`) | Resolved via crates.io API |
-| Exact version | `serde@1.0.200` | Exact pin (`=1.0.200`) | No network call needed |
+| Form | Example | Version behavior |
+|---|---|---|
+| Bare name | `serde` | Latest non-yanked version |
+| Major or major.minor pin | `tokio@1`, `tokio@1.0` | Latest matching `^1` / `^1.0` SemVer range |
+| Exact pin | `serde@1.0.200` | Exact version — three numeric components trigger `=1.0.200` pinning |
 
-A version string with fewer than two dots is treated as a semver range (e.g.,
-`@1` matches `>=1.0.0, <2.0.0`; `@1.0` matches `>=1.0.0, <1.1.0`). A version
-with two or more dots is an exact pin.
+Three-component versions are automatically exact-pinned. One- and two-component versions use SemVer range matching. Yanked versions are never selected.
 
-### Module Path in Crate Specs
+## Module Path in Crate Spec {#260423-module-path-in-spec}
 
-A module path can be appended to the crate spec with `::`:
+For `api` and `summary`, a module path may be appended to the crate spec using `::`:
 
 ```
-cargo brief -C api tokio@1::net       # browse tokio's net module
-cargo brief -C api bevy@0.15::ecs     # browse bevy's ecs module (cross-crate)
+cargo brief -C api tokio@1::net
+cargo brief -C summary bevy::render
 ```
 
-Alternatively, the module path can be passed as a separate positional argument:
+The segment before `::` is the crate spec; the segment after is the module path passed to the rendering pipeline. For `search`, the pattern is a separate positional argument — the `::` form is not used.
+
+## Feature Flags {#260423-feature-flags}
+
+Two flags control feature selection for remote crates. Both require `-C`.
+
+`-F <FEATURES>` (long: `--features`) — comma-separated list of Cargo feature names to enable:
 
 ```
-cargo brief -C api tokio@1 net
-cargo brief -C -F net api tokio@1 net
+cargo brief -C api serde -F derive,alloc
 ```
 
-## Version Resolution
-
-When the crate spec is not an exact pin, cargo-brief queries the crates.io REST
-API (`/api/v1/crates/{name}`) to find the newest non-yanked version matching the
-requirement.
-
-### 24-Hour API Cache
-
-API responses are cached at `<cache-root>/versions/{name}.json`. A cached
-response younger than 24 hours is used without contacting crates.io. This means:
-
-- Bare specs (`serde`) and partial specs (`serde@1`) may serve a version that is
-  up to 24 hours stale.
-- Exact specs (`serde@1.0.200`) skip the API entirely -- no network call, no
-  cache TTL concern.
-- Running `cargo brief clean serde` removes the version cache for that crate,
-  forcing a fresh API call on the next invocation.
-
-### Offline Fallback
-
-If the crates.io API is unreachable, a stale cache (older than 24 hours) is used
-with a warning on stderr. If no cache exists and the network fails, the command
-errors with a suggestion to specify an exact version.
-
-### Ambiguous Version Resolution
-
-When multiple versions of a dependency exist in a workspace's `Cargo.lock`
-(e.g., `hashbrown 0.14` and `hashbrown 0.15`), cargo-brief auto-picks the
-highest semver version. If cargo itself reports a "specification is ambiguous"
-error during rustdoc JSON generation, the tool retries with a version-qualified
-spec (`name@version`).
-
-## Feature Flags
-
-`-F` / `--features` enables specific crate features. It requires `-C`.
+`--no-default-features` — disables the crate's default features:
 
 ```
-cargo brief -C -F rt,net,io-util api tokio@1
-cargo brief -C -F derive api serde@1
+cargo brief -C api serde --no-default-features -F alloc
 ```
 
-Features are comma-separated. They are passed to the generated workspace's
-`Cargo.toml` as `features = ["rt", "net", "io-util"]`.
+Feature names are sorted alphabetically when building the cache directory name, so `-F rt,net,macros` and `-F macros,net,rt` resolve to the same cache entry. There is no `--all-features` flag — feature names must be spelled out explicitly.
 
-### `--no-default-features`
+## `--no-cache` Flag {#260423-no-cache-flag}
 
-Disables the crate's default feature set. Requires `-C`. Can be combined with
-`-F` to enable only specific features:
+`--no-cache` forces a temporary workspace that is discarded when the process exits. No files persist to the cache directory. Version resolution still runs best-effort for the output header; any resolution failure is silently ignored and the process continues with whatever version cargo selects.
 
-```
-cargo brief -C --no-default-features -F derive api serde@1
-```
+This flag requires `-C`.
 
-Feature-gated items are invisible in the output unless the appropriate features
-are enabled. If an expected item is missing, try adding `-F full` or the
-relevant feature name.
+## Version Resolution {#260423-version-resolution}
 
-## Cache Management
+For non-exact specs, cargo-brief resolves the concrete version before creating the workspace:
 
-### Cache Location
+1. **Exact spec** (`=` prefix or three-component) — no network call; the version is used as-is.
+2. **24-hour version cache hit** — reads `$CACHE_DIR/versions/{name}.json`; selects the newest non-yanked version matching the SemVer requirement.
+3. **Cache miss or expired** — queries `https://crates.io/api/v1/crates/{name}` and writes the response to the version cache (best-effort; cache write failures are silent).
+4. **API failure with stale cache** — uses the stale cached data with a stderr warning: `Warning: using stale version cache for '{name}' (API unavailable: …)`.
+5. **No cache and API failure** — fails with: `Cannot resolve version for '{name}': … Try specifying an exact version (e.g., {name}@1.0.0) or check your internet connection.`
 
-Resolved workspaces are stored on disk so that subsequent invocations reuse
-build artifacts. The cache root is determined by:
+Only crates.io is supported. Private registries are not.
 
-1. `$CARGO_BRIEF_CACHE_DIR` (if set)
-2. `$XDG_CACHE_HOME/cargo-brief/crates/` (if `$XDG_CACHE_HOME` is set)
-3. `$HOME/.cache/cargo-brief/crates/` (default)
+## Cache Directory Location {#260423-cache-dir-location}
 
-### Cache Directory Naming
+The cache root is resolved in priority order:
 
-Each cached workspace uses a version-normalized directory name:
+1. `$CARGO_BRIEF_CACHE_DIR` — used verbatim when set.
+2. `$XDG_CACHE_HOME/cargo-brief/crates` — used when `XDG_CACHE_HOME` is set.
+3. `$HOME/.cache/cargo-brief/crates` — default fallback; uses `/tmp` if `HOME` is unset.
 
-```
-<cache-root>/serde[1.0.200]/
-<cache-root>/tokio[1.44.1]+macros+net+rt/
-<cache-root>/bevy[0.15.1]+bevy_winit+default/
-```
+`CARGO_BRIEF_CACHE_DIR` is the standard override for testing and CI environments.
 
-Format: `name[version]` with optional `+feature` suffixes (alphabetically
-sorted). Changing the version or feature set produces a new directory --
-different specs never collide.
+## Cache Directory Naming {#260423-cache-dir-naming}
 
-### Cache Contents
-
-Each cached directory contains:
-- `Cargo.toml` -- generated workspace manifest with the crate as a dependency
-- `src/lib.rs` -- empty placeholder
-- `Cargo.lock` -- generated by cargo on first build
-- `target/` -- cargo build artifacts, including rustdoc JSON output
-
-### `cargo brief clean [SPEC]`
-
-Manages cached workspaces.
+Each cached workspace occupies one directory under the cache root:
 
 ```
-cargo brief clean            # remove entire cache directory
-cargo brief clean serde      # remove all serde versions + version cache
-cargo brief clean tokio      # remove all tokio versions + version cache
+$CACHE_DIR/
+  versions/
+    serde.json                       # crates.io API response, 24-hour TTL
+  serde[1.0.217]/                    # workspace — no additional features
+  tokio[1.44.1]+macros+net+rt/       # features sorted alphabetically, joined with +
+    Cargo.toml                       # exact-pinned dependency (=1.44.1)
+    src/lib.rs                       # empty dummy crate
+    Cargo.lock                       # written by cargo on first build
+    target/doc/tokio.json            # rustdoc JSON output
+    target/doc/tokio.bin             # bincode parse cache
 ```
 
-When a SPEC is given, all directories matching the crate name prefix are removed
-(e.g., `clean serde` removes `serde[1.0.200]`, `serde[1.0.228]`, etc.). The
-version API cache (`versions/{name}.json`) is also removed, forcing a fresh
-lookup on the next invocation.
+Directory name format: `{name}[{resolved_version}]` with features appended as `+feat1+feat2` in alphabetical order. Different crate specs that resolve to the same version and feature set share one directory. The workspace `Cargo.toml` pins the version exactly (`={resolved_version}`) to prevent cargo from selecting a different version on subsequent builds.
 
-When no SPEC is given, the entire cache root is removed.
+## Cache Invalidation and TTL {#260423-cache-invalidation-ttl}
 
-Removed paths and their sizes (in MB) are printed to stderr.
+| Cache layer | TTL / invalidation |
+|---|---|
+| Version response (`versions/{name}.json`) | 24 hours from file mtime |
+| rustdoc JSON (`target/doc/{name}.json`) | No TTL — reused indefinitely |
+| Bincode parse cache (`target/doc/{name}.bin`) | Regenerated when absent or older than the `.json` |
 
-### `--no-cache`
+rustdoc JSON is never automatically invalidated when a new crate version is released. The only invalidation paths are `cargo brief clean <name>` (removes the named workspace) or `cargo brief clean` (removes the entire cache). See the `clean` subcommand in [CLI Surface](cli-surface.md#260423-clean-subcommand).
 
-The `--no-cache` flag (requires `-C`) uses a temporary directory instead of the
-persistent cache. The workspace is cleaned up when the command finishes.
+## Nightly Toolchain Detection {#260423-toolchain-detection}
 
-Version resolution is best-effort in `--no-cache` mode -- if the API call fails,
-the command proceeds with whatever version cargo resolves, rather than erroring
-immediately.
+Before the first `cargo rustdoc` call per process, cargo-brief checks whether the required toolchain (default: `nightly`) is installed:
 
-## Cross-Crate Accessible Paths
+- **TTY mode** — if stderr is a terminal and the toolchain is missing, an interactive prompt (`[y/N]`) offers to run `rustup toolchain install {toolchain}` immediately.
+- **Non-TTY mode** — fails with: `The '{toolchain}' toolchain is not installed. Install it with: rustup toolchain install {toolchain}`.
+- **`rustup` absent** — fails with: `rustup is not installed. Install it from https://rustup.rs/ then run: rustup toolchain install {toolchain}`.
 
-Facade crates like `bevy` and `axum` re-export items from internal sub-crates.
-Without cross-crate resolution, users would see raw internal paths like
-`bevy_render::render_resource::bind_group::AsBindGroup`. With it, items appear
-under their user-facing paths: `render::render_resource::AsBindGroup`.
+The check runs at most once per process invocation.
 
-### How It Works
+## Multi-Version Disambiguation {#260423-multi-version-disambiguation}
 
-When cargo-brief detects that a crate's root module has public re-exports
-pointing to external sub-crates (glob `pub use bevy_internal::*` or named
-`pub use bevy_ecs as ecs`), it automatically:
+Workspaces with multiple versions of the same crate in their dependency tree (common in facade crates like `bevy`) cause `cargo rustdoc -p {name}` to fail with an ambiguous-specification error. cargo-brief handles this automatically:
 
-1. Generates rustdoc JSON for each referenced sub-crate
-2. Walks the re-export tree top-down, tracking the accessible path at each level
-3. Builds a unified index where each item has its shortest non-prelude path
+1. Detects the ambiguous-specification error in cargo's stderr output.
+2. Parses the candidate `name@version` specs from stderr.
+3. Selects the highest semver match and retries with the version-qualified spec.
 
-This runs automatically for both local and remote crates -- no user flag is
-needed.
+If auto-selection also fails, cargo-brief emits: `Multiple versions of '{name}' exist and auto-resolution failed. Use \`name@version\` to disambiguate.`
 
-### Batch Pre-Warming
+## Cross-Crate Facade Expansion {#260423-cross-crate-facade-expansion}
 
-For crates with many sub-crate dependencies (e.g., bevy has dozens), cargo-brief
-batches rustdoc JSON generation. Instead of running `cargo rustdoc` once per
-sub-crate, it runs `cargo doc -p a -p b -p c ...` in a single invocation per
-BFS level (max depth 8). This is significantly faster for large facade crates.
+Facade crates (e.g., `bevy`, `axum`, `serde`) re-export items from sub-crates. cargo-brief follows these re-exports automatically for `api`, `search`, and `summary` queries:
 
-Sub-crate names are validated against the workspace's `Cargo.lock` before being
-passed to cargo. Crates with multiple versions in the lockfile are
-disambiguated with version-qualified specs.
+1. The primary crate's public API is walked top-down.
+2. Both glob (`pub use sub_crate::*`) and named (`pub use sub_crate::Item`) re-exports into external crates are followed.
+3. Each reachable item is assigned an **accessible path** reflecting how a user would write the `use` statement through the facade (e.g., `bevy::render::render_resource::AsBindGroup` rather than `bevy_render::render_resource::bind_group::AsBindGroup`).
+4. When an item is reachable via multiple paths, the shortest non-prelude path wins.
+5. Sub-crate rustdoc JSON files are generated and cached on demand, with cache hits reused transparently.
 
-Individual sub-crate generation remains as a fallback if batch generation fails
-for any package.
+The re-export follow depth is capped at 8 levels with cycle detection. `--no-expand-glob` disables cross-crate glob expansion. See [Output Format](output-format.md#260423-glob-reexport-rendering) for rendering rules and [Visibility Semantics](visibility.md#260423-cross-crate-depth-guard) for the depth guard.
 
-### Path Deduplication
+## Verbose Progress Reporting {#260423-verbose-remote-progress}
 
-When the same item is reachable through multiple paths (e.g., via the prelude
-and via the module tree), the shortest non-prelude path is kept. Prelude paths
-are deprioritized -- a path through `ecs::system::Query` is preferred over
-`prelude::Query`.
+With `--verbose`, cargo-brief reports remote pipeline activity to stderr:
 
-### Affected Subcommands
-
-Cross-crate path resolution applies to `api`, `search`, and `summary`. The
-`code` subcommand uses a separate BFS (`discover_accessible_deps`) to find
-accessible dependency source directories. The `examples` and `ts` subcommands
-operate on source files only and do not use the cross-crate index.
+- Before a multi-crate `cargo doc` invocation for cross-crate sub-crate discovery: `[cargo-brief] Batch generating rustdoc JSON for N crate(s): crate1, crate2, …`
+- `cargo doc` and `cargo rustdoc` stderr is inherited, streaming real-time compilation output.
+- Cache hits for previously-generated rustdoc JSON are reported per crate.

@@ -1,3 +1,13 @@
+---
+domain: Search Module
+description: Pattern parsing, leaf item walker, one-line-per-item renderer, cross-crate index search
+sources:
+  - src/search.rs
+  - src/lib.rs
+related:
+  - visibility.md
+---
+
 # Search Module
 
 ## Entry Points

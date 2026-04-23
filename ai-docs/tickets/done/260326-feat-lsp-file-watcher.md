@@ -1,10 +1,13 @@
 ---
 title: "LSP daemon: file watcher integration"
 status: done
+parent: 260326-feat-lsp-daemon
 completed: 2026-03-26
+plans:
+  phase1: 2026-03/26-1830-lsp-file-watcher
 related:
-  - 260326-feat-lsp-daemon             # parent
-  - 260326-feat-lsp-daemon-bootstrap   # prerequisite
+  260326-feat-lsp-daemon: parent
+  260326-feat-lsp-daemon-bootstrap: prerequisite
 ---
 
 # LSP daemon: file watcher integration
