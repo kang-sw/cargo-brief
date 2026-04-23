@@ -314,13 +314,24 @@ pub fn resolve_crate_version(workspace_dir: &Path, crate_name: &str) -> Option<S
 }
 
 /// Extract the features map for a specific version from a crates.io API JSON response.
+///
+/// Merges `features2` into `features` so that `dep:` weak-dependency aliases are included.
 fn extract_features_from_api_response(json_str: &str, version: &str) -> Option<serde_json::Value> {
     let parsed: serde_json::Value = serde_json::from_str(json_str).ok()?;
     let versions = parsed.get("versions")?.as_array()?;
     for entry in versions {
         if entry.get("num")?.as_str() == Some(version) {
-            // features may be absent on older crates; return null → empty map
-            return Some(entry.get("features").cloned().unwrap_or(serde_json::Value::Null));
+            let mut features = entry
+                .get("features")
+                .and_then(|v| v.as_object())
+                .cloned()
+                .unwrap_or_default();
+            if let Some(features2) = entry.get("features2").and_then(|v| v.as_object()) {
+                for (k, v) in features2 {
+                    features.entry(k.clone()).or_insert_with(|| v.clone());
+                }
+            }
+            return Some(serde_json::Value::Object(features));
         }
     }
     None

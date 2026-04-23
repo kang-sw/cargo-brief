@@ -31,6 +31,7 @@ fn either_args() -> ApiArgs {
             compact: false,
             verbose_metadata: false,
             all: false,
+            no_feature_gates: false,
         },
         global: GlobalArgs {
             toolchain: "nightly".to_string(),

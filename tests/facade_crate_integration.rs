@@ -29,6 +29,7 @@ fn facade_args(crate_name: &str) -> ApiArgs {
             compact: false,
             verbose_metadata: false,
             all: false,
+            no_feature_gates: false,
         },
         global: GlobalArgs {
             toolchain: "nightly".to_string(),

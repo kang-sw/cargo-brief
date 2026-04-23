@@ -31,6 +31,7 @@ fn remote_args(spec: &str) -> (ApiArgs, RemoteOpts) {
             compact: false,
             verbose_metadata: false,
             all: false,
+            no_feature_gates: false,
         },
         global: GlobalArgs {
             toolchain: "nightly".to_string(),
