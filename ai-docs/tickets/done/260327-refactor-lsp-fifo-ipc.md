@@ -1,11 +1,14 @@
 ---
 title: "LSP daemon: replace UDS with FIFO-based IPC for sandbox compatibility"
-related:
-  - 260326-feat-lsp-daemon-bootstrap   # original UDS implementation
-  - 260326-feat-lsp-query-commands     # query commands using current IPC
-  - 260326-feat-lsp-windows-support    # shares IPC abstraction concern
+status: done
 started: 2026-03-27
 completed: 2026-03-27
+plans:
+  phase1: 2026-03/27-0138-lsp-fifo-ipc
+related:
+  260326-feat-lsp-daemon-bootstrap: original UDS implementation
+  260326-feat-lsp-query-commands: query commands using current IPC
+  260326-feat-lsp-windows-support: shares IPC abstraction concern
 ---
 
 # LSP daemon: FIFO-based IPC

@@ -1,7 +1,6 @@
 ---
 title: "search: glob patterns fail to match short names due to full-path anchoring"
 status: idea
-plans: null
 reported: 2026-03-29
 ---
 

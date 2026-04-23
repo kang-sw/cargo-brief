@@ -1,11 +1,15 @@
 ---
 title: "LSP daemon: query commands (references, blast-radius, call-hierarchy)"
+status: done
+parent: 260326-feat-lsp-daemon
 started: 2026-03-26
 completed: 2026-03-26
+plans:
+  phase2: 2026-03/26-2230-lsp-query-commands-p2
 related:
-  - 260326-feat-lsp-daemon             # parent
-  - 260326-feat-lsp-daemon-bootstrap   # prerequisite
-  - 260326-feat-lsp-file-watcher       # recommended but not blocking
+  260326-feat-lsp-daemon: parent
+  260326-feat-lsp-daemon-bootstrap: prerequisite
+  260326-feat-lsp-file-watcher: recommended but not blocking
 ---
 
 # LSP daemon: query commands

@@ -2,8 +2,10 @@
 title: "LSP daemon: improve spawn failure diagnostics"
 status: done
 completed: 2026-03-26
+plans:
+  phase1: 2026-03/26-1900-lsp-daemon-spawn-diagnostics
 related:
-  - 260326-feat-lsp-daemon-bootstrap  # original implementation
+  260326-feat-lsp-daemon-bootstrap: original implementation
 ---
 
 # LSP daemon: improve spawn failure diagnostics

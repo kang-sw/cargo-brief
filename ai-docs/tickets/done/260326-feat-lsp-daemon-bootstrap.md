@@ -1,6 +1,10 @@
 ---
 title: "LSP daemon: process lifecycle, UDS, ra bootstrap"
+status: done
+parent: 260326-feat-lsp-daemon
 completed: 2026-03-26
+plans:
+  phase1: 2026-03/26-1944-lsp-daemon-bootstrap
 ---
 
 # LSP daemon: process lifecycle, UDS, ra bootstrap
