@@ -15,6 +15,8 @@ features:
   - Nightly Toolchain Detection
   - Multi-Version Disambiguation
   - Cross-Crate Facade Expansion
+  - Remote Feature Graph
+    - Offline Fallback
   - Verbose Progress Reporting
 ---
 
@@ -44,6 +46,7 @@ cargo brief -C summary bevy
 | `code` | Yes |
 | `examples` | Yes — scans source files of the fetched crate |
 | `ts` | Yes |
+| `features` | Yes — shows the remote crate's feature graph |
 | `lsp` | **No** — rejected at startup with an error |
 | `clean` | N/A — `clean` manages the cache itself; `-C` is not used |
 
@@ -87,6 +90,8 @@ cargo brief -C api serde --no-default-features -F alloc
 ```
 
 Feature names are sorted alphabetically when building the cache directory name, so `-F rt,net,macros` and `-F macros,net,rt` resolve to the same cache entry. There is no `--all-features` flag — feature names must be spelled out explicitly.
+
+Feature names are validated against the remote crate's feature graph before invoking `cargo rustdoc`. See [-F pre-validation](cli-surface.md#260423-feature-flag-validation) in the CLI Surface spec for error format and did-you-mean behavior.
 
 ## `--no-cache` Flag {#260423-no-cache-flag}
 
@@ -176,6 +181,23 @@ Facade crates (e.g., `bevy`, `axum`, `serde`) re-export items from sub-crates. c
 5. Sub-crate rustdoc JSON files are generated and cached on demand, with cache hits reused transparently.
 
 The re-export follow depth is capped at 8 levels with cycle detection. `--no-expand-glob` disables cross-crate glob expansion. See [Output Format](output-format.md#260423-glob-reexport-rendering) for rendering rules and [Visibility Semantics](visibility.md#260423-cross-crate-depth-guard) for the depth guard.
+
+## Remote Feature Graph {#260423-remote-feature-graph}
+
+When querying a remote crate, cargo-brief fetches the crate's feature graph from the crates.io API alongside the version resolution call. The feature graph is used for two purposes:
+
+1. **Feature-gate annotations** in `api` output — items behind `#[cfg(feature = "...")]` are annotated (see [Feature-Gate Annotations](output-format.md#260423-feature-gate-annotations)).
+2. **`-F` pre-validation** — requested feature names are validated before invoking `cargo rustdoc`.
+
+The feature graph is built by merging the `features` and `features2` fields from the crates.io API response. `features2` stores weak-dependency aliases that use the `dep:` prefix syntax; without merging, those aliases would be silently absent. {#260423-feature-graph-offline-fallback}
+
+### Offline Fallback
+
+If the crates.io API call fails (network unavailable, rate-limited, or malformed response), cargo-brief continues without a feature graph:
+
+- Feature-gate annotations are silently omitted from `api` output — no error is raised.
+- `-F` pre-validation is skipped — the raw feature list is forwarded to cargo unchanged.
+- The `features` subcommand in remote mode exits with an error (a feature graph is its only output).
 
 ## Verbose Progress Reporting {#260423-verbose-remote-progress}
 
