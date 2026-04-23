@@ -1,3 +1,17 @@
+---
+domain: LSP Daemon
+description: Re-exec contract, FIFO IPC, flock serialization, idle timeout, rust-analyzer lifecycle
+sources:
+  - src/lsp/mod.rs
+  - src/lsp/daemon.rs
+  - src/lsp/client.rs
+  - src/lsp/ipc/mod.rs
+  - src/lsp/watcher.rs
+  - src/lsp/query.rs
+related:
+  - testing.md
+---
+
 # LSP Daemon
 
 ## Entry Points

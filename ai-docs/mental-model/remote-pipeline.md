@@ -1,3 +1,15 @@
+---
+domain: Remote Pipeline
+description: "--crates lifecycle: TempDir borrow chain, version semantics, remote-only constraints"
+sources:
+  - src/lib.rs
+  - src/remote.rs
+  - src/cross_crate.rs
+related:
+  - target-resolution.md
+  - glob-expansion.md
+---
+
 # Remote Pipeline
 
 ## Entry Points
