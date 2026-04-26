@@ -4,6 +4,8 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [0.11.2] - 2026-04-26
+
 ### Fixed
 
 - **`summary` now follows named `pub use` of modules.** Crates that re-export a
