@@ -2447,6 +2447,52 @@ fn test_summary_reexport_counted_as_target_kind() {
     );
 }
 
+#[test]
+fn test_summary_named_module_reexport_external_view() {
+    // `pub use facade_inner::facade_pub;` (where `facade_inner` is private) should
+    // surface `facade_pub` as a module line in the external-view summary, with the
+    // counts of the items it re-exports. Mirrors aws-smithy-http-client's
+    // `pub use client::proxy;` pattern, where `client` is pub(crate).
+    let model = fixture_model();
+    let reachable = compute_reachable_set(&model);
+    let output = summary::render_summary(&model, None, false, Some(&reachable));
+
+    let mod_line = output
+        .lines()
+        .find(|l| l.starts_with("mod facade_pub;"))
+        .unwrap_or_else(|| panic!("named module re-export should appear:\n{output}"));
+    assert!(
+        mod_line.contains("structs"),
+        "facade_pub should report struct count from re-exported module:\n{mod_line}"
+    );
+    assert!(
+        mod_line.contains("fns"),
+        "facade_pub should report fn count from re-exported module:\n{mod_line}"
+    );
+    assert!(
+        mod_line.contains("traits"),
+        "facade_pub should report trait count from re-exported module:\n{mod_line}"
+    );
+
+    // The private parent must NOT appear in external view.
+    assert!(
+        !output.contains("mod facade_inner"),
+        "private parent module must not leak into external summary:\n{output}"
+    );
+}
+
+#[test]
+fn test_summary_named_module_reexport_same_crate() {
+    // Same-crate (privacy-aware) view should also show the alias-named module line.
+    let model = fixture_model();
+    let output = summary::render_summary(&model, None, true, None);
+
+    assert!(
+        output.lines().any(|l| l.starts_with("mod facade_pub;")),
+        "named module re-export should appear in same-crate summary:\n{output}"
+    );
+}
+
 // === Search Kind Filter Tests ===
 
 #[test]

@@ -122,6 +122,47 @@ fn count_module_items(
             continue;
         }
 
+        // Named `pub use` of a module (e.g. `pub use private_mod::sub_pub;`):
+        // treat as an inline module declaration under the alias and recurse into
+        // the target's children so its items appear in the summary.
+        if let ItemEnum::Use(use_item) = &child.inner
+            && !use_item.is_glob
+            && let Some(target_id) = use_item.id.as_ref()
+            && let Some(target) = model.krate.index.get(target_id)
+            && matches!(&target.inner, ItemEnum::Module(_))
+        {
+            let alias = child
+                .name
+                .as_deref()
+                .filter(|s| !s.is_empty())
+                .unwrap_or(use_item.name.as_str());
+            let child_path = if current_path == root_path {
+                alias.to_string()
+            } else {
+                let rel = current_path
+                    .strip_prefix(root_path)
+                    .and_then(|s| s.strip_prefix("::"))
+                    .unwrap_or(current_path);
+                format!("{rel}::{alias}")
+            };
+
+            module_summaries.entry(child_path).or_default();
+
+            let full_child_path = format!("{current_path}::{alias}");
+            count_module_items(
+                model,
+                target,
+                &full_child_path,
+                root_path,
+                observer,
+                same_crate,
+                reachable,
+                root_summary,
+                module_summaries,
+            );
+            continue;
+        }
+
         if let ItemEnum::Module(_) = &child.inner {
             let is_glob_private =
                 reachable.is_some_and(|info| info.glob_private_modules.contains(child_id));

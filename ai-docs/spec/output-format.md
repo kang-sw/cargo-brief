@@ -453,3 +453,4 @@ Rules:
 - All `//` comments align to the same column (padded).
 - Empty modules (zero visible items) are omitted entirely.
 - For cross-crate facade crates, sub-crate module lines are prefixed with the accessible path: `mod render::render_resource; // ...`.
+- Named module re-exports (e.g. `pub use private_parent::sub_pub;` where the parent is private but the submodule is `pub`) appear as a `mod <alias>;` line under the alias, with counts of items reachable through the re-export. Mirrors the access path a downstream user observes.

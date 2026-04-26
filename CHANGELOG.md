@@ -2,6 +2,18 @@
 
 All notable changes to this project will be documented in this file.
 
+## [Unreleased]
+
+### Fixed
+
+- **`summary` now follows named `pub use` of modules.** Crates that re-export a
+  submodule of a private parent (e.g. `aws-smithy-http-client`'s
+  `pub use client::proxy;` / `pub use client::tls;` where `client` is `pub(crate)`)
+  previously rendered as `// root: ...` only — every re-exported module's contents
+  were silently dropped. The summary now emits `mod proxy;` / `mod tls;` lines with
+  item counts, matching the access path downstream users observe. The reachability
+  walk and the summary renderer were both updated.
+
 ## [0.11.1] - 2026-04-23
 
 ### Changed

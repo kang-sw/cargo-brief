@@ -291,6 +291,27 @@ pub(crate) mod hidden_reexport {
 
 pub use hidden_reexport::*;
 
+// --- Named module re-export from a private parent module ---
+// Mirrors aws-smithy-http-client's `pub use client::proxy;` pattern:
+// the parent (`facade_inner`) is private, but its public submodule
+// (`facade_pub`) is re-exported at the crate root by name.
+mod facade_inner {
+    pub mod facade_pub {
+        pub struct FacadeStruct {
+            pub field: i32,
+        }
+
+        pub fn facade_fn() -> i32 {
+            0
+        }
+
+        pub trait FacadeTrait {
+            fn facade_method(&self);
+        }
+    }
+}
+pub use facade_inner::facade_pub;
+
 // --- Cross-crate glob re-export chain ---
 // test-fixture → glob-source → glob-inner (2-level chain)
 pub use glob_source::*;
