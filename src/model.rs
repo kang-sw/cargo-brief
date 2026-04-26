@@ -348,11 +348,7 @@ fn walk_public(
                         && let Some(target) = model.krate.index.get(target_id)
                         && matches!(target.inner, ItemEnum::Module(_))
                     {
-                        let alias = child
-                            .name
-                            .as_deref()
-                            .filter(|s| !s.is_empty())
-                            .unwrap_or(use_item.name.as_str());
+                        let alias = child.name.as_deref().unwrap_or(&use_item.name);
                         let child_res = format!("{resolution_path}::{alias}");
                         let child_can = format!("{canonical_path}::{alias}");
                         walk_public(model, target, &child_res, &child_can, info);

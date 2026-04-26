@@ -1,4 +1,4 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashSet};
 
 use rustdoc_types::{Id, Item, ItemEnum, Visibility};
 
@@ -117,6 +117,28 @@ fn count_module_items(
     root_summary: &mut ModuleSummary,
     module_summaries: &mut BTreeMap<String, ModuleSummary>,
 ) {
+    // Pre-collect module IDs reached via visible named pub use re-exports.
+    // The Module arm below uses this to skip modules that were already processed,
+    // preventing double-counting when the same module appears as both a direct
+    // `pub mod` child and a named `pub use` re-export in the same parent scope.
+    let use_module_ids: HashSet<&Id> = model
+        .module_children(module_item)
+        .into_iter()
+        .filter(|(child_id, child)| {
+            is_item_visible(child, child_id, observer, same_crate, reachable, model)
+        })
+        .filter_map(|(_, child)| match &child.inner {
+            ItemEnum::Use(u) if !u.is_glob => u.id.as_ref().filter(|target_id| {
+                model
+                    .krate
+                    .index
+                    .get(*target_id)
+                    .is_some_and(|t| matches!(t.inner, ItemEnum::Module(_)))
+            }),
+            _ => None,
+        })
+        .collect();
+
     for (child_id, child) in model.module_children(module_item) {
         if !is_item_visible(child, child_id, observer, same_crate, reachable, model) {
             continue;
@@ -129,13 +151,9 @@ fn count_module_items(
             && !use_item.is_glob
             && let Some(target_id) = use_item.id.as_ref()
             && let Some(target) = model.krate.index.get(target_id)
-            && matches!(&target.inner, ItemEnum::Module(_))
+            && matches!(target.inner, ItemEnum::Module(_))
         {
-            let alias = child
-                .name
-                .as_deref()
-                .filter(|s| !s.is_empty())
-                .unwrap_or(use_item.name.as_str());
+            let alias = child.name.as_deref().unwrap_or(&use_item.name);
             let child_path = if current_path == root_path {
                 alias.to_string()
             } else {
@@ -164,6 +182,11 @@ fn count_module_items(
         }
 
         if let ItemEnum::Module(_) = &child.inner {
+            // Skip modules already handled via the named pub use branch above.
+            if use_module_ids.contains(child_id) {
+                continue;
+            }
+
             let is_glob_private =
                 reachable.is_some_and(|info| info.glob_private_modules.contains(child_id));
 

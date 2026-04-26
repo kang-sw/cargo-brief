@@ -2461,17 +2461,19 @@ fn test_summary_named_module_reexport_external_view() {
         .lines()
         .find(|l| l.starts_with("mod facade_pub;"))
         .unwrap_or_else(|| panic!("named module re-export should appear:\n{output}"));
+    // facade_pub contains exactly 1 struct, 1 fn, 1 trait — assert exact counts
+    // so inflation (double-counting) or deflation (items silently dropped) are caught.
     assert!(
-        mod_line.contains("structs"),
-        "facade_pub should report struct count from re-exported module:\n{mod_line}"
+        mod_line.contains("1 structs"),
+        "facade_pub should report exactly 1 struct:\n{mod_line}"
     );
     assert!(
-        mod_line.contains("fns"),
-        "facade_pub should report fn count from re-exported module:\n{mod_line}"
+        mod_line.contains("1 fns"),
+        "facade_pub should report exactly 1 fn:\n{mod_line}"
     );
     assert!(
-        mod_line.contains("traits"),
-        "facade_pub should report trait count from re-exported module:\n{mod_line}"
+        mod_line.contains("1 traits"),
+        "facade_pub should report exactly 1 trait:\n{mod_line}"
     );
 
     // The private parent must NOT appear in external view.
@@ -2483,13 +2485,41 @@ fn test_summary_named_module_reexport_external_view() {
 
 #[test]
 fn test_summary_named_module_reexport_same_crate() {
-    // Same-crate (privacy-aware) view should also show the alias-named module line.
+    // Same-crate (privacy-aware) view should also show the alias-named module line,
+    // with correct item counts and no double-listing of the same root-level module.
     let model = fixture_model();
     let output = summary::render_summary(&model, None, true, None);
 
+    let mod_line = output
+        .lines()
+        .find(|l| l.starts_with("mod facade_pub;"))
+        .unwrap_or_else(|| {
+            panic!("named module re-export should appear in same-crate summary:\n{output}")
+        });
+
+    // facade_pub contains exactly 1 struct, 1 fn, 1 trait — assert exact counts
+    // so double-counting (items visited twice due to both Use and Module arms) is caught.
     assert!(
-        output.lines().any(|l| l.starts_with("mod facade_pub;")),
-        "named module re-export should appear in same-crate summary:\n{output}"
+        mod_line.contains("1 structs"),
+        "facade_pub should report exactly 1 struct in same-crate view:\n{mod_line}"
+    );
+    assert!(
+        mod_line.contains("1 fns"),
+        "facade_pub should report exactly 1 fn in same-crate view:\n{mod_line}"
+    );
+    assert!(
+        mod_line.contains("1 traits"),
+        "facade_pub should report exactly 1 trait in same-crate view:\n{mod_line}"
+    );
+
+    // The root-level alias must not be listed more than once under the same name.
+    let root_facade_pub_count = output
+        .lines()
+        .filter(|l| l.starts_with("mod facade_pub;"))
+        .count();
+    assert_eq!(
+        root_facade_pub_count, 1,
+        "facade_pub should appear exactly once as a root-level module:\n{output}"
     );
 }
 
