@@ -117,13 +117,17 @@ fn count_module_items(
     root_summary: &mut ModuleSummary,
     module_summaries: &mut BTreeMap<String, ModuleSummary>,
 ) {
+    // Bind once — module_children allocates a Vec; all other call sites bind once
+    // and reuse. The pre-pass borrows via .iter().copied(); the main loop consumes.
+    let children = model.module_children(module_item);
+
     // Pre-collect module IDs reached via visible named pub use re-exports.
     // The Module arm below uses this to skip modules that were already processed,
     // preventing double-counting when the same module appears as both a direct
     // `pub mod` child and a named `pub use` re-export in the same parent scope.
-    let use_module_ids: HashSet<&Id> = model
-        .module_children(module_item)
-        .into_iter()
+    let use_module_ids: HashSet<&Id> = children
+        .iter()
+        .copied()
         .filter(|(child_id, child)| {
             is_item_visible(child, child_id, observer, same_crate, reachable, model)
         })
@@ -139,7 +143,7 @@ fn count_module_items(
         })
         .collect();
 
-    for (child_id, child) in model.module_children(module_item) {
+    for (child_id, child) in children {
         if !is_item_visible(child, child_id, observer, same_crate, reachable, model) {
             continue;
         }

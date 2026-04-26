@@ -309,8 +309,19 @@ mod facade_inner {
             fn facade_method(&self);
         }
     }
+
+    // Zero public items — re-exported to verify that empty modules are suppressed.
+    pub mod facade_empty {}
+
+    // Re-exported under a different name to exercise the rename-alias path
+    // (child.name = "facade_alias" differs from the module's own name "facade_renamed").
+    pub mod facade_renamed {
+        pub struct RenamedStruct;
+    }
 }
 pub use facade_inner::facade_pub;
+pub use facade_inner::facade_empty; // zero items → must be suppressed in summary
+pub use facade_inner::facade_renamed as facade_alias; // alias name must appear, not "facade_renamed"
 
 // --- Cross-crate glob re-export chain ---
 // test-fixture → glob-source → glob-inner (2-level chain)

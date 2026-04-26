@@ -2523,6 +2523,48 @@ fn test_summary_named_module_reexport_same_crate() {
     );
 }
 
+#[test]
+fn test_summary_named_module_reexport_rename_alias() {
+    // `pub use facade_inner::facade_renamed as facade_alias;` exercises the alias-name
+    // path where child.name ("facade_alias") differs from the module's own name
+    // ("facade_renamed"). A bug using use_item.name instead of child.name would surface
+    // the wrong name.
+    let model = fixture_model();
+    let reachable = compute_reachable_set(&model);
+    let output = summary::render_summary(&model, None, false, Some(&reachable));
+
+    // Must appear under the alias name.
+    assert!(
+        output.lines().any(|l| l.starts_with("mod facade_alias;")),
+        "renamed re-export should appear under alias name:\n{output}"
+    );
+    // Must NOT appear under the module's own name.
+    assert!(
+        !output.lines().any(|l| l.starts_with("mod facade_renamed;")),
+        "renamed module's own name must not leak into summary:\n{output}"
+    );
+}
+
+#[test]
+fn test_summary_named_module_reexport_empty_suppressed() {
+    // `pub use facade_inner::facade_empty;` — the re-exported module has no public items
+    // and must be suppressed (not emitted as a `mod` line) in both views.
+    let model = fixture_model();
+    let reachable = compute_reachable_set(&model);
+
+    let external = summary::render_summary(&model, None, false, Some(&reachable));
+    assert!(
+        !external.contains("mod facade_empty"),
+        "empty re-exported module must not appear in external summary:\n{external}"
+    );
+
+    let same_crate = summary::render_summary(&model, None, true, None);
+    assert!(
+        !same_crate.contains("mod facade_empty"),
+        "empty re-exported module must not appear in same-crate summary:\n{same_crate}"
+    );
+}
+
 // === Search Kind Filter Tests ===
 
 #[test]
