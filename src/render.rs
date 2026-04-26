@@ -211,8 +211,17 @@ pub fn render_single_inlined_item(
                 continue;
             }
             // Check dedup but don't insert yet — only insert on successful render.
-            // A source crate that can't render the item (e.g., proc macro crate)
-            // must not block other source crates from trying.
+            // A source crate that can't render the item must not block other source
+            // crates from trying.
+            //
+            // seen_names is populated only after a successful render (see below).
+            // Proc-macros are intentionally excluded from that population step so
+            // that a same-named trait from another source crate (e.g. serde's
+            // `Serialize` derive macro + `Serialize` trait) can still render.
+            // Proc-macro crates cannot export traits, so this scenario cannot be
+            // exercised by a self-contained fixture; it requires a serde-style setup
+            // where a regular crate re-exports both a derive macro (from a proc-macro
+            // dep) and a same-named trait.
             if seen_names.contains(name) {
                 return None;
             }
@@ -1714,7 +1723,7 @@ fn render_proc_macro(item: &Item, pm: &ProcMacro, indent: &str, vis: &str, outpu
         }
         MacroKind::Attr => {
             output.push_str(&format!("{indent}#[proc_macro_attribute]\n"));
-            output.push_str(&format!("{indent}{vis}macro {name}! {{ /* ... */ }}\n"));
+            output.push_str(&format!("{indent}{vis}macro {name} {{ /* ... */ }}\n"));
         }
         MacroKind::Derive => {
             if pm.helpers.is_empty() {
