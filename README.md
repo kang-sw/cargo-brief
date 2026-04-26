@@ -1,5 +1,10 @@
 # cargo-brief
 
+[![Crates.io](https://img.shields.io/crates/v/cargo-brief.svg)](https://crates.io/crates/cargo-brief)
+[![Downloads](https://img.shields.io/crates/d/cargo-brief.svg)](https://crates.io/crates/cargo-brief)
+[![Docs.rs](https://docs.rs/cargo-brief/badge.svg)](https://docs.rs/cargo-brief)
+[![License: MPL-2.0](https://img.shields.io/badge/License-MPL--2.0-blue.svg)](https://opensource.org/licenses/MPL-2.0)
+
 Visibility-aware Rust API extractor — pseudo-Rust output for AI agent consumption.
 
 ## Why?
