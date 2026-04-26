@@ -145,8 +145,8 @@ Domain docs in `ai-docs/mental-model/`:
 - Pipeline: All pipelines take `(args, &RemoteOpts)`. Build `PipelineContext` (local or remote), then call shared pipeline. Remote branching: `if remote.crates { ... spec from args.target.crate_name ... }`
 - CLI types: `ApiArgs`, `SearchArgs`, `ExamplesArgs`, `SummaryArgs`, `TsArgs`, `CodeArgs`, `CleanArgs`, `LspArgs` + shared `TargetArgs`/`FilterArgs`/`GlobalArgs` + `RemoteOpts` (plain struct, not clap)
 - Modules: `cli`, `code`, `cross_crate`, `examples`, `lsp`, `remote`, `resolve`, `rustdoc_json`, `model`, `render`, `search`, `summary`, `ts`
-- Test fixture: `test_fixture/` (workspace with `glob-source`/`glob-inner`/`named-source` sub-crates for cross-crate glob and named re-export testing)
-- Integration tests: `tests/integration.rs` (224 tests)
+- Test fixture: `test_fixture/` (workspace with `glob-source`/`glob-inner`/`named-source` sub-crates for cross-crate glob and named re-export testing; also contains `facade_inner`/`facade_pub`/`facade_empty`/`facade_alias` fixtures for named Use→Module re-export through private parents)
+- Integration tests: `tests/integration.rs` (245 tests)
 
 ## Documented Dependencies
 
