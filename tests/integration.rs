@@ -2447,6 +2447,124 @@ fn test_summary_reexport_counted_as_target_kind() {
     );
 }
 
+#[test]
+fn test_summary_named_module_reexport_external_view() {
+    // `pub use facade_inner::facade_pub;` (where `facade_inner` is private) should
+    // surface `facade_pub` as a module line in the external-view summary, with the
+    // counts of the items it re-exports. Mirrors aws-smithy-http-client's
+    // `pub use client::proxy;` pattern, where `client` is pub(crate).
+    let model = fixture_model();
+    let reachable = compute_reachable_set(&model);
+    let output = summary::render_summary(&model, None, false, Some(&reachable));
+
+    let mod_line = output
+        .lines()
+        .find(|l| l.starts_with("mod facade_pub;"))
+        .unwrap_or_else(|| panic!("named module re-export should appear:\n{output}"));
+    // facade_pub contains exactly 1 struct, 1 fn, 1 trait — assert exact counts
+    // so inflation (double-counting) or deflation (items silently dropped) are caught.
+    assert!(
+        mod_line.contains("1 structs"),
+        "facade_pub should report exactly 1 struct:\n{mod_line}"
+    );
+    assert!(
+        mod_line.contains("1 fns"),
+        "facade_pub should report exactly 1 fn:\n{mod_line}"
+    );
+    assert!(
+        mod_line.contains("1 traits"),
+        "facade_pub should report exactly 1 trait:\n{mod_line}"
+    );
+
+    // The private parent must NOT appear in external view.
+    assert!(
+        !output.contains("mod facade_inner"),
+        "private parent module must not leak into external summary:\n{output}"
+    );
+}
+
+#[test]
+fn test_summary_named_module_reexport_same_crate() {
+    // Same-crate (privacy-aware) view should also show the alias-named module line,
+    // with correct item counts and no double-listing of the same root-level module.
+    let model = fixture_model();
+    let output = summary::render_summary(&model, None, true, None);
+
+    let mod_line = output
+        .lines()
+        .find(|l| l.starts_with("mod facade_pub;"))
+        .unwrap_or_else(|| {
+            panic!("named module re-export should appear in same-crate summary:\n{output}")
+        });
+
+    // facade_pub contains exactly 1 struct, 1 fn, 1 trait — assert exact counts
+    // so double-counting (items visited twice due to both Use and Module arms) is caught.
+    assert!(
+        mod_line.contains("1 structs"),
+        "facade_pub should report exactly 1 struct in same-crate view:\n{mod_line}"
+    );
+    assert!(
+        mod_line.contains("1 fns"),
+        "facade_pub should report exactly 1 fn in same-crate view:\n{mod_line}"
+    );
+    assert!(
+        mod_line.contains("1 traits"),
+        "facade_pub should report exactly 1 trait in same-crate view:\n{mod_line}"
+    );
+
+    // The root-level alias must not be listed more than once under the same name.
+    let root_facade_pub_count = output
+        .lines()
+        .filter(|l| l.starts_with("mod facade_pub;"))
+        .count();
+    assert_eq!(
+        root_facade_pub_count, 1,
+        "facade_pub should appear exactly once as a root-level module:\n{output}"
+    );
+}
+
+#[test]
+fn test_summary_named_module_reexport_rename_alias() {
+    // `pub use facade_inner::facade_renamed as facade_alias;` exercises the alias-name
+    // path where child.name ("facade_alias") differs from the module's own name
+    // ("facade_renamed"). A bug using use_item.name instead of child.name would surface
+    // the wrong name.
+    let model = fixture_model();
+    let reachable = compute_reachable_set(&model);
+    let output = summary::render_summary(&model, None, false, Some(&reachable));
+
+    // Must appear under the alias name.
+    assert!(
+        output.lines().any(|l| l.starts_with("mod facade_alias;")),
+        "renamed re-export should appear under alias name:\n{output}"
+    );
+    // Must NOT appear under the module's own name.
+    assert!(
+        !output.lines().any(|l| l.starts_with("mod facade_renamed;")),
+        "renamed module's own name must not leak into summary:\n{output}"
+    );
+}
+
+#[test]
+fn test_summary_named_module_reexport_empty_suppressed() {
+    // `pub use facade_inner::facade_empty;` — the re-exported module has no public items
+    // and must be suppressed (not emitted as a `mod` line) in both views.
+    let model = fixture_model();
+    let reachable = compute_reachable_set(&model);
+
+    let external = summary::render_summary(&model, None, false, Some(&reachable));
+    assert!(
+        !external.contains("mod facade_empty"),
+        "empty re-exported module must not appear in external summary:\n{external}"
+    );
+
+    let same_crate = summary::render_summary(&model, None, true, None);
+    assert!(
+        !same_crate.contains("mod facade_empty"),
+        "empty re-exported module must not appear in same-crate summary:\n{same_crate}"
+    );
+}
+
 // === Search Kind Filter Tests ===
 
 #[test]
