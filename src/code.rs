@@ -25,6 +25,9 @@ pub enum ItemKind {
     Type,
     Impl,
     Macro,
+    ProcMacro,
+    ProcAttrMacro,
+    ProcDeriveMacro,
     Const,
     Use,
 }
@@ -41,6 +44,9 @@ impl ItemKind {
             "type" => Some(Self::Type),
             "impl" => Some(Self::Impl),
             "macro" => Some(Self::Macro),
+            "proc-macro" => Some(Self::ProcMacro),
+            "attr-macro" => Some(Self::ProcAttrMacro),
+            "derive-macro" => Some(Self::ProcDeriveMacro),
             "const" => Some(Self::Const),
             "use" => Some(Self::Use),
             _ => None,
@@ -58,6 +64,9 @@ impl ItemKind {
             Self::Type => "type",
             Self::Impl => "impl",
             Self::Macro => "macro",
+            Self::ProcMacro => "proc-macro",
+            Self::ProcAttrMacro => "attr-macro",
+            Self::ProcDeriveMacro => "derive-macro",
             Self::Const => "const",
             Self::Use => "use",
         }
@@ -127,7 +136,7 @@ pub fn resolve_code_args(args: &CodeArgs) -> Result<ResolvedCodeArgs> {
                     name: name.clone(),
                 }),
                 None => bail!(
-                    "Unknown item kind '{}'. Valid kinds: fn, struct, enum, trait, field, type, impl, macro, const, use",
+                    "Unknown item kind '{}'. Valid kinds: fn, struct, enum, trait, field, type, impl, macro, proc-macro, attr-macro, derive-macro, const, use",
                     kind_str
                 ),
             }
@@ -176,6 +185,12 @@ fn build_query(kind: Option<ItemKind>) -> String {
         ItemKind::Macro => {
             parts.push("(macro_definition name: (identifier) @name) @item");
         }
+        // Proc-macros are pub fn items in source, decorated with #[proc_macro*].
+        // tree-sitter-rust has no dedicated node for them; match as function_item.
+        ItemKind::ProcMacro | ItemKind::ProcAttrMacro | ItemKind::ProcDeriveMacro => {
+            parts.push("(function_item name: (identifier) @name) @item");
+            parts.push("(function_signature_item name: (identifier) @name) @item");
+        }
         ItemKind::Const => {
             parts.push("(const_item name: (identifier) @name) @item");
             parts.push("(static_item name: (identifier) @name) @item");
@@ -194,7 +209,9 @@ fn build_query(kind: Option<ItemKind>) -> String {
     if let Some(k) = kind {
         add(&mut parts, k);
     } else {
-        // Catch-all: all kinds except Use (reduces noise)
+        // Catch-all: all kinds except Use (reduces noise).
+        // ProcMacro/ProcAttrMacro/ProcDeriveMacro intentionally omitted — their
+        // tree-sitter pattern (function_item) is identical to Fn and already included.
         for k in [
             ItemKind::Fn,
             ItemKind::Struct,

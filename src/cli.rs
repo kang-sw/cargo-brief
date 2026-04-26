@@ -514,7 +514,7 @@ pub struct FilterArgs {
     #[arg(long, help_heading = "Filtering")]
     pub no_unions: bool,
 
-    /// Exclude macros
+    /// Exclude macros and proc-macros (bang, attribute, derive)
     #[arg(long, help_heading = "Filtering")]
     pub no_macros: bool,
 

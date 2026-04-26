@@ -4570,3 +4570,131 @@ fn test_features_offline_bails_with_user_error() {
     let _ = result;
     unsafe { std::env::remove_var("CARGO_BRIEF_CACHE_DIR") };
 }
+
+// === Proc-macro tests ===
+
+fn proc_macro_api_args() -> ApiArgs {
+    ApiArgs {
+        target: TargetArgs {
+            crate_name: "proc-macro-fixture".to_string(),
+            module_path: None,
+            at_package: None,
+            at_mod: None,
+            manifest_path: Some("test_fixture/Cargo.toml".to_string()),
+        },
+        filter: default_filter(),
+        global: GlobalArgs {
+            toolchain: "nightly".to_string(),
+            verbose: false,
+        },
+        depth: 1,
+        recursive: true,
+        no_expand_glob: false,
+    }
+}
+
+fn proc_macro_summary_args() -> SummaryArgs {
+    SummaryArgs {
+        target: TargetArgs {
+            crate_name: "proc-macro-fixture".to_string(),
+            module_path: None,
+            at_package: None,
+            at_mod: None,
+            manifest_path: Some("test_fixture/Cargo.toml".to_string()),
+        },
+        global: GlobalArgs {
+            toolchain: "nightly".to_string(),
+            verbose: false,
+        },
+    }
+}
+
+#[test]
+fn test_proc_macro_api_bang() {
+    let output = cargo_brief::run_api_pipeline(&proc_macro_api_args(), &RemoteOpts::default())
+        .expect("api pipeline failed for proc-macro-fixture");
+
+    assert!(
+        output.contains("#[proc_macro]"),
+        "bang proc-macro should render #[proc_macro] attribute:\n{output}"
+    );
+    assert!(
+        output.contains("my_bang"),
+        "bang proc-macro name should appear in api output:\n{output}"
+    );
+}
+
+#[test]
+fn test_proc_macro_api_attr() {
+    let output = cargo_brief::run_api_pipeline(&proc_macro_api_args(), &RemoteOpts::default())
+        .expect("api pipeline failed for proc-macro-fixture");
+
+    assert!(
+        output.contains("#[proc_macro_attribute]"),
+        "attribute proc-macro should render #[proc_macro_attribute]:\n{output}"
+    );
+    assert!(
+        output.contains("my_attr"),
+        "attribute proc-macro name should appear in api output:\n{output}"
+    );
+}
+
+#[test]
+fn test_proc_macro_api_derive() {
+    let output = cargo_brief::run_api_pipeline(&proc_macro_api_args(), &RemoteOpts::default())
+        .expect("api pipeline failed for proc-macro-fixture");
+
+    assert!(
+        output.contains("#[proc_macro_derive(MyDerive"),
+        "derive proc-macro should render #[proc_macro_derive(...)]:\n{output}"
+    );
+    assert!(
+        output.contains("my_helper"),
+        "helper attribute should appear in derive render:\n{output}"
+    );
+}
+
+#[test]
+fn test_proc_macro_summary_counts() {
+    let output =
+        cargo_brief::run_summary_pipeline(&proc_macro_summary_args(), &RemoteOpts::default())
+            .expect("summary pipeline failed for proc-macro-fixture");
+
+    assert!(
+        output.contains("proc_macros") || output.contains("attr_macros") || output.contains("derive_macros"),
+        "summary should report at least one proc-macro kind count:\n{output}"
+    );
+    assert!(
+        output.contains("1 proc_macros"),
+        "summary should count 1 bang proc-macro:\n{output}"
+    );
+    assert!(
+        output.contains("1 attr_macros"),
+        "summary should count 1 attribute proc-macro:\n{output}"
+    );
+    assert!(
+        output.contains("1 derive_macros"),
+        "summary should count 1 derive proc-macro:\n{output}"
+    );
+}
+
+#[test]
+fn test_proc_macro_no_macros_flag() {
+    let mut args = proc_macro_api_args();
+    args.filter.no_macros = true;
+    let output = cargo_brief::run_api_pipeline(&args, &RemoteOpts::default())
+        .expect("api pipeline failed for proc-macro-fixture with --no-macros");
+
+    assert!(
+        !output.contains("#[proc_macro]"),
+        "--no-macros should suppress bang proc-macros:\n{output}"
+    );
+    assert!(
+        !output.contains("#[proc_macro_attribute]"),
+        "--no-macros should suppress attribute proc-macros:\n{output}"
+    );
+    assert!(
+        !output.contains("#[proc_macro_derive"),
+        "--no-macros should suppress derive proc-macros:\n{output}"
+    );
+}
