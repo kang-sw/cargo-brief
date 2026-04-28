@@ -4,6 +4,26 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [0.12.0] - 2026-04-29
+
+### Added
+
+- **Proc-macro support across all subcommands.** Proc-macro crates (bang `name!(...)`,
+  attribute `#[name]`, and derive `#[derive(Name)]` kinds) were previously invisible to
+  cargo-brief. All five subcommands now surface them:
+  - `api` renders each kind with its appropriate leading attribute
+    (`#[proc_macro]`, `#[proc_macro_attribute]`, `#[proc_macro_derive(...)]`) followed
+    by a `pub macro` pseudo-Rust declaration.
+  - `search` emits kind-prefixed one-liners: `proc_macro path::name!;`,
+    `attr_macro #[path::name];`, `derive_macro #[derive(path::Name)];`.
+  - `summary` counts proc-macro kinds separately as `proc_macros`, `attr_macros`,
+    `derive_macros`.
+  - `code` accepts `proc-macro`, `attr-macro`, and `derive-macro` as KIND arguments.
+  - Cross-crate search and `api` include proc-macro items from dependency crates.
+- **`--no-macros` now suppresses all four macro kinds**: `macro_rules!` and the three
+  proc-macro kinds (bang, attribute, derive). Previously only `macro_rules!` items
+  were suppressed.
+
 ## [0.11.2] - 2026-04-26
 
 ### Fixed
