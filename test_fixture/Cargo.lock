@@ -18,6 +18,10 @@ name = "named-source"
 version = "0.1.0"
 
 [[package]]
+name = "proc-macro-fixture"
+version = "0.1.0"
+
+[[package]]
 name = "test-fixture"
 version = "0.1.0"
 dependencies = [

@@ -7,7 +7,7 @@
 use std::collections::HashSet;
 
 use rustdoc_types::{
-    Attribute, Id, Item, ItemEnum, Struct, StructKind, Type, VariantKind, Visibility,
+    Attribute, Id, Item, ItemEnum, MacroKind, Struct, StructKind, Type, VariantKind, Visibility,
 };
 
 use crate::cli::FilterArgs;
@@ -36,6 +36,9 @@ pub(crate) enum LeafKind {
     Static,
     TypeAlias,
     Macro,
+    ProcMacro,
+    ProcAttrMacro,
+    ProcDeriveMacro,
     AssocType,
     AssocConst,
     Use,
@@ -57,6 +60,9 @@ impl LeafKind {
                 | (LeafKind::Static, "static")
                 | (LeafKind::TypeAlias, "type")
                 | (LeafKind::Macro, "macro")
+                | (LeafKind::ProcMacro, "proc-macro")
+                | (LeafKind::ProcAttrMacro, "attr-macro")
+                | (LeafKind::ProcDeriveMacro, "derive-macro")
                 | (LeafKind::AssocType, "type")
                 | (LeafKind::AssocConst, "const")
                 | (LeafKind::Use, "use")
@@ -77,9 +83,12 @@ impl LeafKind {
             LeafKind::Static => 8,
             LeafKind::TypeAlias => 9,
             LeafKind::Macro => 10,
-            LeafKind::AssocType => 11,
-            LeafKind::AssocConst => 12,
-            LeafKind::Use => 13,
+            LeafKind::ProcMacro => 11,
+            LeafKind::ProcAttrMacro => 12,
+            LeafKind::ProcDeriveMacro => 13,
+            LeafKind::AssocType => 14,
+            LeafKind::AssocConst => 15,
+            LeafKind::Use => 16,
         }
     }
 }
@@ -766,6 +775,19 @@ fn walk_module<'a>(
                     context: LeafContext::None,
                 });
             }
+            ItemEnum::ProcMacro(pm) if !args.no_macros => {
+                let kind = match pm.kind {
+                    MacroKind::Bang => LeafKind::ProcMacro,
+                    MacroKind::Attr => LeafKind::ProcAttrMacro,
+                    MacroKind::Derive => LeafKind::ProcDeriveMacro,
+                };
+                leaves.push(LeafItem {
+                    path: child_path,
+                    item: child,
+                    kind,
+                    context: LeafContext::None,
+                });
+            }
             ItemEnum::Use(use_item) if !use_item.is_glob => {
                 // Follow the re-export target to check --no-* filters
                 let target = use_item
@@ -783,6 +805,7 @@ fn walk_module<'a>(
                         ItemEnum::Static(_) => args.no_constants,
                         ItemEnum::TypeAlias(_) => args.no_aliases,
                         ItemEnum::Macro(_) => args.no_macros,
+                        ItemEnum::ProcMacro(_) => args.no_macros,
                         _ => false,
                     })
                     .unwrap_or(false);
@@ -1039,6 +1062,15 @@ pub(crate) fn render_leaf(
         LeafKind::TypeAlias => render_type_alias_leaf(output, leaf),
         LeafKind::Macro => {
             output.push_str(&format!("macro {}!;\n", leaf.path));
+        }
+        LeafKind::ProcMacro => {
+            output.push_str(&format!("proc_macro {}!;\n", leaf.path));
+        }
+        LeafKind::ProcAttrMacro => {
+            output.push_str(&format!("attr_macro #[{}];\n", leaf.path));
+        }
+        LeafKind::ProcDeriveMacro => {
+            output.push_str(&format!("derive_macro #[derive({})];\n", leaf.path));
         }
         LeafKind::AssocType => render_assoc_type_leaf(output, leaf),
         LeafKind::AssocConst => render_assoc_const_leaf(output, leaf),
@@ -1458,6 +1490,9 @@ pub fn search_cross_crate_index(
             AccessibleItemKind::Constant => LeafKind::Constant,
             AccessibleItemKind::Static => LeafKind::Static,
             AccessibleItemKind::Macro => LeafKind::Macro,
+            AccessibleItemKind::ProcMacro => LeafKind::ProcMacro,
+            AccessibleItemKind::ProcAttrMacro => LeafKind::ProcAttrMacro,
+            AccessibleItemKind::ProcDeriveMacro => LeafKind::ProcDeriveMacro,
             AccessibleItemKind::Module => continue,
         };
 
@@ -1712,7 +1747,10 @@ fn should_skip_kind(kind: AccessibleItemKind, filter: &FilterArgs) -> bool {
         AccessibleItemKind::Union => filter.no_unions,
         AccessibleItemKind::TypeAlias => filter.no_aliases,
         AccessibleItemKind::Constant | AccessibleItemKind::Static => filter.no_constants,
-        AccessibleItemKind::Macro => filter.no_macros,
+        AccessibleItemKind::Macro
+        | AccessibleItemKind::ProcMacro
+        | AccessibleItemKind::ProcAttrMacro
+        | AccessibleItemKind::ProcDeriveMacro => filter.no_macros,
         AccessibleItemKind::Module => false,
     }
 }

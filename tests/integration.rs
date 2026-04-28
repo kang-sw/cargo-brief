@@ -4570,3 +4570,182 @@ fn test_features_offline_bails_with_user_error() {
     let _ = result;
     unsafe { std::env::remove_var("CARGO_BRIEF_CACHE_DIR") };
 }
+
+// === Proc-macro tests ===
+
+fn proc_macro_api_args() -> ApiArgs {
+    ApiArgs {
+        target: TargetArgs {
+            crate_name: "proc-macro-fixture".to_string(),
+            module_path: None,
+            at_package: None,
+            at_mod: None,
+            manifest_path: Some("test_fixture/Cargo.toml".to_string()),
+        },
+        filter: default_filter(),
+        global: GlobalArgs {
+            toolchain: "nightly".to_string(),
+            verbose: false,
+        },
+        depth: 1,
+        recursive: true,
+        no_expand_glob: false,
+    }
+}
+
+fn proc_macro_summary_args() -> SummaryArgs {
+    SummaryArgs {
+        target: TargetArgs {
+            crate_name: "proc-macro-fixture".to_string(),
+            module_path: None,
+            at_package: None,
+            at_mod: None,
+            manifest_path: Some("test_fixture/Cargo.toml".to_string()),
+        },
+        global: GlobalArgs {
+            toolchain: "nightly".to_string(),
+            verbose: false,
+        },
+    }
+}
+
+#[test]
+fn test_proc_macro_api() {
+    let output = cargo_brief::run_api_pipeline(&proc_macro_api_args(), &RemoteOpts::default())
+        .expect("api pipeline failed for proc-macro-fixture");
+
+    // bang
+    assert!(
+        output.contains("#[proc_macro]\npub macro my_bang! {"),
+        "bang proc-macro should render #[proc_macro] and bang syntax:\n{output}"
+    );
+    // attribute
+    assert!(
+        output.contains("#[proc_macro_attribute]\npub macro my_attr {"),
+        "attribute proc-macro should render without bang syntax:\n{output}"
+    );
+    // derive
+    assert!(
+        output.contains(
+            "#[proc_macro_derive(MyDerive, attributes(my_helper))]\npub macro MyDerive {"
+        ),
+        "derive proc-macro should render helper attributes and derive syntax:\n{output}"
+    );
+}
+
+#[test]
+fn test_proc_macro_summary_counts() {
+    let output =
+        cargo_brief::run_summary_pipeline(&proc_macro_summary_args(), &RemoteOpts::default())
+            .expect("summary pipeline failed for proc-macro-fixture");
+
+    assert!(
+        output.contains("1 proc_macros"),
+        "summary should count 1 bang proc-macro:\n{output}"
+    );
+    assert!(
+        output.contains("1 attr_macros"),
+        "summary should count 1 attribute proc-macro:\n{output}"
+    );
+    assert!(
+        output.contains("1 derive_macros"),
+        "summary should count 1 derive proc-macro:\n{output}"
+    );
+}
+
+#[test]
+fn test_proc_macro_no_macros_flag() {
+    let mut args = proc_macro_api_args();
+    args.filter.no_macros = true;
+    let output = cargo_brief::run_api_pipeline(&args, &RemoteOpts::default())
+        .expect("api pipeline failed for proc-macro-fixture with --no-macros");
+
+    assert!(
+        !output.contains("#[proc_macro]"),
+        "--no-macros should suppress bang proc-macros:\n{output}"
+    );
+    assert!(
+        !output.contains("#[proc_macro_attribute]"),
+        "--no-macros should suppress attribute proc-macros:\n{output}"
+    );
+    assert!(
+        !output.contains("#[proc_macro_derive"),
+        "--no-macros should suppress derive proc-macros:\n{output}"
+    );
+}
+
+#[test]
+fn test_proc_macro_search() {
+    let args = SearchArgs {
+        crate_name: "proc-macro-fixture".to_string(),
+        patterns: vec!["my".to_string()],
+        filter: default_filter(),
+        global: GlobalArgs {
+            toolchain: "nightly".to_string(),
+            verbose: false,
+        },
+        at_package: None,
+        at_mod: None,
+        manifest_path: Some("test_fixture/Cargo.toml".to_string()),
+        limit: None,
+        methods_of: None,
+        search_kind: None,
+        members: false,
+    };
+    let output = cargo_brief::run_search_pipeline(&args, &RemoteOpts::default())
+        .expect("search pipeline failed for proc-macro-fixture");
+
+    assert!(
+        output.contains("proc_macro") && output.contains("my_bang!"),
+        "bang proc-macro should appear as 'proc_macro ...my_bang!;':\n{output}"
+    );
+    assert!(
+        output.contains("attr_macro") && output.contains("#[") && output.contains("my_attr]"),
+        "attribute proc-macro should appear as 'attr_macro #[my_attr];':\n{output}"
+    );
+    assert!(
+        output.contains("derive_macro") && output.contains("MyDerive"),
+        "derive proc-macro should appear as 'derive_macro #[derive(MyDerive)];':\n{output}"
+    );
+}
+
+#[test]
+fn test_proc_macro_code_kinds() {
+    // Proc-macros are `pub fn` items in source, so the tree-sitter query for
+    // proc-macro/attr-macro/derive-macro kinds matches function_item nodes.
+    let base_args = CodeArgs {
+        args: vec![],
+        global: GlobalArgs {
+            toolchain: "nightly".to_string(),
+            verbose: false,
+        },
+        manifest_path: Some("test_fixture/Cargo.toml".to_string()),
+        src_only: false,
+        no_deps: true,
+        all_deps: false,
+        limit: None,
+        quiet: false,
+        refs: false,
+        refs_only: false,
+        in_type: None,
+    };
+
+    for (kind, name) in [
+        ("proc-macro", "my_bang"),
+        ("attr-macro", "my_attr"),
+        ("derive-macro", "my_derive"),
+    ] {
+        let mut args = base_args.clone();
+        args.args = vec![
+            "proc-macro-fixture".to_string(),
+            kind.to_string(),
+            name.to_string(),
+        ];
+        let output = cargo_brief::run_code_pipeline(&args, &RemoteOpts::default())
+            .unwrap_or_else(|e| panic!("code pipeline failed for {kind} {name}: {e}"));
+        assert!(
+            output.contains(name),
+            "code {kind} {name} should find function definition:\n{output}"
+        );
+    }
+}

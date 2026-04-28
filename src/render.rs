@@ -2,8 +2,8 @@ use std::collections::{BTreeMap, HashSet};
 
 use rustdoc_types::{
     Attribute, Constant, Enum, Function, GenericArg, GenericArgs, GenericBound,
-    GenericParamDefKind, Id, Impl, Item, ItemEnum, ReprKind, Static, Struct, StructKind, Term,
-    Trait, Type, TypeAlias, Union, VariantKind, Visibility, WherePredicate,
+    GenericParamDefKind, Id, Impl, Item, ItemEnum, MacroKind, ProcMacro, ReprKind, Static, Struct,
+    StructKind, Term, Trait, Type, TypeAlias, Union, VariantKind, Visibility, WherePredicate,
 };
 
 use crate::cfg_parse::{parse_cfg_attribute, reconstruct_cfg_attr};
@@ -211,14 +211,24 @@ pub fn render_single_inlined_item(
                 continue;
             }
             // Check dedup but don't insert yet — only insert on successful render.
-            // A source crate that can't render the item (e.g., proc macro crate)
-            // must not block other source crates from trying.
+            // A source crate that can't render the item must not block other source
+            // crates from trying.
+            //
+            // seen_names is populated only after a successful render (see below).
+            // Proc-macros are intentionally excluded from that population step so
+            // that a same-named trait from another source crate (e.g. serde's
+            // `Serialize` derive macro + `Serialize` trait) can still render.
+            // Proc-macro crates cannot export traits, so this scenario cannot be
+            // exercised by a self-contained fixture; it requires a serde-style setup
+            // where a regular crate re-exports both a derive macro (from a proc-macro
+            // dep) and a same-named trait.
             if seen_names.contains(name) {
                 return None;
             }
 
             let mut output = String::new();
             let mut impl_ids = Vec::new();
+            let mut rendered_is_proc_macro = false;
 
             if let ItemEnum::Use(use_item) = &child.inner {
                 if let Some(target_id) = &use_item.id
@@ -230,6 +240,7 @@ pub fn render_single_inlined_item(
                     if !should_render_item(target_item, filter) {
                         return None;
                     }
+                    rendered_is_proc_macro = matches!(target_item.inner, ItemEnum::ProcMacro(_));
                     render_item(
                         model,
                         target_item,
@@ -246,6 +257,7 @@ pub fn render_single_inlined_item(
                 if !should_render_item(child, filter) {
                     return None;
                 }
+                rendered_is_proc_macro = matches!(child.inner, ItemEnum::ProcMacro(_));
                 render_item(
                     model,
                     child,
@@ -261,11 +273,15 @@ pub fn render_single_inlined_item(
 
             render_inlined_impl_blocks(model, filter, &observer, &impl_ids, "", &mut output);
             if !output.is_empty() {
-                seen_names.insert(name.to_string());
+                // Proc-macros share names with traits (e.g. the `Serialize` derive macro
+                // and the `Serialize` trait both named "Serialize" in serde). Don't claim
+                // the name so a same-named trait from another source crate can still expand.
+                if !rendered_is_proc_macro {
+                    seen_names.insert(name.to_string());
+                }
                 return Some(output);
             }
-            // Render produced nothing (e.g., proc macro) — don't claim the name,
-            // let other source crates try
+            // Render produced nothing — don't claim the name, let other source crates try
         }
     }
     None
@@ -547,6 +563,11 @@ pub fn render_leaf_not_found(
             ItemEnum::Static(_) => "static",
             ItemEnum::Union(_) => "union",
             ItemEnum::Macro(_) => "macro",
+            ItemEnum::ProcMacro(pm) => match pm.kind {
+                MacroKind::Bang => "proc-macro",
+                MacroKind::Attr => "attr-macro",
+                MacroKind::Derive => "derive-macro",
+            },
             ItemEnum::Use(_) => "use",
             _ => "item",
         };
@@ -709,6 +730,7 @@ fn should_render_item(item: &Item, args: &FilterArgs) -> bool {
         ItemEnum::Static(_) => !args.no_constants,
         ItemEnum::Union(_) => !args.no_unions,
         ItemEnum::Macro(_) => !args.no_macros,
+        ItemEnum::ProcMacro(_) => !args.no_macros,
         _ => true,
     }
 }
@@ -1022,6 +1044,18 @@ fn render_module_contents(
                 );
             }
             ItemEnum::Macro(_) if !args.no_macros => {
+                render_item(
+                    model,
+                    child,
+                    child_id,
+                    &child_indent,
+                    args,
+                    observer,
+                    same_crate,
+                    output,
+                );
+            }
+            ItemEnum::ProcMacro(_) if !args.no_macros => {
                 render_item(
                     model,
                     child,
@@ -1363,6 +1397,9 @@ fn render_item(
             let name = item.name.as_deref().unwrap_or("?");
             output.push_str(&format!("{indent}macro_rules! {name} {{ /* ... */ }}\n"));
         }
+        ItemEnum::ProcMacro(pm) => {
+            render_proc_macro(item, pm, indent, &vis, output);
+        }
         _ => {}
     }
 }
@@ -1675,6 +1712,31 @@ fn render_constant(
         "{indent}{vis}const {name}: {} = {val};\n",
         format_type(type_)
     ));
+}
+
+fn render_proc_macro(item: &Item, pm: &ProcMacro, indent: &str, vis: &str, output: &mut String) {
+    let name = item.name.as_deref().unwrap_or("?");
+    match pm.kind {
+        MacroKind::Bang => {
+            output.push_str(&format!("{indent}#[proc_macro]\n"));
+            output.push_str(&format!("{indent}{vis}macro {name}! {{ /* ... */ }}\n"));
+        }
+        MacroKind::Attr => {
+            output.push_str(&format!("{indent}#[proc_macro_attribute]\n"));
+            output.push_str(&format!("{indent}{vis}macro {name} {{ /* ... */ }}\n"));
+        }
+        MacroKind::Derive => {
+            if pm.helpers.is_empty() {
+                output.push_str(&format!("{indent}#[proc_macro_derive({name})]\n"));
+            } else {
+                let helpers = pm.helpers.join(", ");
+                output.push_str(&format!(
+                    "{indent}#[proc_macro_derive({name}, attributes({helpers}))]\n"
+                ));
+            }
+            output.push_str(&format!("{indent}{vis}macro {name} {{ /* ... */ }}\n"));
+        }
+    }
 }
 
 fn render_static(item: &Item, s: &Static, indent: &str, vis: &str, output: &mut String) {

@@ -1,38 +1,6 @@
 ---
 title: CLI Surface
 summary: All subcommands, flags, positional arguments, target resolution rules, and behavioral contracts for the cargo-brief CLI.
-features:
-  - Invocation Modes
-  - Global Flags
-    - -C / --crates
-    - -F / --features \<FEATURES\>
-    - --no-default-features
-    - --no-cache
-    - --toolchain \<NAME\>
-    - -v / --verbose
-  - Target Resolution
-    - Smart Leaf Resolution
-  - api Subcommand
-  - search Subcommand
-    - Pattern DSL
-    - Member Display
-  - examples Subcommand
-  - summary Subcommand
-  - ts Subcommand
-  - code Subcommand
-    - Dependency Search Modes
-  - features Subcommand
-  - clean Subcommand
-  - lsp Subcommand — Lifecycle Commands
-  - lsp Subcommand — Query Commands
-  - Shared Option Groups
-    - FilterArgs
-    - GlobalArgs
-    - TargetArgs
-  - Behavioral Contracts
-    - Nightly Toolchain Detection
-    - AI Agent Quick Guide
-    - Error Messages
 ---
 
 # CLI Surface
@@ -165,7 +133,7 @@ Subcommand-specific flags:
 |---|---|
 | `--limit [OFFSET:]N` | Paginate results |
 | `--methods-of <TYPE>` | Show only items whose direct parent is `TYPE` (exact match) |
-| `--search-kind <KINDS>` | Comma-separated kind filter: `fn`, `struct`, `enum`, `trait`, `field`, `variant`, `const`, `static`, `type`, `macro`, `use` |
+| `--search-kind <KINDS>` | Comma-separated kind filter: `fn`, `struct`, `enum`, `trait`, `field`, `variant`, `const`, `static`, `type`, `macro`, `proc-macro`, `attr-macro`, `derive-macro`, `use` |
 | `--members` | Expand all members (fields, methods, trait impls) of matched types |
 | `--at-package`, `--at-mod` | Visibility observer override |
 | `--manifest-path` | Path to `Cargo.toml` |
@@ -294,7 +262,7 @@ Accepts 1–3 positional arguments with context-sensitive disambiguation:
 
 A single argument that is a valid kind keyword alone is an error — use the 2-arg or 3-arg form.
 
-Supported kinds: `fn`, `struct`, `enum`, `trait`, `field`, `type`, `impl`, `macro`, `const`, `use`. Omitting KIND also excludes `use` from results.
+Supported kinds: `fn`, `struct`, `enum`, `trait`, `field`, `type`, `impl`, `macro`, `proc-macro`, `attr-macro`, `derive-macro`, `const`, `use`. Omitting KIND also excludes `use` from results.
 
 Output per match: `@<file>:<line>`, `in <crate>::<module>[, in <parent>]`, then the matched source block.
 

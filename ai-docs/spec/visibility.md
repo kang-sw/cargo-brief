@@ -1,23 +1,6 @@
 ---
 title: Visibility Semantics
 summary: How cargo-brief determines which items to show based on the observer's position — covering observer setup, visibility levels, re-export interaction, and canonical path selection for facade crates.
-features:
-  - Observer Position
-  - Same-Crate Auto-Detection
-    - Effect of same_crate
-  - The `--at-mod` Flag
-  - The `--at-package` Flag
-  - Visibility Levels
-    - `pub`
-    - `pub(crate)`
-    - `pub(super)` and `pub(in path)`
-    - Private (Default visibility)
-    - Struct and Union Fields
-  - Cross-Crate View
-  - Named Re-Export Visibility
-  - Glob Re-Export Inlining
-  - Canonical Path Selection
-  - Visibility by Item Kind
 ---
 
 # Visibility Semantics

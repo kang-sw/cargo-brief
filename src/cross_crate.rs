@@ -18,7 +18,7 @@
 use std::collections::HashSet;
 use std::path::Path;
 
-use rustdoc_types::{Id, Item, ItemEnum, Visibility};
+use rustdoc_types::{Id, Item, ItemEnum, MacroKind, Visibility};
 
 use crate::model::{CrateModel, ReachableInfo, compute_reachable_set};
 use crate::rustdoc_json::{self, LockfilePackages};
@@ -49,6 +49,9 @@ pub enum AccessibleItemKind {
     Constant,
     Static,
     Macro,
+    ProcMacro,
+    ProcAttrMacro,
+    ProcDeriveMacro,
 }
 
 impl AccessibleItemKind {
@@ -64,6 +67,11 @@ impl AccessibleItemKind {
             ItemEnum::Constant { .. } => Some(Self::Constant),
             ItemEnum::Static(_) => Some(Self::Static),
             ItemEnum::Macro(_) => Some(Self::Macro),
+            ItemEnum::ProcMacro(pm) => Some(match pm.kind {
+                MacroKind::Bang => Self::ProcMacro,
+                MacroKind::Attr => Self::ProcAttrMacro,
+                MacroKind::Derive => Self::ProcDeriveMacro,
+            }),
             _ => None,
         }
     }

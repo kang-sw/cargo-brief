@@ -1,6 +1,6 @@
 use std::collections::{BTreeMap, HashSet};
 
-use rustdoc_types::{Id, Item, ItemEnum, Visibility};
+use rustdoc_types::{Id, Item, ItemEnum, MacroKind, Visibility};
 
 use crate::model::{CrateModel, ReachableInfo, is_visible_from};
 
@@ -15,6 +15,9 @@ pub enum ItemKind {
     TypeAlias,
     Constant,
     Macro,
+    ProcMacro,
+    ProcAttrMacro,
+    ProcDeriveMacro,
     Union,
 }
 
@@ -28,6 +31,9 @@ impl ItemKind {
             ItemKind::TypeAlias => "types",
             ItemKind::Constant => "consts",
             ItemKind::Macro => "macros",
+            ItemKind::ProcMacro => "proc_macros",
+            ItemKind::ProcAttrMacro => "attr_macros",
+            ItemKind::ProcDeriveMacro => "derive_macros",
             ItemKind::Union => "unions",
         }
     }
@@ -68,6 +74,11 @@ fn classify_item(item: &Item, model: &CrateModel) -> Option<ItemKind> {
         ItemEnum::TypeAlias(_) => Some(ItemKind::TypeAlias),
         ItemEnum::Constant { .. } | ItemEnum::Static(_) => Some(ItemKind::Constant),
         ItemEnum::Macro(_) => Some(ItemKind::Macro),
+        ItemEnum::ProcMacro(pm) => Some(match pm.kind {
+            MacroKind::Bang => ItemKind::ProcMacro,
+            MacroKind::Attr => ItemKind::ProcAttrMacro,
+            MacroKind::Derive => ItemKind::ProcDeriveMacro,
+        }),
         ItemEnum::Union(_) => Some(ItemKind::Union),
         ItemEnum::Use(use_item) => {
             if use_item.is_glob {
@@ -408,6 +419,9 @@ pub fn summarize_cross_crate_index(index: &CrossCrateIndex) -> String {
             AccessibleItemKind::TypeAlias => ItemKind::TypeAlias,
             AccessibleItemKind::Constant | AccessibleItemKind::Static => ItemKind::Constant,
             AccessibleItemKind::Macro => ItemKind::Macro,
+            AccessibleItemKind::ProcMacro => ItemKind::ProcMacro,
+            AccessibleItemKind::ProcAttrMacro => ItemKind::ProcAttrMacro,
+            AccessibleItemKind::ProcDeriveMacro => ItemKind::ProcDeriveMacro,
             AccessibleItemKind::Union => ItemKind::Union,
             AccessibleItemKind::Module => continue,
         };

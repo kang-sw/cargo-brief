@@ -1,21 +1,6 @@
 ---
 title: LSP Daemon
 summary: cargo-brief's LSP daemon — lifecycle management (touch/stop/status), query commands (references, blast-radius, call-hierarchy), symbol resolution strategy, RA indexing readiness, idle timeout, filesystem watcher, and IPC mechanism.
-features:
-  - Subcommand Overview
-  - `lsp touch`
-  - `lsp stop`
-  - `lsp status`
-  - `lsp references`
-  - `lsp blast-radius`
-  - `lsp call-hierarchy`
-  - Symbol Resolution
-  - Daemon Lifecycle
-  - Daemon Directory Location
-  - Idle Timeout
-  - RA Indexing Readiness
-  - Filesystem Watcher
-  - IPC Mechanism
 ---
 
 # LSP Daemon
