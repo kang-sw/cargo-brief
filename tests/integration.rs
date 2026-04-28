@@ -4616,30 +4616,20 @@ fn test_proc_macro_api() {
 
     // bang
     assert!(
-        output.contains("#[proc_macro]"),
-        "bang proc-macro should render #[proc_macro] attribute:\n{output}"
-    );
-    assert!(
-        output.contains("my_bang"),
-        "bang proc-macro name should appear in api output:\n{output}"
+        output.contains("#[proc_macro]\npub macro my_bang! {"),
+        "bang proc-macro should render #[proc_macro] and bang syntax:\n{output}"
     );
     // attribute
     assert!(
-        output.contains("#[proc_macro_attribute]"),
-        "attribute proc-macro should render #[proc_macro_attribute]:\n{output}"
-    );
-    assert!(
-        output.contains("my_attr"),
-        "attribute proc-macro name should appear in api output:\n{output}"
+        output.contains("#[proc_macro_attribute]\npub macro my_attr {"),
+        "attribute proc-macro should render without bang syntax:\n{output}"
     );
     // derive
     assert!(
-        output.contains("#[proc_macro_derive(MyDerive"),
-        "derive proc-macro should render #[proc_macro_derive(...)]:\n{output}"
-    );
-    assert!(
-        output.contains("my_helper"),
-        "helper attribute should appear in derive render:\n{output}"
+        output.contains(
+            "#[proc_macro_derive(MyDerive, attributes(my_helper))]\npub macro MyDerive {"
+        ),
+        "derive proc-macro should render helper attributes and derive syntax:\n{output}"
     );
 }
 
@@ -4688,7 +4678,7 @@ fn test_proc_macro_no_macros_flag() {
 fn test_proc_macro_search() {
     let args = SearchArgs {
         crate_name: "proc-macro-fixture".to_string(),
-        patterns: vec![],
+        patterns: vec!["my".to_string()],
         filter: default_filter(),
         global: GlobalArgs {
             toolchain: "nightly".to_string(),
