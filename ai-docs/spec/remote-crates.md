@@ -1,23 +1,6 @@
 ---
 title: Remote Crates
 summary: How cargo-brief fetches and queries crates from crates.io — covering the -C flag, crate spec syntax, version resolution, cache directory structure and TTL semantics, feature selection, nightly toolchain detection, multi-version disambiguation, and cross-crate facade expansion.
-features:
-  - The `-C` Flag
-  - Subcommand Compatibility
-  - Crate Spec Syntax
-  - Module Path in Crate Spec
-  - Feature Flags
-  - `--no-cache` Flag
-  - Version Resolution
-  - Cache Directory Location
-  - Cache Directory Naming
-  - Cache Invalidation and TTL
-  - Nightly Toolchain Detection
-  - Multi-Version Disambiguation
-  - Cross-Crate Facade Expansion
-  - Remote Feature Graph
-    - Offline Fallback
-  - Verbose Progress Reporting
 ---
 
 # Remote Crates

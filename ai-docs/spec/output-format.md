@@ -1,33 +1,6 @@
 ---
 title: Output Format
 summary: Pseudo-Rust rendering rules for the api, search, and summary subcommands — covering item-type display, doc handling, density controls, attribute rendering, re-export representation, trait impl collapsing, and search/summary output formats.
-features:
-  - Crate Header and Crate-Level Docs
-  - Pseudo-Rust Philosophy
-  - Module Structure and Depth Control
-    - Glob-Private Module Inlining
-  - Item-Type Rendering
-    - Structs
-    - Enums
-    - Traits
-    - Functions
-    - Other Item Types
-  - Inherent Impl Blocks
-  - Trait Impl Collapsing
-  - Re-Export Rendering
-    - Named Re-Exports
-    - Glob Re-Exports
-  - Doc Comment Handling
-    - Density Flags
-  - Attribute Rendering
-    - Default Attributes (always shown)
-    - Verbose Attributes (`--verbose-metadata`)
-  - Feature-Gate Annotations
-  - Item-Kind Filtering
-  - Search Output Format
-    - Member Display
-    - Sorting and Pagination
-  - Summary Output Format
 ---
 
 # Output Format
@@ -192,6 +165,30 @@ pub union Bits {
 macro_rules! my_macro { /* ... */ }
 ```
 
+### Proc-Macros {#260429-proc-macro-rendering}
+
+Three proc-macro kinds, each with a kind-appropriate leading attribute:
+
+**Bang (`name!(...)`):**
+```rust
+#[proc_macro]
+pub macro name! { /* ... */ }
+```
+
+**Attribute (`#[name]`):**
+```rust
+#[proc_macro_attribute]
+pub macro name { /* ... */ }
+```
+
+**Derive (`#[derive(Name)]`):**
+```rust
+#[proc_macro_derive(Name, attributes(helper))]
+pub macro Name { /* ... */ }
+```
+
+The `pub macro` keyword is pseudo-Rust (not compilable); it reads correctly to syntax highlighters and conveys the item shape to LLMs. The leading `#[proc_macro*]` attribute conveys the kind unambiguously. For derive macros without helpers, the `attributes(...)` list is omitted.
+
 ## Inherent Impl Blocks {#260423-inherent-impl-rendering}
 
 Inherent impl blocks render after their type definition:
@@ -239,7 +236,7 @@ pub use crate::inner::Widget; // struct
 pub use crate::inner::OldName as NewName; // trait
 ```
 
-Supported kind labels: `struct`, `enum`, `trait`, `fn`, `type`, `const`, `static`, `macro`, `use`.
+Supported kind labels: `struct`, `enum`, `trait`, `fn`, `type`, `const`, `static`, `macro`, `proc-macro`, `attr-macro`, `derive-macro`, `use`.
 
 In default mode (`--no-expand-glob` absent), named re-exports from the local crate are replaced by the full inlined definition of the target item rather than a `pub use` line.
 
@@ -343,7 +340,7 @@ The default set includes all common item kinds. Each `--no-*` flag removes one k
 | `--no-aliases` | Type aliases |
 | `--no-constants` | Constants **and** statics |
 | `--no-unions` | Unions |
-| `--no-macros` | Macros |
+| `--no-macros` | `macro_rules!` macros and all proc-macro kinds (bang, attribute, derive) |
 
 `--all` adds blanket impls, auto-trait impls, and synthetic impls to the output, and disables trait impl collapsing.
 
@@ -375,6 +372,9 @@ Per-item line formats by kind:
 | Static | `static [mut] path::NAME: T;` |
 | Type alias | `type path::Name<G> = T;` |
 | Macro | `macro path::name!;` |
+| Proc-Macro (bang) | `proc_macro path::name!;` |
+| Proc-Macro (attribute) | `attr_macro #[path::name];` |
+| Proc-Macro (derive) | `derive_macro #[derive(path::Name)];` |
 | Associated type | `type path::Type::Assoc = T;` |
 | Associated const | `const path::Type::CONST: T = value;` |
 | Re-export | `use source::path;` or `use source::path as Alias; // kind` |
@@ -412,7 +412,7 @@ The `-::` prefix is padded to align under the first `::` segment of the parent p
 
 ### Sorting and Pagination {#260423-search-sort-pagination}
 
-Default sort order: functions first, then structs, enums, traits, unions, fields, variants, constants, statics, type aliases, macros, associated types, associated constants, re-exports. Secondary sort: alphabetical by full path. With `--members`, sort is path-based only.
+Default sort order: functions first, then structs, enums, traits, unions, fields, variants, constants, statics, type aliases, macros, proc-macros, attr-macros, derive-macros, associated types, associated constants, re-exports. Secondary sort: alphabetical by full path. With `--members`, sort is path-based only.
 
 `--limit N` shows the first N results. `--limit OFFSET:N` skips OFFSET results then shows N.
 
@@ -448,7 +448,7 @@ mod io::buf;     // 2 traits, 3 structs, 5 fns
 Rules:
 - One line per submodule with at least one visible item.
 - `// root:` covers items defined directly at the queried module level.
-- Item kind columns appear in fixed order: traits, structs, enums, fns, types, consts, macros, unions.
+- Item kind columns appear in fixed order: traits, structs, enums, fns, types, consts, macros, proc_macros, attr_macros, derive_macros, unions.
 - Zero-count kinds are omitted.
 - All `//` comments align to the same column (padded).
 - Empty modules (zero visible items) are omitted entirely.
