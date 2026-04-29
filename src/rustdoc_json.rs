@@ -154,6 +154,64 @@ fn read_tty_line() -> std::io::Result<String> {
     }
 }
 
+/// Find the rustdoc JSON file for a package in a doc directory.
+///
+/// Tries the package-name-based path first (`pkg_name → underscored → .json`).
+/// If not found, queries `cargo metadata` to discover the actual lib target name.
+/// This handles crates where `[lib] name` differs from the package name
+/// (e.g. `rustls-webpki` generates `webpki.json`, not `rustls_webpki.json`).
+pub fn find_lib_json_path(
+    base_name: &str,
+    manifest_path: Option<&str>,
+    doc_dir: &Path,
+) -> Option<PathBuf> {
+    let expected_stem = base_name.replace('-', "_");
+    let expected = doc_dir.join(format!("{expected_stem}.json"));
+    if expected.exists() {
+        return Some(expected);
+    }
+    let lib_name = query_lib_target_name(base_name, manifest_path)?;
+    if lib_name == expected_stem {
+        return None;
+    }
+    let alt = doc_dir.join(format!("{lib_name}.json"));
+    alt.exists().then_some(alt)
+}
+
+/// Run `cargo metadata` to find the lib/proc-macro target name for a package.
+///
+/// Runs without `--no-deps` so that external crates (e.g. crates.io deps in an
+/// isolated temp workspace) are also visible in the packages list.
+fn query_lib_target_name(package_name: &str, manifest_path: Option<&str>) -> Option<String> {
+    let mut cmd = Command::new("cargo");
+    cmd.args(["metadata", "--format-version=1"]);
+    if let Some(m) = manifest_path {
+        cmd.args(["--manifest-path", m]);
+    }
+    let output = cmd.output().ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    let meta: serde_json::Value = serde_json::from_slice(&output.stdout).ok()?;
+    let packages = meta.get("packages")?.as_array()?;
+    let norm = package_name.replace('-', "_");
+    for pkg in packages {
+        if pkg["name"].as_str()?.replace('-', "_") != norm {
+            continue;
+        }
+        for target in pkg["targets"].as_array()? {
+            let kinds = target["kind"].as_array()?;
+            let is_lib = kinds
+                .iter()
+                .any(|k| matches!(k.as_str(), Some("lib") | Some("proc-macro")));
+            if is_lib {
+                return target["name"].as_str().map(|n| n.replace('-', "_"));
+            }
+        }
+    }
+    None
+}
+
 /// Invoke `cargo +nightly rustdoc` and return the path to the generated JSON file.
 ///
 /// When `verbose` is true, cargo's stderr (compilation progress) is streamed to
@@ -169,9 +227,8 @@ pub fn generate_rustdoc_json(
 ) -> Result<PathBuf> {
     if use_cache {
         let base_name = crate_name.split('@').next().unwrap_or(crate_name);
-        let json_name = base_name.replace('-', "_");
-        let json_path = target_dir.join("doc").join(format!("{json_name}.json"));
-        if json_path.exists() {
+        let doc_dir = target_dir.join("doc");
+        if let Some(json_path) = find_lib_json_path(base_name, manifest_path, &doc_dir) {
             if verbose {
                 eprintln!("[cargo-brief] Using cached rustdoc JSON for '{crate_name}'");
             }
@@ -274,21 +331,18 @@ pub fn generate_rustdoc_json(
         }
     }
 
-    // Find the generated JSON file in the target directory
-    // Strip `@version` suffix — cargo uses it for disambiguation but the output file
-    // is always named by the bare crate name.
+    // Find the generated JSON file. Strip `@version` suffix first — cargo uses it
+    // for disambiguation but the output file is named by the lib target name.
+    // Use find_lib_json_path to handle crates where [lib] name != package name.
     let base_name = crate_name.split('@').next().unwrap_or(crate_name);
-    let json_name = base_name.replace('-', "_");
-    let json_path = target_dir.join("doc").join(format!("{json_name}.json"));
-
-    if !json_path.exists() {
-        bail!(
+    let doc_dir = target_dir.join("doc");
+    find_lib_json_path(base_name, manifest_path, &doc_dir).with_context(|| {
+        let expected_name = base_name.replace('-', "_");
+        format!(
             "Expected rustdoc JSON at {} but file not found",
-            json_path.display()
-        );
-    }
-
-    Ok(json_path)
+            doc_dir.join(format!("{expected_name}.json")).display()
+        )
+    })
 }
 
 /// Parse rustdoc JSON with bincode caching. If a `.bin` file exists and is
@@ -423,9 +477,8 @@ pub fn batch_generate_rustdoc_json(
 
     for &name in crate_names {
         let base = name.split('@').next().unwrap_or(name);
-        let json_name = base.replace('-', "_");
-        let json_path = target_dir.join("doc").join(format!("{json_name}.json"));
-        if json_path.exists() {
+        let doc_dir = target_dir.join("doc");
+        if find_lib_json_path(base, manifest_path, &doc_dir).is_some() {
             succeeded.push(name.to_string());
         } else {
             to_generate.push(name);
@@ -486,9 +539,8 @@ pub fn batch_generate_rustdoc_json(
     // Check which JSONs got created
     for name in &to_generate {
         let base = name.split('@').next().unwrap_or(name);
-        let json_name = base.replace('-', "_");
-        let json_path = target_dir.join("doc").join(format!("{json_name}.json"));
-        if json_path.exists() {
+        let doc_dir = target_dir.join("doc");
+        if find_lib_json_path(base, manifest_path, &doc_dir).is_some() {
             succeeded.push(name.to_string());
         } else if verbose {
             eprintln!("warning: batch cargo doc did not produce JSON for '{name}'");
