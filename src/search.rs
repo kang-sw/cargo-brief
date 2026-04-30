@@ -360,6 +360,48 @@ pub fn render_search_filtered(
     )
 }
 
+/// Test whether an item passes the `--in-params` / `--in-returns` type filters.
+///
+/// Each filter is a pre-parsed `(ParsedPattern, case_sensitive)` pair. Returns `false` for
+/// non-function items and for functions that fail either filter.
+fn matches_type_filter(
+    item: &Item,
+    params_filter: Option<&(ParsedPattern, bool)>,
+    returns_filter: Option<&(ParsedPattern, bool)>,
+) -> bool {
+    let ItemEnum::Function(f) = &item.inner else {
+        return false;
+    };
+    if let Some((parsed, cs)) = params_filter {
+        let any_param = f.sig.inputs.iter().any(|(_, ty)| {
+            let s = render::format_type_pub(ty);
+            let s = if *cs { s } else { s.to_lowercase() };
+            parsed
+                .or_groups
+                .iter()
+                .any(|g| g.iter().all(|tok| token_matches(tok, &s)))
+        });
+        if !any_param {
+            return false;
+        }
+    }
+    if let Some((parsed, cs)) = returns_filter {
+        let Some(ret_ty) = &f.sig.output else {
+            return false;
+        };
+        let s = render::format_type_pub(ret_ty);
+        let s = if *cs { s } else { s.to_lowercase() };
+        if !parsed
+            .or_groups
+            .iter()
+            .any(|g| g.iter().all(|tok| token_matches(tok, &s)))
+        {
+            return false;
+        }
+    }
+    true
+}
+
 #[allow(clippy::too_many_arguments)]
 fn render_search_inner(
     model: &CrateModel,
@@ -519,44 +561,18 @@ fn render_search_inner(
         matched.retain(|leaf| leaf.path.contains(&suffix) || leaf.path.starts_with(&prefix));
     }
 
-    // --in-params / --in-returns: filter by function signature type strings
-    if in_params.is_some() || in_returns.is_some() {
+    // --in-params / --in-returns: parse once, then filter by function signature type strings
+    let params_filter = in_params.map(|p| {
+        let cs = p.chars().any(|c| c.is_uppercase());
+        (parse_pattern(p, cs), cs)
+    });
+    let returns_filter = in_returns.map(|p| {
+        let cs = p.chars().any(|c| c.is_uppercase());
+        (parse_pattern(p, cs), cs)
+    });
+    if params_filter.is_some() || returns_filter.is_some() {
         matched.retain(|leaf| {
-            let ItemEnum::Function(f) = &leaf.item.inner else {
-                return false;
-            };
-            if let Some(pat) = in_params {
-                let cs = pat.chars().any(|c| c.is_uppercase());
-                let parsed = parse_pattern(pat, cs);
-                let any_param = f.sig.inputs.iter().any(|(_, ty)| {
-                    let s = render::format_type_pub(ty);
-                    let s = if cs { s } else { s.to_lowercase() };
-                    parsed
-                        .or_groups
-                        .iter()
-                        .any(|g| g.iter().all(|tok| token_matches(tok, &s)))
-                });
-                if !any_param {
-                    return false;
-                }
-            }
-            if let Some(pat) = in_returns {
-                let cs = pat.chars().any(|c| c.is_uppercase());
-                let parsed = parse_pattern(pat, cs);
-                let Some(ret_ty) = &f.sig.output else {
-                    return false;
-                };
-                let s = render::format_type_pub(ret_ty);
-                let s = if cs { s } else { s.to_lowercase() };
-                if !parsed
-                    .or_groups
-                    .iter()
-                    .any(|g| g.iter().all(|tok| token_matches(tok, &s)))
-                {
-                    return false;
-                }
-            }
-            true
+            matches_type_filter(leaf.item, params_filter.as_ref(), returns_filter.as_ref())
         });
     }
 
@@ -1748,51 +1764,25 @@ pub fn search_cross_crate_index(
             .retain(|(_, leaf)| leaf.path.contains(&suffix) || leaf.path.starts_with(&prefix_pat));
     }
 
+    // --in-params / --in-returns: parse once, then filter by function signature type strings
+    let params_filter = in_params.map(|p| {
+        let cs = p.chars().any(|c| c.is_uppercase());
+        (parse_pattern(p, cs), cs)
+    });
+    let returns_filter = in_returns.map(|p| {
+        let cs = p.chars().any(|c| c.is_uppercase());
+        (parse_pattern(p, cs), cs)
+    });
+    if params_filter.is_some() || returns_filter.is_some() {
+        filtered.retain(|(_, leaf)| {
+            matches_type_filter(leaf.item, params_filter.as_ref(), returns_filter.as_ref())
+        });
+    }
+
     // --search-kind
     if let Some(kind_spec) = search_kind {
         let kinds: Vec<&str> = kind_spec.split(',').map(|s| s.trim()).collect();
         filtered.retain(|(_, leaf)| kinds.iter().any(|k| leaf.kind.matches_kind_str(k)));
-    }
-
-    // --in-params / --in-returns: filter by function signature type strings
-    if in_params.is_some() || in_returns.is_some() {
-        filtered.retain(|(_, leaf)| {
-            let ItemEnum::Function(f) = &leaf.item.inner else {
-                return false;
-            };
-            if let Some(pat) = in_params {
-                let cs = pat.chars().any(|c| c.is_uppercase());
-                let parsed = parse_pattern(pat, cs);
-                let any_param = f.sig.inputs.iter().any(|(_, ty)| {
-                    let s = render::format_type_pub(ty);
-                    let s = if cs { s } else { s.to_lowercase() };
-                    parsed
-                        .or_groups
-                        .iter()
-                        .any(|g| g.iter().all(|tok| token_matches(tok, &s)))
-                });
-                if !any_param {
-                    return false;
-                }
-            }
-            if let Some(pat) = in_returns {
-                let cs = pat.chars().any(|c| c.is_uppercase());
-                let parsed = parse_pattern(pat, cs);
-                let Some(ret_ty) = &f.sig.output else {
-                    return false;
-                };
-                let s = render::format_type_pub(ret_ty);
-                let s = if cs { s } else { s.to_lowercase() };
-                if !parsed
-                    .or_groups
-                    .iter()
-                    .any(|g| g.iter().all(|tok| token_matches(tok, &s)))
-                {
-                    return false;
-                }
-            }
-            true
-        });
     }
 
     // Sort

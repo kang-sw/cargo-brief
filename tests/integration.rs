@@ -3140,8 +3140,11 @@ fn test_cross_crate_in_params_no_name_pattern_no_panic() {
         Some("i32"),
         None,
     );
-    // No functions with i32 params in the cross-crate index → empty output is correct
-    let _ = output; // just verify no panic
+    // No functions with i32 params in the cross-crate index → output must be empty
+    assert!(
+        output.is_empty(),
+        "--in-params i32 with no matching functions should produce empty output:\n{output}"
+    );
 }
 
 // === Leaf Item Resolution Tests ===

@@ -490,53 +490,39 @@ pub fn run_search_pipeline(args: &SearchArgs, remote: &RemoteOpts) -> Result<Str
         anyhow::bail!("search requires a pattern, --methods-of, --in-params, or --in-returns");
     }
 
-    // --methods-of: translate into exclusion flags, keep methods_of for exact parent matching
+    let mut args = args.clone();
+
+    // --methods-of: synthesize a name pattern when none given; narrows walk to functions only.
+    // methods_of stays set — run_shared_search_pipeline uses it for exact parent matching.
     if args.methods_of.is_some() {
-        let mut args = args.clone();
         if args.patterns.is_empty() {
             args.patterns = vec![args.methods_of.as_ref().unwrap().clone()];
         }
-        args.filter.no_structs = true;
-        args.filter.no_enums = true;
-        args.filter.no_traits = true;
-        args.filter.no_unions = true;
-        args.filter.no_constants = true;
-        args.filter.no_macros = true;
-        args.filter.no_aliases = true;
-        // methods_of stays set — run_shared_search_pipeline uses it for exact matching
-        // Leave no_functions = false (methods are functions)
-        let ctx = if remote.crates {
-            build_remote_context_search(&args, &args.crate_name, remote)?
-        } else {
-            build_local_context_search(&args)?
-        };
-        return run_shared_search_pipeline(&ctx, &args);
+        apply_function_narrowing(&mut args.filter);
     }
 
-    // --in-params / --in-returns: narrow to functions only, then apply type filters
+    // --in-params / --in-returns: narrows walk to functions only; type filter applied in render.
     if args.in_params.is_some() || args.in_returns.is_some() {
-        let mut args = args.clone();
-        args.filter.no_structs = true;
-        args.filter.no_enums = true;
-        args.filter.no_traits = true;
-        args.filter.no_unions = true;
-        args.filter.no_constants = true;
-        args.filter.no_macros = true;
-        args.filter.no_aliases = true;
-        let ctx = if remote.crates {
-            build_remote_context_search(&args, &args.crate_name, remote)?
-        } else {
-            build_local_context_search(&args)?
-        };
-        return run_shared_search_pipeline(&ctx, &args);
+        apply_function_narrowing(&mut args.filter);
     }
 
     let ctx = if remote.crates {
-        build_remote_context_search(args, &args.crate_name, remote)?
+        build_remote_context_search(&args, &args.crate_name, remote)?
     } else {
-        build_local_context_search(args)?
+        build_local_context_search(&args)?
     };
-    run_shared_search_pipeline(&ctx, args)
+    run_shared_search_pipeline(&ctx, &args)
+}
+
+/// Set the filter flags that restrict the item walk to functions and methods only.
+fn apply_function_narrowing(filter: &mut FilterArgs) {
+    filter.no_structs = true;
+    filter.no_enums = true;
+    filter.no_traits = true;
+    filter.no_unions = true;
+    filter.no_constants = true;
+    filter.no_macros = true;
+    filter.no_aliases = true;
 }
 
 fn build_local_context_search(args: &SearchArgs) -> Result<PipelineContext> {
