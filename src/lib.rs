@@ -690,8 +690,8 @@ fn run_shared_search_pipeline(ctx: &PipelineContext, args: &SearchArgs) -> Resul
             search_kind,
             methods_of,
             members,
-            None, // in_params — wired in Step 2
-            None, // in_returns — wired in Step 2
+            in_params,
+            in_returns,
         );
         if !cross_output.is_empty() {
             output.push_str(&cross_output);
