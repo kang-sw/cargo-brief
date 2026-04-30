@@ -481,9 +481,13 @@ fn render_and_expand_globs(
 
 /// Run the search pipeline and return the rendered output string.
 pub fn run_search_pipeline(args: &SearchArgs, remote: &RemoteOpts) -> Result<String> {
-    // Validate: need either a pattern or --methods-of
-    if args.patterns.is_empty() && args.methods_of.is_none() {
-        anyhow::bail!("search requires a pattern or --methods-of <TYPE>");
+    // Validate: need either a pattern or one of the search-narrowing flags
+    if args.patterns.is_empty()
+        && args.methods_of.is_none()
+        && args.in_params.is_none()
+        && args.in_returns.is_none()
+    {
+        anyhow::bail!("search requires a pattern, --methods-of, --in-params, or --in-returns");
     }
 
     // --methods-of: translate into exclusion flags, keep methods_of for exact parent matching
@@ -501,6 +505,24 @@ pub fn run_search_pipeline(args: &SearchArgs, remote: &RemoteOpts) -> Result<Str
         args.filter.no_aliases = true;
         // methods_of stays set — run_shared_search_pipeline uses it for exact matching
         // Leave no_functions = false (methods are functions)
+        let ctx = if remote.crates {
+            build_remote_context_search(&args, &args.crate_name, remote)?
+        } else {
+            build_local_context_search(&args)?
+        };
+        return run_shared_search_pipeline(&ctx, &args);
+    }
+
+    // --in-params / --in-returns: narrow to functions only, then apply type filters
+    if args.in_params.is_some() || args.in_returns.is_some() {
+        let mut args = args.clone();
+        args.filter.no_structs = true;
+        args.filter.no_enums = true;
+        args.filter.no_traits = true;
+        args.filter.no_unions = true;
+        args.filter.no_constants = true;
+        args.filter.no_macros = true;
+        args.filter.no_aliases = true;
         let ctx = if remote.crates {
             build_remote_context_search(&args, &args.crate_name, remote)?
         } else {
@@ -608,6 +630,8 @@ fn run_shared_search_pipeline(ctx: &PipelineContext, args: &SearchArgs) -> Resul
     let (model, same_crate, reachable) = generate_and_parse_model(ctx)?;
     let pattern = args.pattern();
     let methods_of = args.methods_of.as_deref();
+    let in_params = args.in_params.as_deref();
+    let in_returns = args.in_returns.as_deref();
 
     let search_kind = args.search_kind.as_deref();
     let members = args.members;
@@ -626,6 +650,8 @@ fn run_shared_search_pipeline(ctx: &PipelineContext, args: &SearchArgs) -> Resul
             methods_of,
             search_kind,
             members,
+            in_params,
+            in_returns,
         )
     };
 
@@ -664,6 +690,8 @@ fn run_shared_search_pipeline(ctx: &PipelineContext, args: &SearchArgs) -> Resul
             search_kind,
             methods_of,
             members,
+            None, // in_params — wired in Step 2
+            None, // in_returns — wired in Step 2
         );
         if !cross_output.is_empty() {
             output.push_str(&cross_output);
