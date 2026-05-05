@@ -293,6 +293,8 @@ pub fn render_search(
         None,
         None,
         false,
+        None,
+        None,
     )
 }
 
@@ -321,6 +323,8 @@ pub fn render_search_methods_of(
         Some(methods_of),
         None,
         false,
+        None,
+        None,
     )
 }
 
@@ -337,6 +341,8 @@ pub fn render_search_filtered(
     methods_of: Option<&str>,
     search_kind: Option<&str>,
     members: bool,
+    in_params: Option<&str>,
+    in_returns: Option<&str>,
 ) -> String {
     render_search_inner(
         model,
@@ -349,7 +355,51 @@ pub fn render_search_filtered(
         methods_of,
         search_kind,
         members,
+        in_params,
+        in_returns,
     )
+}
+
+/// Test whether an item passes the `--in-params` / `--in-returns` type filters.
+///
+/// Each filter is a pre-parsed `(ParsedPattern, case_sensitive)` pair. Returns `false` for
+/// non-function items and for functions that fail either filter.
+fn matches_type_filter(
+    item: &Item,
+    params_filter: Option<&(ParsedPattern, bool)>,
+    returns_filter: Option<&(ParsedPattern, bool)>,
+) -> bool {
+    let ItemEnum::Function(f) = &item.inner else {
+        return false;
+    };
+    if let Some((parsed, cs)) = params_filter {
+        let any_param = f.sig.inputs.iter().any(|(_, ty)| {
+            let s = render::format_type_pub(ty);
+            let s = if *cs { s } else { s.to_lowercase() };
+            parsed
+                .or_groups
+                .iter()
+                .any(|g| g.iter().all(|tok| token_matches(tok, &s)))
+        });
+        if !any_param {
+            return false;
+        }
+    }
+    if let Some((parsed, cs)) = returns_filter {
+        let Some(ret_ty) = &f.sig.output else {
+            return false;
+        };
+        let s = render::format_type_pub(ret_ty);
+        let s = if *cs { s } else { s.to_lowercase() };
+        if !parsed
+            .or_groups
+            .iter()
+            .any(|g| g.iter().all(|tok| token_matches(tok, &s)))
+        {
+            return false;
+        }
+    }
+    true
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -364,6 +414,8 @@ fn render_search_inner(
     methods_of: Option<&str>,
     search_kind: Option<&str>,
     members: bool,
+    in_params: Option<&str>,
+    in_returns: Option<&str>,
 ) -> String {
     let crate_name = model.crate_name();
     let observer = observer_module_path
@@ -395,21 +447,28 @@ fn render_search_inner(
     let case_sensitive = pattern.chars().any(|c| c.is_uppercase());
     let parsed = parse_pattern(pattern, case_sensitive);
 
-    // Positive pattern matching (OR of AND groups)
-    let mut matched: Vec<&LeafItem> = leaves
-        .iter()
-        .filter(|leaf| {
-            let path = if case_sensitive {
-                leaf.path.clone()
-            } else {
-                leaf.path.to_lowercase()
-            };
-            parsed
-                .or_groups
-                .iter()
-                .any(|group| group.iter().all(|tok| token_matches(tok, &path)))
-        })
-        .collect();
+    // Positive pattern matching (OR of AND groups).
+    // When no name pattern is given but a type filter is active, skip name filtering.
+    let mut matched: Vec<&LeafItem> = if parsed.or_groups.is_empty()
+        && (in_params.is_some() || in_returns.is_some())
+    {
+        leaves.iter().collect()
+    } else {
+        leaves
+            .iter()
+            .filter(|leaf| {
+                let path = if case_sensitive {
+                    leaf.path.clone()
+                } else {
+                    leaf.path.to_lowercase()
+                };
+                parsed
+                    .or_groups
+                    .iter()
+                    .any(|group| group.iter().all(|tok| token_matches(tok, &path)))
+            })
+            .collect()
+    };
 
     // Global exclusions
     if !parsed.exclusions.is_empty() {
@@ -500,6 +559,21 @@ fn render_search_inner(
         let suffix = format!("::{type_name}::");
         let prefix = format!("{type_name}::");
         matched.retain(|leaf| leaf.path.contains(&suffix) || leaf.path.starts_with(&prefix));
+    }
+
+    // --in-params / --in-returns: parse once, then filter by function signature type strings
+    let params_filter = in_params.map(|p| {
+        let cs = p.chars().any(|c| c.is_uppercase());
+        (parse_pattern(p, cs), cs)
+    });
+    let returns_filter = in_returns.map(|p| {
+        let cs = p.chars().any(|c| c.is_uppercase());
+        (parse_pattern(p, cs), cs)
+    });
+    if params_filter.is_some() || returns_filter.is_some() {
+        matched.retain(|leaf| {
+            matches_type_filter(leaf.item, params_filter.as_ref(), returns_filter.as_ref())
+        });
     }
 
     // --search-kind: include only matching kinds
@@ -1459,6 +1533,8 @@ pub fn search_cross_crate_index(
     search_kind: Option<&str>,
     methods_of: Option<&str>,
     members: bool,
+    in_params: Option<&str>,
+    in_returns: Option<&str>,
 ) -> String {
     // Smart-case
     let case_sensitive = pattern.chars().any(|c| c.is_uppercase());
@@ -1575,22 +1651,28 @@ pub fn search_cross_crate_index(
         }
     }
 
-    // Pattern matching
-    let mut filtered: Vec<(usize, &LeafItem)> = matched
-        .iter()
-        .filter(|(_, leaf)| {
-            let path = if case_sensitive {
-                leaf.path.clone()
-            } else {
-                leaf.path.to_lowercase()
-            };
-            parsed
-                .or_groups
-                .iter()
-                .any(|group| group.iter().all(|tok| token_matches(tok, &path)))
-        })
-        .map(|(ci, leaf)| (*ci, leaf))
-        .collect();
+    // Pattern matching. When no name pattern is given but a type filter is active, skip name filtering.
+    let mut filtered: Vec<(usize, &LeafItem)> = if parsed.or_groups.is_empty()
+        && (in_params.is_some() || in_returns.is_some())
+    {
+        matched.iter().map(|(ci, leaf)| (*ci, leaf)).collect()
+    } else {
+        matched
+            .iter()
+            .filter(|(_, leaf)| {
+                let path = if case_sensitive {
+                    leaf.path.clone()
+                } else {
+                    leaf.path.to_lowercase()
+                };
+                parsed
+                    .or_groups
+                    .iter()
+                    .any(|group| group.iter().all(|tok| token_matches(tok, &path)))
+            })
+            .map(|(ci, leaf)| (*ci, leaf))
+            .collect()
+    };
 
     // Global exclusions
     if !parsed.exclusions.is_empty() {
@@ -1680,6 +1762,21 @@ pub fn search_cross_crate_index(
         let prefix_pat = format!("{type_name}::");
         filtered
             .retain(|(_, leaf)| leaf.path.contains(&suffix) || leaf.path.starts_with(&prefix_pat));
+    }
+
+    // --in-params / --in-returns: parse once, then filter by function signature type strings
+    let params_filter = in_params.map(|p| {
+        let cs = p.chars().any(|c| c.is_uppercase());
+        (parse_pattern(p, cs), cs)
+    });
+    let returns_filter = in_returns.map(|p| {
+        let cs = p.chars().any(|c| c.is_uppercase());
+        (parse_pattern(p, cs), cs)
+    });
+    if params_filter.is_some() || returns_filter.is_some() {
+        filtered.retain(|(_, leaf)| {
+            matches_type_filter(leaf.item, params_filter.as_ref(), returns_filter.as_ref())
+        });
     }
 
     // --search-kind

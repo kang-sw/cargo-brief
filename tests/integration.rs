@@ -2582,6 +2582,8 @@ fn test_search_kind_fn_only() {
         None,
         Some("fn"),
         false,
+        None,
+        None,
     );
     // Should include functions (free_function is not a member, so no suppression)
     assert!(
@@ -2614,6 +2616,8 @@ fn test_search_kind_struct_enum() {
         None,
         Some("struct,enum"),
         false,
+        None,
+        None,
     );
     // Should include PubStruct
     assert!(
@@ -2642,6 +2646,8 @@ fn test_search_kind_no_match() {
         None,
         Some("macro"),
         false,
+        None,
+        None,
     );
     assert!(
         output.contains("(0 results)"),
@@ -2680,7 +2686,7 @@ fn search_glob_question_mark() {
     // Glob tokens skip exact-name check; use --members to include variants
     let filter = default_filter();
     let output = search::render_search_filtered(
-        &model, "*::?lpha", &filter, None, None, true, None, None, None, true,
+        &model, "*::?lpha", &filter, None, None, true, None, None, None, true, None, None,
     );
     assert!(
         output.contains("Alpha"),
@@ -2709,6 +2715,8 @@ fn search_glob_mid_pattern() {
         None,
         None,
         true,
+        None,
+        None,
     );
     assert!(
         output.contains("pub_method"),
@@ -2852,6 +2860,8 @@ fn test_search_kind_trait() {
         None,
         Some("trait"),
         false,
+        None,
+        None,
     );
     assert!(
         output.contains("trait "),
@@ -2878,6 +2888,8 @@ fn test_search_kind_const() {
         None,
         Some("const"),
         false,
+        None,
+        None,
     );
     assert!(
         output.contains("const "),
@@ -3025,6 +3037,8 @@ fn test_cross_crate_search_accessible_paths() {
         None,
         None,
         false,
+        None,
+        None,
     );
 
     assert!(
@@ -3067,6 +3081,8 @@ fn test_cross_crate_search_all_item_types() {
         None,
         None,
         false,
+        None,
+        None,
     );
 
     // Should find both struct and trait
@@ -3077,6 +3093,57 @@ fn test_cross_crate_search_all_item_types() {
     assert!(
         output.contains("GlobInnerTrait"),
         "Should find GlobInnerTrait:\n{output}"
+    );
+}
+
+// === Cross-Crate --in-params / --in-returns Tests ===
+
+#[test]
+fn test_cross_crate_in_returns_excludes_non_functions() {
+    let index = build_test_fixture_index();
+    let filter = default_filter();
+    // The cross-crate index for test_fixture contains only structs from sub-crates (no functions).
+    // --in-returns must not crash and must exclude all non-function items.
+    let output = search::search_cross_crate_index(
+        &index,
+        "test_fixture",
+        "Glob",
+        &filter,
+        None,
+        None,
+        None,
+        false,
+        None,
+        Some("String"),
+    );
+    // GlobInnerItem is a struct, not a function — it must not appear
+    assert!(
+        !output.contains("GlobInnerItem"),
+        "--in-returns should exclude structs from cross-crate index:\n{output}"
+    );
+}
+
+#[test]
+fn test_cross_crate_in_params_no_name_pattern_no_panic() {
+    let index = build_test_fixture_index();
+    let filter = default_filter();
+    // Empty name pattern with in_params active: should not panic
+    let output = search::search_cross_crate_index(
+        &index,
+        "test_fixture",
+        "",
+        &filter,
+        None,
+        None,
+        None,
+        false,
+        Some("i32"),
+        None,
+    );
+    // No functions with i32 params in the cross-crate index → output must be empty
+    assert!(
+        output.is_empty(),
+        "--in-params i32 with no matching functions should produce empty output:\n{output}"
     );
 }
 
@@ -3288,6 +3355,8 @@ fn search_members_flag_expands_all_members() {
         None,
         None,
         true, // members=true
+        None,
+        None,
     );
     // With --members, fields and methods of PubStruct should be present
     assert!(
@@ -3350,6 +3419,8 @@ fn search_collapsed_display_format() {
         None,
         None,
         true, // members=true
+        None,
+        None,
     );
     // Collapsed display: members after parent use -:: continuation
     assert!(
@@ -3373,6 +3444,8 @@ fn search_members_sort_by_path() {
         None,
         None,
         true, // members=true
+        None,
+        None,
     );
     // With --members, sort is path-based: parent type comes before its members
     let lines: Vec<&str> = output
@@ -3401,6 +3474,8 @@ fn search_members_with_limit() {
         None,
         None,
         true, // members=true
+        None,
+        None,
     );
     // Limit counts expanded members — at most 2 result lines
     let result_lines: Vec<&str> = output
@@ -3433,6 +3508,8 @@ fn search_collapsed_variant_display() {
         None,
         None,
         true, // members=true
+        None,
+        None,
     );
     // Enum variants should use collapsed display
     assert!(
@@ -3466,6 +3543,8 @@ fn methods_of_no_stack_overflow() {
         methods_of: Some("PubStruct".to_string()),
         search_kind: None,
         members: false,
+        in_params: None,
+        in_returns: None,
     };
     let result = cargo_brief::run_search_pipeline(&args, &RemoteOpts::default());
     assert!(
@@ -3477,6 +3556,188 @@ fn methods_of_no_stack_overflow() {
     assert!(
         output.contains("pub_method"),
         "should contain methods of PubStruct:\n{output}"
+    );
+}
+
+// === --in-params / --in-returns Type Filter Tests ===
+
+#[test]
+fn test_in_returns_string() {
+    let model = fixture_model();
+    let filter = default_filter();
+    // async_function() -> String and where_fn(...) -> String should match; free_function() -> i32 should not
+    let output = search::render_search_filtered(
+        &model,
+        "*",
+        &filter,
+        None,
+        None,
+        true,
+        None,
+        None,
+        None,
+        false,
+        None,
+        Some("String"),
+    );
+    assert!(
+        output.contains("async_function"),
+        "--in-returns String should include async_function() -> String:\n{output}"
+    );
+    assert!(
+        output.contains("where_fn"),
+        "--in-returns String should include where_fn() -> String:\n{output}"
+    );
+    assert!(
+        !output.contains("free_function"),
+        "--in-returns String should exclude free_function() -> i32:\n{output}"
+    );
+}
+
+#[test]
+fn test_in_params_i32() {
+    let model = fixture_model();
+    let filter = default_filter();
+    // free_function(x: i32, y: i32) should match; async_function() (no params) should not
+    let output = search::render_search_filtered(
+        &model,
+        "*",
+        &filter,
+        None,
+        None,
+        true,
+        None,
+        None,
+        None,
+        false,
+        Some("i32"),
+        None,
+    );
+    assert!(
+        output.contains("free_function"),
+        "--in-params i32 should include free_function(x: i32, y: i32):\n{output}"
+    );
+    assert!(
+        !output.contains("async_function"),
+        "--in-params i32 should exclude async_function (no params):\n{output}"
+    );
+}
+
+#[test]
+fn test_in_params_and_in_returns_and_semantics() {
+    let model = fixture_model();
+    let filter = default_filter();
+    // free_function(x: i32, y: i32) -> i32: matches both i32 param and i32 return
+    let output = search::render_search_filtered(
+        &model,
+        "*",
+        &filter,
+        None,
+        None,
+        true,
+        None,
+        None,
+        None,
+        false,
+        Some("i32"),
+        Some("i32"),
+    );
+    assert!(
+        output.contains("free_function"),
+        "--in-params i32 --in-returns i32 should include free_function:\n{output}"
+    );
+    // async_function() -> String: has no i32 param → excluded
+    assert!(
+        !output.contains("async_function"),
+        "--in-params i32 --in-returns i32 should exclude async_function:\n{output}"
+    );
+    // No structs or enums in output
+    assert!(
+        !output.contains("struct "),
+        "type filter should exclude structs:\n{output}"
+    );
+}
+
+#[test]
+fn test_in_params_no_name_pattern_collects_all() {
+    let model = fixture_model();
+    let filter = default_filter();
+    // Empty name pattern with in_params active: should collect all functions
+    // whose ANY parameter type contains "i32"
+    let output = search::render_search_filtered(
+        &model,
+        "",
+        &filter,
+        None,
+        None,
+        true,
+        None,
+        None,
+        None,
+        false,
+        Some("i32"),
+        None,
+    );
+    assert!(
+        output.contains("free_function"),
+        "empty name pattern + --in-params i32 should still find free_function:\n{output}"
+    );
+    // Should not panic — absence of panic IS the test
+}
+
+#[test]
+fn test_in_returns_name_pattern_and_semantics() {
+    let model = fixture_model();
+    // Name pattern AND return type: only functions matching BOTH
+    let output = search::render_search_filtered(
+        &model,
+        "free",
+        &default_filter(),
+        None,
+        None,
+        true,
+        None,
+        None,
+        None,
+        false,
+        None,
+        Some("i32"),
+    );
+    assert!(
+        output.contains("free_function"),
+        "name 'free' + --in-returns i32 should find free_function:\n{output}"
+    );
+    // async_function matches name 'free'? No. But where_fn doesn't match 'free' either.
+    assert!(
+        !output.contains("async_function"),
+        "async_function does not match name 'free':\n{output}"
+    );
+}
+
+#[test]
+fn test_in_returns_excludes_non_functions() {
+    let model = fixture_model();
+    let mut filter = default_filter();
+    // Even with no_structs=false, structs must not appear when in_returns is active
+    // because the retain pass returns false for non-functions
+    filter.no_structs = false;
+    let output = search::render_search_filtered(
+        &model,
+        "*",
+        &filter,
+        None,
+        None,
+        true,
+        None,
+        None,
+        None,
+        false,
+        None,
+        Some("String"),
+    );
+    assert!(
+        !output.contains("struct "),
+        "--in-returns should exclude structs even if no_structs=false:\n{output}"
     );
 }
 
@@ -4691,6 +4952,8 @@ fn test_proc_macro_search() {
         methods_of: None,
         search_kind: None,
         members: false,
+        in_params: None,
+        in_returns: None,
     };
     let output = cargo_brief::run_search_pipeline(&args, &RemoteOpts::default())
         .expect("search pipeline failed for proc-macro-fixture");

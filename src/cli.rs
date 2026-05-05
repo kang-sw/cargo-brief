@@ -630,6 +630,14 @@ pub struct SearchArgs {
     /// Show all members (fields, variants, methods) of matched types
     #[arg(long)]
     pub members: bool,
+
+    /// Filter functions by parameter type (substring/glob/exact pattern)
+    #[arg(long, value_name = "PATTERN", help_heading = "Filtering")]
+    pub in_params: Option<String>,
+
+    /// Filter functions by return type (substring/glob/exact pattern)
+    #[arg(long, value_name = "PATTERN", help_heading = "Filtering")]
+    pub in_returns: Option<String>,
 }
 
 impl SearchArgs {
