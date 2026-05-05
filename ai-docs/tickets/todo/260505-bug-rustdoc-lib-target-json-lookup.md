@@ -21,6 +21,11 @@ in each caller. The integration branch already includes the upstream PR. This
 ticket tracks the review hardening needed before shipping it from the local
 integration branch.
 
+The upstream PR did not perform the repository documentation step: no spec,
+mental-model, README, or changelog updates were included with the external
+change. Treat any documentation impact as local integration work, not as already
+handled by PR #4.
+
 ## Decisions
 
 - Keep the lookup abstraction in `rustdoc_json`; callers should not hand-roll
@@ -54,6 +59,10 @@ package-derived JSON path is absent. Keep failure reporting useful enough that
 metadata failure is not indistinguishable from a missing rustdoc output file
 when the fallback was required.
 
+Also decide whether this bugfix requires spec or mental-model documentation
+after the implementation is hardened. The upstream PR provided no documentation
+pass, so absence of docs in the PR must not be treated as an intentional no-op.
+
 Success criteria:
 
 - Repeated mismatched-lib-name lookups do not repeatedly shell out in the same
@@ -61,4 +70,3 @@ Success criteria:
 - Error context still points users at the expected package-derived path while
   preserving enough fallback context for diagnosis.
 - `cargo test` passes.
-

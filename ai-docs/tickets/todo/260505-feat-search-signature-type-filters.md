@@ -22,6 +22,11 @@ The integration branch already includes the upstream PR. This ticket tracks the
 remaining work needed to make the new caller-visible behavior complete and
 documented.
 
+The upstream PR did not perform the repository documentation step: it adds
+caller-visible CLI behavior without spec, README, or changelog updates. Treat
+that omission as part of the local integration scope, not as a decision to skip
+documentation.
+
 ## Decisions
 
 - Keep the filters on `search`, not `code`; this is API-surface search over
@@ -40,6 +45,9 @@ Update the CLI and output/search specs for `--in-params` and `--in-returns`.
 The spec must settle whether type filters support the full existing pattern DSL,
 including exclusions, or only the positive OR/AND token subset currently wired
 by the PR.
+
+This phase exists because the external PR did no documentation pass before
+landing on the integration branch.
 
 Success criteria:
 
@@ -73,4 +81,3 @@ Success criteria:
 - README includes concise examples for finding functions by parameter and
   return type.
 - CHANGELOG records the new caller-visible search capability.
-
