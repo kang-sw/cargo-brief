@@ -1355,11 +1355,12 @@ fn pre_warm_cross_crate_json(model: &CrateModel, ctx: &PipelineContext) {
         let mut next_batch = Vec::new();
         for name in &batch {
             let base = name.split('@').next().unwrap_or(name);
-            let json_name = base.replace('-', "_");
-            let json_path = ctx.target_dir.join("doc").join(format!("{json_name}.json"));
-            if !json_path.exists() {
+            let doc_dir = ctx.target_dir.join("doc");
+            let Some(json_path) =
+                rustdoc_json::find_lib_json_path(base, ctx.manifest_path.as_deref(), &doc_dir)
+            else {
                 continue;
-            }
+            };
             let Ok(krate) = rustdoc_json::parse_rustdoc_json_cached(&json_path) else {
                 continue;
             };
@@ -1419,11 +1420,12 @@ fn discover_accessible_deps(
         let mut next_batch = Vec::new();
         for name in &batch {
             let base = name.split('@').next().unwrap_or(name);
-            let json_name = base.replace('-', "_");
-            let json_path = target_dir.join("doc").join(format!("{json_name}.json"));
-            if !json_path.exists() {
+            let doc_dir = target_dir.join("doc");
+            let Some(json_path) =
+                rustdoc_json::find_lib_json_path(base, manifest_path, &doc_dir)
+            else {
                 continue;
-            }
+            };
             let Ok(krate) = rustdoc_json::parse_rustdoc_json_cached(&json_path) else {
                 continue;
             };
