@@ -6,6 +6,7 @@ spec:
 related-mental-model:
   - remote-pipeline
   - target-resolution
+completed: 2026-05-05
 ---
 
 # rustdoc_json: harden lib target name JSON lookup from PR #4
@@ -51,6 +52,15 @@ Success criteria:
 - Normal package-name-equals-lib-name behavior remains covered by existing
   tests.
 
+### Result (81f84b0) - 2026-05-05
+
+Added `renamed-lib-package` to the integration fixture workspace with Cargo
+package name `renamed-lib-package` and Rust lib target name
+`renamed_lib_actual`. The regression test exercises
+`generate_rustdoc_json()` with `use_cache=false` to verify post-generation JSON
+discovery and then with `use_cache=true` to verify cached lookup through the lib
+target filename.
+
 ### Phase 2: Bound fallback metadata cost and error behavior
 
 Review `find_lib_json_path` and its fallback metadata lookup. Avoid repeated
@@ -70,3 +80,16 @@ Success criteria:
 - Error context still points users at the expected package-derived path while
   preserving enough fallback context for diagnosis.
 - `cargo test` passes.
+
+### Result (81f84b0) - 2026-05-05
+
+Cached the manifest-level Cargo package name to Rust lib/proc-macro target name
+map in process, so batch and BFS callers do not repeatedly shell out for every
+mismatched package lookup. The implementation deliberately does not cache JSON
+file existence, because batch generation can create files after an earlier miss
+in the same operation.
+
+Failure context still reports the package-derived expected path and now includes
+the fallback metadata result when available. Documentation follow-up landed in
+`228bf0d`, updating the remote cache spec and mental models for lib-target JSON
+filenames and the cached metadata fallback.
