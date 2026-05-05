@@ -1,8 +1,10 @@
 use std::collections::{HashMap, HashSet};
+use std::env;
 use std::io::IsTerminal;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Mutex, OnceLock};
 
 use anyhow::{Context, Result, bail};
 
@@ -57,6 +59,9 @@ impl LockfilePackages {
 
 /// Guard: runs the toolchain check at most once per process.
 static TOOLCHAIN_CHECKED: AtomicBool = AtomicBool::new(false);
+
+static LIB_TARGET_NAME_CACHE: OnceLock<Mutex<HashMap<String, HashMap<String, String>>>> =
+    OnceLock::new();
 
 /// Pre-check that the required rustup toolchain is available.
 ///
@@ -178,11 +183,28 @@ pub fn find_lib_json_path(
     alt.exists().then_some(alt)
 }
 
-/// Run `cargo metadata` to find the lib/proc-macro target name for a package.
+fn manifest_cache_key(manifest_path: Option<&str>) -> String {
+    if let Some(manifest) = manifest_path {
+        return Path::new(manifest)
+            .canonicalize()
+            .unwrap_or_else(|_| PathBuf::from(manifest))
+            .to_string_lossy()
+            .into_owned();
+    }
+
+    env::current_dir()
+        .ok()
+        .and_then(|cwd| cwd.canonicalize().ok())
+        .unwrap_or_else(|| PathBuf::from("."))
+        .to_string_lossy()
+        .into_owned()
+}
+
+/// Run `cargo metadata` to find lib/proc-macro target names for all packages.
 ///
 /// Runs without `--no-deps` so that external crates (e.g. crates.io deps in an
 /// isolated temp workspace) are also visible in the packages list.
-fn query_lib_target_name(package_name: &str, manifest_path: Option<&str>) -> Option<String> {
+fn load_lib_target_names(manifest_path: Option<&str>) -> Option<HashMap<String, String>> {
     let mut cmd = Command::new("cargo");
     cmd.args(["metadata", "--format-version=1"]);
     if let Some(m) = manifest_path {
@@ -194,22 +216,61 @@ fn query_lib_target_name(package_name: &str, manifest_path: Option<&str>) -> Opt
     }
     let meta: serde_json::Value = serde_json::from_slice(&output.stdout).ok()?;
     let packages = meta.get("packages")?.as_array()?;
-    let norm = package_name.replace('-', "_");
+
+    let mut names = HashMap::new();
     for pkg in packages {
-        if pkg["name"].as_str()?.replace('-', "_") != norm {
-            continue;
-        }
+        let package_name = pkg["name"].as_str()?;
         for target in pkg["targets"].as_array()? {
             let kinds = target["kind"].as_array()?;
             let is_lib = kinds
                 .iter()
                 .any(|k| matches!(k.as_str(), Some("lib") | Some("proc-macro")));
             if is_lib {
-                return target["name"].as_str().map(|n| n.replace('-', "_"));
+                let package_key = package_name.replace('-', "_");
+                let target_name = target["name"].as_str()?.replace('-', "_");
+                names.insert(package_key, target_name);
+                break;
             }
         }
     }
-    None
+    Some(names)
+}
+
+fn query_lib_target_name(package_name: &str, manifest_path: Option<&str>) -> Option<String> {
+    let norm = package_name.replace('-', "_");
+    let cache_key = manifest_cache_key(manifest_path);
+    let cache = LIB_TARGET_NAME_CACHE.get_or_init(|| Mutex::new(HashMap::new()));
+
+    if let Ok(guard) = cache.lock()
+        && let Some(cached) = guard.get(&cache_key)
+    {
+        return cached.get(&norm).cloned();
+    }
+
+    let names = load_lib_target_names(manifest_path)?;
+    let target_name = names.get(&norm).cloned();
+    if let Ok(mut guard) = cache.lock() {
+        guard.insert(cache_key, names);
+    }
+    target_name
+}
+
+fn describe_lib_json_fallback(
+    base_name: &str,
+    manifest_path: Option<&str>,
+    doc_dir: &Path,
+) -> String {
+    let expected_stem = base_name.replace('-', "_");
+    let Some(lib_name) = query_lib_target_name(base_name, manifest_path) else {
+        return format!("cargo metadata did not resolve a lib/proc-macro target for '{base_name}'");
+    };
+    if lib_name == expected_stem {
+        return format!("cargo metadata resolved '{base_name}' to the expected target name");
+    }
+    format!(
+        "cargo metadata resolved '{base_name}' to lib target '{lib_name}', but {} was also missing",
+        doc_dir.join(format!("{lib_name}.json")).display()
+    )
 }
 
 /// Invoke `cargo +nightly rustdoc` and return the path to the generated JSON file.
@@ -338,9 +399,10 @@ pub fn generate_rustdoc_json(
     let doc_dir = target_dir.join("doc");
     find_lib_json_path(base_name, manifest_path, &doc_dir).with_context(|| {
         let expected_name = base_name.replace('-', "_");
+        let fallback = describe_lib_json_fallback(base_name, manifest_path, &doc_dir);
         format!(
-            "Expected rustdoc JSON at {} but file not found",
-            doc_dir.join(format!("{expected_name}.json")).display()
+            "Expected rustdoc JSON at {} but file not found; {fallback}",
+            doc_dir.join(format!("{expected_name}.json")).display(),
         )
     })
 }

@@ -22,6 +22,10 @@ name = "proc-macro-fixture"
 version = "0.1.0"
 
 [[package]]
+name = "renamed-lib-package"
+version = "0.1.0"
+
+[[package]]
 name = "test-fixture"
 version = "0.1.0"
 dependencies = [

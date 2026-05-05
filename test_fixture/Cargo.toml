@@ -4,7 +4,13 @@ version = "0.1.0"
 edition = "2021"
 
 [workspace]
-members = ["glob-source", "glob-inner", "named-source", "proc-macro-fixture"]
+members = [
+    "glob-source",
+    "glob-inner",
+    "named-source",
+    "proc-macro-fixture",
+    "renamed-lib-package",
+]
 
 [features]
 default = ["full"]

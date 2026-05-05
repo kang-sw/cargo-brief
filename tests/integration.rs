@@ -31,6 +31,51 @@ fn fixture_model() -> CrateModel {
     CrateModel::from_crate(krate)
 }
 
+#[test]
+fn test_generate_rustdoc_json_finds_renamed_lib_target_json() {
+    let metadata = resolve::load_cargo_metadata(Some("test_fixture/Cargo.toml"))
+        .expect("Failed to load cargo metadata");
+    let doc_dir = metadata.target_dir.join("doc");
+    let package_named_json = doc_dir.join("renamed_lib_package.json");
+    let lib_named_json = doc_dir.join("renamed_lib_actual.json");
+    let _ = std::fs::remove_file(&package_named_json);
+    let _ = std::fs::remove_file(&lib_named_json);
+
+    let json_path = rustdoc_json::generate_rustdoc_json(
+        "renamed-lib-package",
+        "nightly",
+        Some("test_fixture/Cargo.toml"),
+        true,
+        &metadata.target_dir,
+        false,
+        false,
+    )
+    .expect("Failed to generate rustdoc JSON for renamed lib fixture");
+
+    assert_eq!(
+        json_path.file_name().and_then(|name| name.to_str()),
+        Some("renamed_lib_actual.json")
+    );
+    assert!(lib_named_json.exists());
+    assert!(
+        !package_named_json.exists(),
+        "rustdoc should not emit package-derived JSON for a renamed lib target"
+    );
+
+    let cached_path = rustdoc_json::generate_rustdoc_json(
+        "renamed-lib-package",
+        "nightly",
+        Some("test_fixture/Cargo.toml"),
+        true,
+        &metadata.target_dir,
+        false,
+        true,
+    )
+    .expect("Failed to find cached rustdoc JSON for renamed lib fixture");
+
+    assert_eq!(cached_path, lib_named_json);
+}
+
 fn default_filter() -> FilterArgs {
     FilterArgs {
         no_structs: false,
