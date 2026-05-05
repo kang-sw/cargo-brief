@@ -40,6 +40,8 @@ fn test_generate_rustdoc_json_finds_renamed_lib_target_json() {
     let lib_named_json = doc_dir.join("renamed_lib_actual.json");
     let _ = std::fs::remove_file(&package_named_json);
     let _ = std::fs::remove_file(&lib_named_json);
+    std::fs::create_dir_all(&doc_dir).expect("Failed to create rustdoc output directory");
+    std::fs::write(&package_named_json, "{}").expect("Failed to write stale package-derived JSON");
 
     let json_path = rustdoc_json::generate_rustdoc_json(
         "renamed-lib-package",
@@ -58,13 +60,13 @@ fn test_generate_rustdoc_json_finds_renamed_lib_target_json() {
     );
     assert!(lib_named_json.exists());
     assert!(
-        !package_named_json.exists(),
-        "rustdoc should not emit package-derived JSON for a renamed lib target"
+        package_named_json.exists(),
+        "test fixture should leave a stale package-derived JSON in place"
     );
 
     let cached_path = rustdoc_json::generate_rustdoc_json(
         "renamed-lib-package",
-        "nightly",
+        "definitely-not-a-real-toolchain",
         Some("test_fixture/Cargo.toml"),
         true,
         &metadata.target_dir,

@@ -8,6 +8,8 @@ use std::sync::{Mutex, OnceLock};
 
 use anyhow::{Context, Result, bail};
 
+type LibTargetNameMap = HashMap<String, String>;
+
 /// Package names and versions from Cargo.lock.
 ///
 /// Tracks all package names for validation, plus version lists for
@@ -60,8 +62,11 @@ impl LockfilePackages {
 /// Guard: runs the toolchain check at most once per process.
 static TOOLCHAIN_CHECKED: AtomicBool = AtomicBool::new(false);
 
-static LIB_TARGET_NAME_CACHE: OnceLock<Mutex<HashMap<String, HashMap<String, String>>>> =
-    OnceLock::new();
+static LIB_TARGET_NAME_CACHE: OnceLock<Mutex<HashMap<String, LibTargetNameMap>>> = OnceLock::new();
+
+#[cfg(test)]
+static LIB_TARGET_METADATA_LOADS: std::sync::atomic::AtomicUsize =
+    std::sync::atomic::AtomicUsize::new(0);
 
 /// Pre-check that the required rustup toolchain is available.
 ///
@@ -161,26 +166,25 @@ fn read_tty_line() -> std::io::Result<String> {
 
 /// Find the rustdoc JSON file for a package in a doc directory.
 ///
-/// Tries the package-name-based path first (`pkg_name → underscored → .json`).
-/// If not found, queries `cargo metadata` to discover the actual lib target name.
+/// Uses `cargo metadata` to discover the actual lib target name when available.
+/// Falls back to the package-name-based path (`pkg_name → underscored → .json`).
 /// This handles crates where `[lib] name` differs from the package name
 /// (e.g. `rustls-webpki` generates `webpki.json`, not `rustls_webpki.json`).
 pub fn find_lib_json_path(
-    base_name: &str,
+    crate_spec: &str,
     manifest_path: Option<&str>,
     doc_dir: &Path,
 ) -> Option<PathBuf> {
+    let base_name = crate_spec.split('@').next().unwrap_or(crate_spec);
     let expected_stem = base_name.replace('-', "_");
     let expected = doc_dir.join(format!("{expected_stem}.json"));
-    if expected.exists() {
-        return Some(expected);
+    if let Some(lib_name) = query_lib_target_name(crate_spec, manifest_path)
+        && lib_name != expected_stem
+    {
+        let alt = doc_dir.join(format!("{lib_name}.json"));
+        return alt.exists().then_some(alt);
     }
-    let lib_name = query_lib_target_name(base_name, manifest_path)?;
-    if lib_name == expected_stem {
-        return None;
-    }
-    let alt = doc_dir.join(format!("{lib_name}.json"));
-    alt.exists().then_some(alt)
+    expected.exists().then_some(expected)
 }
 
 fn manifest_cache_key(manifest_path: Option<&str>) -> String {
@@ -204,7 +208,10 @@ fn manifest_cache_key(manifest_path: Option<&str>) -> String {
 ///
 /// Runs without `--no-deps` so that external crates (e.g. crates.io deps in an
 /// isolated temp workspace) are also visible in the packages list.
-fn load_lib_target_names(manifest_path: Option<&str>) -> Option<HashMap<String, String>> {
+fn load_lib_target_names(manifest_path: Option<&str>) -> Option<LibTargetNameMap> {
+    #[cfg(test)]
+    LIB_TARGET_METADATA_LOADS.fetch_add(1, Ordering::Relaxed);
+
     let mut cmd = Command::new("cargo");
     cmd.args(["metadata", "--format-version=1"]);
     if let Some(m) = manifest_path {
@@ -217,38 +224,57 @@ fn load_lib_target_names(manifest_path: Option<&str>) -> Option<HashMap<String, 
     let meta: serde_json::Value = serde_json::from_slice(&output.stdout).ok()?;
     let packages = meta.get("packages")?.as_array()?;
 
-    let mut names = HashMap::new();
+    let mut entries = Vec::new();
+    let mut package_counts: HashMap<String, usize> = HashMap::new();
     for pkg in packages {
         let package_name = pkg["name"].as_str()?;
+        let package_key = package_name.replace('-', "_");
+        let version = pkg["version"].as_str()?;
         for target in pkg["targets"].as_array()? {
             let kinds = target["kind"].as_array()?;
             let is_lib = kinds
                 .iter()
                 .any(|k| matches!(k.as_str(), Some("lib") | Some("proc-macro")));
             if is_lib {
-                let package_key = package_name.replace('-', "_");
                 let target_name = target["name"].as_str()?.replace('-', "_");
-                names.insert(package_key, target_name);
+                *package_counts.entry(package_key.clone()).or_default() += 1;
+                entries.push((package_key, version.to_string(), target_name));
                 break;
             }
+        }
+    }
+
+    let mut names = HashMap::new();
+    for (package_key, version, target_name) in entries {
+        names.insert(format!("{package_key}@{version}"), target_name.clone());
+        if package_counts.get(&package_key) == Some(&1) {
+            names.insert(package_key, target_name);
         }
     }
     Some(names)
 }
 
-fn query_lib_target_name(package_name: &str, manifest_path: Option<&str>) -> Option<String> {
-    let norm = package_name.replace('-', "_");
+fn lib_target_cache_lookup_key(crate_spec: &str) -> String {
+    let (base_name, version) = crate_spec
+        .split_once('@')
+        .map_or((crate_spec, None), |(name, version)| (name, Some(version)));
+    let norm = base_name.replace('-', "_");
+    version.map_or(norm.clone(), |version| format!("{norm}@{version}"))
+}
+
+fn query_lib_target_name(crate_spec: &str, manifest_path: Option<&str>) -> Option<String> {
+    let lookup_key = lib_target_cache_lookup_key(crate_spec);
     let cache_key = manifest_cache_key(manifest_path);
     let cache = LIB_TARGET_NAME_CACHE.get_or_init(|| Mutex::new(HashMap::new()));
 
     if let Ok(guard) = cache.lock()
         && let Some(cached) = guard.get(&cache_key)
     {
-        return cached.get(&norm).cloned();
+        return cached.get(&lookup_key).cloned();
     }
 
     let names = load_lib_target_names(manifest_path)?;
-    let target_name = names.get(&norm).cloned();
+    let target_name = names.get(&lookup_key).cloned();
     if let Ok(mut guard) = cache.lock() {
         guard.insert(cache_key, names);
     }
@@ -256,19 +282,22 @@ fn query_lib_target_name(package_name: &str, manifest_path: Option<&str>) -> Opt
 }
 
 fn describe_lib_json_fallback(
-    base_name: &str,
+    crate_spec: &str,
     manifest_path: Option<&str>,
     doc_dir: &Path,
 ) -> String {
+    let base_name = crate_spec.split('@').next().unwrap_or(crate_spec);
     let expected_stem = base_name.replace('-', "_");
-    let Some(lib_name) = query_lib_target_name(base_name, manifest_path) else {
-        return format!("cargo metadata did not resolve a lib/proc-macro target for '{base_name}'");
+    let Some(lib_name) = query_lib_target_name(crate_spec, manifest_path) else {
+        return format!(
+            "cargo metadata did not resolve a lib/proc-macro target for '{crate_spec}'"
+        );
     };
     if lib_name == expected_stem {
-        return format!("cargo metadata resolved '{base_name}' to the expected target name");
+        return format!("cargo metadata resolved '{crate_spec}' to the expected target name");
     }
     format!(
-        "cargo metadata resolved '{base_name}' to lib target '{lib_name}', but {} was also missing",
+        "cargo metadata resolved '{crate_spec}' to lib target '{lib_name}', but {} was also missing",
         doc_dir.join(format!("{lib_name}.json")).display()
     )
 }
@@ -287,9 +316,8 @@ pub fn generate_rustdoc_json(
     use_cache: bool,
 ) -> Result<PathBuf> {
     if use_cache {
-        let base_name = crate_name.split('@').next().unwrap_or(crate_name);
         let doc_dir = target_dir.join("doc");
-        if let Some(json_path) = find_lib_json_path(base_name, manifest_path, &doc_dir) {
+        if let Some(json_path) = find_lib_json_path(crate_name, manifest_path, &doc_dir) {
             if verbose {
                 eprintln!("[cargo-brief] Using cached rustdoc JSON for '{crate_name}'");
             }
@@ -397,9 +425,9 @@ pub fn generate_rustdoc_json(
     // Use find_lib_json_path to handle crates where [lib] name != package name.
     let base_name = crate_name.split('@').next().unwrap_or(crate_name);
     let doc_dir = target_dir.join("doc");
-    find_lib_json_path(base_name, manifest_path, &doc_dir).with_context(|| {
+    find_lib_json_path(crate_name, manifest_path, &doc_dir).with_context(|| {
         let expected_name = base_name.replace('-', "_");
-        let fallback = describe_lib_json_fallback(base_name, manifest_path, &doc_dir);
+        let fallback = describe_lib_json_fallback(crate_name, manifest_path, &doc_dir);
         format!(
             "Expected rustdoc JSON at {} but file not found; {fallback}",
             doc_dir.join(format!("{expected_name}.json")).display(),
@@ -538,9 +566,8 @@ pub fn batch_generate_rustdoc_json(
     let mut to_generate = Vec::new();
 
     for &name in crate_names {
-        let base = name.split('@').next().unwrap_or(name);
         let doc_dir = target_dir.join("doc");
-        if find_lib_json_path(base, manifest_path, &doc_dir).is_some() {
+        if find_lib_json_path(name, manifest_path, &doc_dir).is_some() {
             succeeded.push(name.to_string());
         } else {
             to_generate.push(name);
@@ -600,9 +627,8 @@ pub fn batch_generate_rustdoc_json(
 
     // Check which JSONs got created
     for name in &to_generate {
-        let base = name.split('@').next().unwrap_or(name);
         let doc_dir = target_dir.join("doc");
-        if find_lib_json_path(base, manifest_path, &doc_dir).is_some() {
+        if find_lib_json_path(name, manifest_path, &doc_dir).is_some() {
             succeeded.push(name.to_string());
         } else if verbose {
             eprintln!("warning: batch cargo doc did not produce JSON for '{name}'");
@@ -623,4 +649,46 @@ fn pick_highest_version_spec<'a>(specs: &[&'a str]) -> Option<&'a str> {
         })
         .max_by(|a, b| a.0.cmp(&b.0))
         .map(|(_, s)| s)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn clear_lib_target_name_cache() {
+        if let Some(cache) = LIB_TARGET_NAME_CACHE.get()
+            && let Ok(mut guard) = cache.lock()
+        {
+            guard.clear();
+        }
+        LIB_TARGET_METADATA_LOADS.store(0, Ordering::Relaxed);
+    }
+
+    #[test]
+    fn lib_target_cache_lookup_key_preserves_version() {
+        assert_eq!(
+            lib_target_cache_lookup_key("renamed-lib-package"),
+            "renamed_lib_package"
+        );
+        assert_eq!(
+            lib_target_cache_lookup_key("renamed-lib-package@0.1.0"),
+            "renamed_lib_package@0.1.0"
+        );
+    }
+
+    #[test]
+    fn lib_target_name_lookup_reuses_manifest_metadata() {
+        clear_lib_target_name_cache();
+
+        assert_eq!(
+            query_lib_target_name("renamed-lib-package", Some("test_fixture/Cargo.toml")),
+            Some("renamed_lib_actual".to_string())
+        );
+        assert_eq!(
+            query_lib_target_name("renamed-lib-package", Some("test_fixture/Cargo.toml")),
+            Some("renamed_lib_actual".to_string())
+        );
+
+        assert_eq!(LIB_TARGET_METADATA_LOADS.load(Ordering::Relaxed), 1);
+    }
 }

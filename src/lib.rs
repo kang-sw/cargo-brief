@@ -1354,10 +1354,9 @@ fn pre_warm_cross_crate_json(model: &CrateModel, ctx: &PipelineContext) {
         // Parse this batch's crates to discover the next level
         let mut next_batch = Vec::new();
         for name in &batch {
-            let base = name.split('@').next().unwrap_or(name);
             let doc_dir = ctx.target_dir.join("doc");
             let Some(json_path) =
-                rustdoc_json::find_lib_json_path(base, ctx.manifest_path.as_deref(), &doc_dir)
+                rustdoc_json::find_lib_json_path(name, ctx.manifest_path.as_deref(), &doc_dir)
             else {
                 continue;
             };
@@ -1419,10 +1418,8 @@ fn discover_accessible_deps(
 
         let mut next_batch = Vec::new();
         for name in &batch {
-            let base = name.split('@').next().unwrap_or(name);
             let doc_dir = target_dir.join("doc");
-            let Some(json_path) =
-                rustdoc_json::find_lib_json_path(base, manifest_path, &doc_dir)
+            let Some(json_path) = rustdoc_json::find_lib_json_path(name, manifest_path, &doc_dir)
             else {
                 continue;
             };
