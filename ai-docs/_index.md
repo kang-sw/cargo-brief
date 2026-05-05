@@ -135,8 +135,8 @@ Domain docs in `ai-docs/mental-model/`:
 
 - **Tickets**: `ai-docs/tickets/<status>/YYMMDD-<category>-<name>.md`. Categories:
   `bug`, `feat`, `refactor`, `chore`, `research`. `YYMMDD` is creation date (never changes).
-- **Plans**: `ai-docs/plans/YYYY-MM/DD-hhmm.<name>.md`.
-- **Dependency docs**: `ai-docs/deps/<package>[v<ver>].md` — verified API facts.
+- **Plans**: `ai-docs/.plans/YYYY-MM/DD-hhmm.<name>.md`.
+- **Dependency docs**: use `ws-ask-api` / `ai-docs/.deps/`; legacy dependency notes live under `ai-docs/ref/` if present.
 
 ## Workspace Reference
 
@@ -151,6 +151,12 @@ Domain docs in `ai-docs/mental-model/`:
 ## Documented Dependencies
 
 (none yet — add entries here as API drift is discovered)
+
+## Ticket Queue
+
+1. `260423-bug-cfg-parse-implicit-and-fallback`
+2. `260423-feat-subcommand-quickguide-tables`
+3. `260423-feat-verbose-download-progress`
 
 ## Session Notes
 
