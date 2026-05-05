@@ -8,7 +8,19 @@ use std::sync::{Mutex, OnceLock};
 
 use anyhow::{Context, Result, bail};
 
-type LibTargetNameMap = HashMap<String, String>;
+type LibTargetNameMap = HashMap<String, LibTargetName>;
+
+#[derive(Clone)]
+enum LibTargetName {
+    Target(String),
+    Ambiguous,
+}
+
+enum LibTargetNameLookup {
+    Target(String),
+    Ambiguous,
+    Unknown,
+}
 
 /// Package names and versions from Cargo.lock.
 ///
@@ -178,13 +190,16 @@ pub fn find_lib_json_path(
     let base_name = crate_spec.split('@').next().unwrap_or(crate_spec);
     let expected_stem = base_name.replace('-', "_");
     let expected = doc_dir.join(format!("{expected_stem}.json"));
-    if let Some(lib_name) = query_lib_target_name(crate_spec, manifest_path)
-        && lib_name != expected_stem
-    {
-        let alt = doc_dir.join(format!("{lib_name}.json"));
-        return alt.exists().then_some(alt);
+    match query_lib_target_name(crate_spec, manifest_path) {
+        LibTargetNameLookup::Target(lib_name) if lib_name != expected_stem => {
+            let alt = doc_dir.join(format!("{lib_name}.json"));
+            alt.exists().then_some(alt)
+        }
+        LibTargetNameLookup::Ambiguous => None,
+        LibTargetNameLookup::Target(_) | LibTargetNameLookup::Unknown => {
+            expected.exists().then_some(expected)
+        }
     }
-    expected.exists().then_some(expected)
 }
 
 fn manifest_cache_key(manifest_path: Option<&str>) -> String {
@@ -246,9 +261,14 @@ fn load_lib_target_names(manifest_path: Option<&str>) -> Option<LibTargetNameMap
 
     let mut names = HashMap::new();
     for (package_key, version, target_name) in entries {
-        names.insert(format!("{package_key}@{version}"), target_name.clone());
+        names.insert(
+            format!("{package_key}@{version}"),
+            LibTargetName::Target(target_name.clone()),
+        );
         if package_counts.get(&package_key) == Some(&1) {
-            names.insert(package_key, target_name);
+            names.insert(package_key, LibTargetName::Target(target_name));
+        } else {
+            names.insert(package_key, LibTargetName::Ambiguous);
         }
     }
     Some(names)
@@ -262,7 +282,15 @@ fn lib_target_cache_lookup_key(crate_spec: &str) -> String {
     version.map_or(norm.clone(), |version| format!("{norm}@{version}"))
 }
 
-fn query_lib_target_name(crate_spec: &str, manifest_path: Option<&str>) -> Option<String> {
+fn lookup_target_name(names: &LibTargetNameMap, lookup_key: &str) -> LibTargetNameLookup {
+    match names.get(lookup_key) {
+        Some(LibTargetName::Target(name)) => LibTargetNameLookup::Target(name.clone()),
+        Some(LibTargetName::Ambiguous) => LibTargetNameLookup::Ambiguous,
+        None => LibTargetNameLookup::Unknown,
+    }
+}
+
+fn query_lib_target_name(crate_spec: &str, manifest_path: Option<&str>) -> LibTargetNameLookup {
     let lookup_key = lib_target_cache_lookup_key(crate_spec);
     let cache_key = manifest_cache_key(manifest_path);
     let cache = LIB_TARGET_NAME_CACHE.get_or_init(|| Mutex::new(HashMap::new()));
@@ -270,11 +298,13 @@ fn query_lib_target_name(crate_spec: &str, manifest_path: Option<&str>) -> Optio
     if let Ok(guard) = cache.lock()
         && let Some(cached) = guard.get(&cache_key)
     {
-        return cached.get(&lookup_key).cloned();
+        return lookup_target_name(cached, &lookup_key);
     }
 
-    let names = load_lib_target_names(manifest_path)?;
-    let target_name = names.get(&lookup_key).cloned();
+    let Some(names) = load_lib_target_names(manifest_path) else {
+        return LibTargetNameLookup::Unknown;
+    };
+    let target_name = lookup_target_name(&names, &lookup_key);
     if let Ok(mut guard) = cache.lock() {
         guard.insert(cache_key, names);
     }
@@ -288,10 +318,18 @@ fn describe_lib_json_fallback(
 ) -> String {
     let base_name = crate_spec.split('@').next().unwrap_or(crate_spec);
     let expected_stem = base_name.replace('-', "_");
-    let Some(lib_name) = query_lib_target_name(crate_spec, manifest_path) else {
-        return format!(
-            "cargo metadata did not resolve a lib/proc-macro target for '{crate_spec}'"
-        );
+    let lib_name = match query_lib_target_name(crate_spec, manifest_path) {
+        LibTargetNameLookup::Target(lib_name) => lib_name,
+        LibTargetNameLookup::Ambiguous => {
+            return format!(
+                "cargo metadata found multiple package versions for unversioned '{crate_spec}'"
+            );
+        }
+        LibTargetNameLookup::Unknown => {
+            return format!(
+                "cargo metadata did not resolve a lib/proc-macro target for '{crate_spec}'"
+            );
+        }
     };
     if lib_name == expected_stem {
         return format!("cargo metadata resolved '{crate_spec}' to the expected target name");
@@ -655,6 +693,8 @@ fn pick_highest_version_spec<'a>(specs: &[&'a str]) -> Option<&'a str> {
 mod tests {
     use super::*;
 
+    static LIB_TARGET_TEST_LOCK: Mutex<()> = Mutex::new(());
+
     fn clear_lib_target_name_cache() {
         if let Some(cache) = LIB_TARGET_NAME_CACHE.get()
             && let Ok(mut guard) = cache.lock()
@@ -678,17 +718,40 @@ mod tests {
 
     #[test]
     fn lib_target_name_lookup_reuses_manifest_metadata() {
+        let _guard = LIB_TARGET_TEST_LOCK.lock().unwrap();
         clear_lib_target_name_cache();
 
-        assert_eq!(
-            query_lib_target_name("renamed-lib-package", Some("test_fixture/Cargo.toml")),
-            Some("renamed_lib_actual".to_string())
-        );
-        assert_eq!(
-            query_lib_target_name("renamed-lib-package", Some("test_fixture/Cargo.toml")),
-            Some("renamed_lib_actual".to_string())
-        );
+        match query_lib_target_name("renamed-lib-package", Some("test_fixture/Cargo.toml")) {
+            LibTargetNameLookup::Target(name) => assert_eq!(name, "renamed_lib_actual"),
+            LibTargetNameLookup::Ambiguous | LibTargetNameLookup::Unknown => {
+                panic!("renamed-lib-package should resolve to its lib target")
+            }
+        }
+        match query_lib_target_name("renamed-lib-package", Some("test_fixture/Cargo.toml")) {
+            LibTargetNameLookup::Target(name) => assert_eq!(name, "renamed_lib_actual"),
+            LibTargetNameLookup::Ambiguous | LibTargetNameLookup::Unknown => {
+                panic!("cached renamed-lib-package should resolve to its lib target")
+            }
+        }
 
         assert_eq!(LIB_TARGET_METADATA_LOADS.load(Ordering::Relaxed), 1);
+    }
+
+    #[test]
+    fn ambiguous_unversioned_lookup_does_not_accept_package_stem_json() {
+        let _guard = LIB_TARGET_TEST_LOCK.lock().unwrap();
+        clear_lib_target_name_cache();
+        let manifest_path = "ambiguous-fixture/Cargo.toml";
+        let cache_key = manifest_cache_key(Some(manifest_path));
+        let cache = LIB_TARGET_NAME_CACHE.get_or_init(|| Mutex::new(HashMap::new()));
+        let mut names = HashMap::new();
+        names.insert("ambiguous_pkg".to_string(), LibTargetName::Ambiguous);
+        cache.lock().unwrap().insert(cache_key, names);
+
+        let temp_dir = tempfile::tempdir().expect("create temp dir");
+        let doc_dir = temp_dir.path();
+        std::fs::write(doc_dir.join("ambiguous_pkg.json"), "{}").expect("write stale json");
+
+        assert!(find_lib_json_path("ambiguous-pkg", Some(manifest_path), doc_dir).is_none());
     }
 }
