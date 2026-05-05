@@ -391,7 +391,7 @@ Capped at 5 entries before `+ N more`. Synthetic and blanket impls excluded unle
 
 Cross-crate search includes struct fields, enum variants, and union fields with the same formatting as local-crate results.
 
-### Member Display {#260423-search-member-display}
+### Member Display {#260505-search-output-member-display}
 
 By default, member items (fields, methods, variants) are hidden in search results unless a search token exactly matches the member's own name.
 

@@ -117,8 +117,8 @@ $CACHE_DIR/
     Cargo.toml                       # exact-pinned dependency (=1.44.1)
     src/lib.rs                       # empty dummy crate
     Cargo.lock                       # written by cargo on first build
-    target/doc/tokio.json            # rustdoc JSON output
-    target/doc/tokio.bin             # bincode parse cache
+    target/doc/tokio.json            # rustdoc JSON output, named by the Rust lib target
+    target/doc/tokio.bin             # bincode parse cache, next to the JSON file
 ```
 
 Directory name format: `{name}[{resolved_version}]` with features appended as `+feat1+feat2` in alphabetical order. Different crate specs that resolve to the same version and feature set share one directory. The workspace `Cargo.toml` pins the version exactly (`={resolved_version}`) to prevent cargo from selecting a different version on subsequent builds.
@@ -128,10 +128,15 @@ Directory name format: `{name}[{resolved_version}]` with features appended as `+
 | Cache layer | TTL / invalidation |
 |---|---|
 | Version response (`versions/{name}.json`) | 24 hours from file mtime |
-| rustdoc JSON (`target/doc/{name}.json`) | No TTL — reused indefinitely |
-| Bincode parse cache (`target/doc/{name}.bin`) | Regenerated when absent or older than the `.json` |
+| rustdoc JSON (`target/doc/{lib_target_name}.json`) | No TTL — reused indefinitely |
+| Bincode parse cache (`target/doc/{lib_target_name}.bin`) | Regenerated when absent or older than the `.json` |
 
 rustdoc JSON is never automatically invalidated when a new crate version is released. The only invalidation paths are `cargo brief clean <name>` (removes the named workspace) or `cargo brief clean` (removes the entire cache). See the `clean` subcommand in [CLI Surface](cli-surface.md#260423-clean-subcommand).
+
+The JSON and bincode filenames use the Rust lib/proc-macro target name emitted
+by rustdoc, not necessarily the Cargo package name. For most crates these names
+are equivalent after hyphen-to-underscore normalization; crates with an explicit
+`[lib] name = "..."` are cached under that lib target name.
 
 ## Nightly Toolchain Detection {#260423-toolchain-detection}
 
