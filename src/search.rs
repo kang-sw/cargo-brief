@@ -323,7 +323,9 @@ pub fn render_search(
         false,
         None,
         None,
+        None,
     )
+    .output
 }
 
 /// Like `render_search`, but with optional exact-parent filtering for `--methods-of`.
@@ -353,7 +355,9 @@ pub fn render_search_methods_of(
         false,
         None,
         None,
+        None,
     )
+    .output
 }
 
 /// Full search with all options including kind filter.
@@ -385,6 +389,42 @@ pub fn render_search_filtered(
         members,
         in_params,
         in_returns,
+        None,
+    )
+    .output
+}
+
+/// Full search with all options, returning the rendered output plus the total match count.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn render_search_filtered_counted(
+    model: &CrateModel,
+    pattern: &str,
+    filter: &FilterArgs,
+    limit: Option<&str>,
+    observer_module_path: Option<&str>,
+    same_crate: bool,
+    reachable: Option<&ReachableInfo>,
+    methods_of: Option<&str>,
+    search_kind: Option<&str>,
+    members: bool,
+    in_params: Option<&str>,
+    in_returns: Option<&str>,
+    header_total: Option<usize>,
+) -> SearchOutput {
+    render_search_inner(
+        model,
+        pattern,
+        filter,
+        limit,
+        observer_module_path,
+        same_crate,
+        reachable,
+        methods_of,
+        search_kind,
+        members,
+        in_params,
+        in_returns,
+        header_total,
     )
 }
 
@@ -437,7 +477,8 @@ fn render_search_inner(
     members: bool,
     in_params: Option<&str>,
     in_returns: Option<&str>,
-) -> String {
+    header_total: Option<usize>,
+) -> SearchOutput {
     let crate_name = model.crate_name();
     let observer = observer_module_path
         .map(|p| {
@@ -626,7 +667,8 @@ fn render_search_inner(
     let skipped_after = total - end;
 
     // Render
-    let mut output = search_header(crate_name, pattern, in_params, in_returns, total);
+    let display_total = header_total.unwrap_or(total);
+    let mut output = search_header(crate_name, pattern, in_params, in_returns, display_total);
 
     if skipped_before > 0 {
         output.push_str(&format!("// (skipped {skipped_before} results)\n"));
@@ -663,7 +705,7 @@ fn render_search_inner(
         }
     }
 
-    output
+    SearchOutput { output, total }
 }
 
 /// Walk a module recursively, collecting all leaf items.
@@ -1538,6 +1580,11 @@ fn collect_impl_summary(model: &CrateModel, item: &Item, args: &FilterArgs) -> S
 
 use crate::cross_crate::{AccessibleItemKind, CrossCrateIndex};
 
+pub(crate) struct SearchOutput {
+    pub(crate) output: String,
+    pub(crate) total: usize,
+}
+
 /// Search a `CrossCrateIndex` and render results with accessible paths.
 ///
 /// Iterates accessible items, matches against the pattern, and renders
@@ -1545,6 +1592,34 @@ use crate::cross_crate::{AccessibleItemKind, CrossCrateIndex};
 /// internal crate path.
 #[allow(clippy::too_many_arguments)]
 pub fn search_cross_crate_index(
+    index: &CrossCrateIndex,
+    facade_crate_name: &str,
+    pattern: &str,
+    filter: &FilterArgs,
+    limit: Option<&str>,
+    search_kind: Option<&str>,
+    methods_of: Option<&str>,
+    members: bool,
+    in_params: Option<&str>,
+    in_returns: Option<&str>,
+) -> String {
+    search_cross_crate_index_counted(
+        index,
+        facade_crate_name,
+        pattern,
+        filter,
+        limit,
+        search_kind,
+        methods_of,
+        members,
+        in_params,
+        in_returns,
+    )
+    .output
+}
+
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn search_cross_crate_index_counted(
     index: &CrossCrateIndex,
     _facade_crate_name: &str,
     pattern: &str,
@@ -1555,7 +1630,7 @@ pub fn search_cross_crate_index(
     members: bool,
     in_params: Option<&str>,
     in_returns: Option<&str>,
-) -> String {
+) -> SearchOutput {
     // Smart-case
     let case_sensitive = pattern.chars().any(|c| c.is_uppercase());
     let parsed = parse_pattern(pattern, case_sensitive);
@@ -1850,7 +1925,7 @@ pub fn search_cross_crate_index(
         output.push_str(&format!("// ... and {skipped_after} more results\n"));
     }
 
-    output
+    SearchOutput { output, total }
 }
 
 /// Check if a kind should be skipped based on filter flags.

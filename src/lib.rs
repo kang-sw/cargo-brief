@@ -624,8 +624,9 @@ fn run_shared_search_pipeline(ctx: &PipelineContext, args: &SearchArgs) -> Resul
     let search_fn = |model: &CrateModel,
                      observer: Option<&str>,
                      same_crate: bool,
-                     reachable: Option<&ReachableInfo>| {
-        search::render_search_filtered(
+                     reachable: Option<&ReachableInfo>,
+                     header_total: Option<usize>| {
+        search::render_search_filtered_counted(
             model,
             &pattern,
             &args.filter,
@@ -638,10 +639,11 @@ fn run_shared_search_pipeline(ctx: &PipelineContext, args: &SearchArgs) -> Resul
             members,
             in_params,
             in_returns,
+            header_total,
         )
     };
 
-    let mut output = search_fn(
+    let local_output = search_fn(
         &model,
         if same_crate {
             args.at_mod.as_deref()
@@ -650,7 +652,9 @@ fn run_shared_search_pipeline(ctx: &PipelineContext, args: &SearchArgs) -> Resul
         },
         same_crate,
         reachable.as_ref(),
+        None,
     );
+    let mut output = local_output.output;
 
     // Cross-crate search: build unified index, search with accessible paths
     if cross_crate::root_has_cross_crate_reexports(&model) {
@@ -667,7 +671,7 @@ fn run_shared_search_pipeline(ctx: &PipelineContext, args: &SearchArgs) -> Resul
             &ctx.workspace_members,
             &ctx.available_packages,
         );
-        let cross_output = search::search_cross_crate_index(
+        let cross_output = search::search_cross_crate_index_counted(
             &index,
             model.crate_name(),
             &pattern,
@@ -679,8 +683,22 @@ fn run_shared_search_pipeline(ctx: &PipelineContext, args: &SearchArgs) -> Resul
             in_params,
             in_returns,
         );
-        if !cross_output.is_empty() {
-            output.push_str(&cross_output);
+        if cross_output.total > 0 {
+            output = search_fn(
+                &model,
+                if same_crate {
+                    args.at_mod.as_deref()
+                } else {
+                    None
+                },
+                same_crate,
+                reachable.as_ref(),
+                Some(local_output.total + cross_output.total),
+            )
+            .output;
+        }
+        if !cross_output.output.is_empty() {
+            output.push_str(&cross_output.output);
         }
     }
 

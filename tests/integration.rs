@@ -3635,6 +3635,27 @@ fn search_collapsed_variant_display() {
 
 // === run_search_pipeline entry point tests ===
 
+fn default_search_args(patterns: Vec<&str>) -> SearchArgs {
+    SearchArgs {
+        crate_name: "test-fixture".to_string(),
+        patterns: patterns.into_iter().map(str::to_string).collect(),
+        filter: default_filter(),
+        global: GlobalArgs {
+            toolchain: "nightly".to_string(),
+            verbose: false,
+        },
+        at_package: None,
+        at_mod: None,
+        manifest_path: Some("test_fixture/Cargo.toml".to_string()),
+        limit: None,
+        methods_of: None,
+        search_kind: None,
+        members: false,
+        in_params: None,
+        in_returns: None,
+    }
+}
+
 #[test]
 fn methods_of_no_stack_overflow() {
     // Must call run_search_pipeline (not render_search_methods_of) to exercise
@@ -3667,6 +3688,45 @@ fn methods_of_no_stack_overflow() {
     assert!(
         output.contains("pub_method"),
         "should contain methods of PubStruct:\n{output}"
+    );
+}
+
+#[test]
+fn search_pipeline_header_counts_cross_crate_results() {
+    let args = default_search_args(vec!["GlobInnerItem"]);
+
+    let output = cargo_brief::run_search_pipeline(&args, &RemoteOpts::default())
+        .expect("search pipeline failed");
+
+    assert!(
+        output.starts_with("// crate test_fixture — search: \"GlobInnerItem\" (1 results)"),
+        "first header should include cross-crate appended results:\n{output}"
+    );
+    assert!(
+        output.contains("struct GlobInnerItem"),
+        "search pipeline should still render the cross-crate result:\n{output}"
+    );
+}
+
+#[test]
+fn search_pipeline_header_counts_limited_cross_crate_total() {
+    let mut args = default_search_args(vec!["GlobInnerItem"]);
+    args.limit = Some("0".to_string());
+
+    let output = cargo_brief::run_search_pipeline(&args, &RemoteOpts::default())
+        .expect("search pipeline failed");
+
+    assert!(
+        output.starts_with("// crate test_fixture — search: \"GlobInnerItem\" (1 results)"),
+        "limited search header should report total matches, not rendered rows:\n{output}"
+    );
+    assert!(
+        output.contains("// ... and 1 more results"),
+        "limited search should keep pagination based on total matches:\n{output}"
+    );
+    assert!(
+        !output.contains("struct GlobInnerItem"),
+        "limit 0 should not render the matching row:\n{output}"
     );
 }
 
