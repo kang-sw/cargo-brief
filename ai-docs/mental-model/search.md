@@ -15,6 +15,8 @@ related:
 
 ## Module Contracts
 - Pattern parsing (`parse_pattern`) guarantees: exclusion tokens (`-term`) are collected globally across all OR groups into `ParsedPattern.exclusions`, regardless of which comma-separated group the `-term` token appears in. Writing `"Foo,Bar -test"` removes `-test` matches from results for both `Foo` AND `Bar`.
+- `--in-params` and `--in-returns` reuse `parse_pattern`, but the subject is a rendered type string from `render::format_type_pub`, not the item path. Exclusions are scoped to the owning filter subject: name-pattern exclusions inspect item paths, parameter exclusions inspect one candidate parameter type at a time, and return exclusions inspect the return type.
+- For `--in-params`, `matches_type_filter()` accepts a function when one parameter type satisfies the whole parsed pattern, including exclusions. It does not apply exclusions as a function-wide scan across all parameters.
 - `token_matches` with `TokenKind::Exact` checks only the final `::` segment via `rsplit("::").next()`. Writing `=foo::Bar` never matches anything — `=` only binds a bare name, not a path.
 - `glob_match` applies the pattern to the full item path string including `::` separators. `*` spans module boundaries: `*Builder*` matches `outer::SomeBuilder::new` because `*` crosses `::`.
 - Smart-case is determined once from the entire raw pattern string before parsing: if any character is uppercase, the whole parse is case-sensitive (stored tokens are not lowercased).
@@ -29,6 +31,7 @@ related:
 - `render_search_filtered` and `search_cross_crate_index` both take `members: bool` as their final argument. Adding any new filtering option to one function must be mirrored in both, or cross-crate results will diverge from local results silently.
 - Member filtering runs after exclusion and before `--methods-of` filtering. Changing this order alters which members are visible when both flags are combined.
 - `render_collapsed_member` calls `render::format_type_pub` and `render::format_function_sig_pub` directly. If the render module changes those function signatures, collapsed display silently produces wrong output without a compile error (the return type is `String` in both cases).
+- Type-filter matching also depends on `render::format_type_pub`; changing rendered type strings can change `--in-params` / `--in-returns` matches even if search traversal is untouched.
 
 ## Extension Points & Change Recipes
 - **Add a new member kind**: touch `is_member()`, `render_collapsed_member` (add match arm), and both member-expansion blocks in `render_search_inner` and `search_cross_crate_index`. Missing `render_collapsed_member` arm → new members in `--members` mode emit nothing (silent blank line).
