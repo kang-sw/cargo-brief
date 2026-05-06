@@ -494,9 +494,9 @@ pub fn run_search_pipeline(args: &SearchArgs, remote: &RemoteOpts) -> Result<Str
 
     // --methods-of: synthesize a name pattern when none given; narrows walk to functions only.
     // methods_of stays set — run_shared_search_pipeline uses it for exact parent matching.
-    if args.methods_of.is_some() {
+    if let Some(methods_of) = &args.methods_of {
         if args.patterns.is_empty() {
-            args.patterns = vec![args.methods_of.as_ref().unwrap().clone()];
+            args.patterns = vec![methods_of.clone()];
         }
         apply_function_narrowing(&mut args.filter);
     }
@@ -1555,10 +1555,7 @@ fn apply_glob_expansions(
 /// Normalization: trim whitespace, collapse multiple spaces.
 /// Replacement lines inherit the original line's indentation.
 fn replace_glob_lines(output: &mut String, pattern: &str, replacement: &str) {
-    loop {
-        let Some((start, end, indent)) = find_normalized_line(output, pattern) else {
-            break;
-        };
+    while let Some((start, end, indent)) = find_normalized_line(output, pattern) {
         let indented: String = replacement
             .lines()
             .map(|l| {
