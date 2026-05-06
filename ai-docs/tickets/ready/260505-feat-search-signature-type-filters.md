@@ -33,8 +33,23 @@ documentation.
   rustdoc types.
 - Reuse the existing search pattern DSL where possible so users do not learn a
   separate type-pattern language.
+- Type filters support the same positive tokens and exclusion tokens as the
+  existing search pattern DSL. The match subject changes from item path to the
+  rendered type string for the specific filter.
 - Preserve AND semantics across name pattern, parameter filter, and return
   filter.
+- Scope exclusions to the filter that owns them: name-pattern exclusions apply
+  to item paths, `--in-params` exclusions apply to each candidate parameter type
+  string, and `--in-returns` exclusions apply to the return type string.
+- For `--in-params`, one parameter type must satisfy the whole type-filter
+  pattern. Do not treat exclusions as function-wide checks across all
+  parameters.
+- Because `--in-params` and `--in-returns` each accept one CLI option value,
+  multi-token type patterns require shell quoting, for example
+  `--in-params "TokenStream -Option"`. Unquoted `-Option` is a separate CLI
+  token, not part of the type-filter pattern.
+- Search output headers should include active type filters so type-filter-only
+  searches do not render as unexplained `search: ""` results.
 - Keep local and cross-crate behavior in lockstep.
 
 ## Phases
@@ -42,9 +57,23 @@ documentation.
 ### Phase 1: Specify the new CLI behavior
 
 Update the CLI and output/search specs for `--in-params` and `--in-returns`.
-The spec must settle whether type filters support the full existing pattern DSL,
-including exclusions, or only the positive OR/AND token subset currently wired
-by the PR.
+Type filters must reuse the existing pattern DSL, including exclusions, with the
+match subject scoped to the relevant rendered type string. Document that
+multi-token type patterns require quotes because each flag accepts one option
+value.
+
+Update the search help text to reduce CLI-tokenization ambiguity. The help text
+should make clear that exclusion tokens inside type-filter patterns require
+quoting, for example `--in-params "TokenStream -Option"`.
+
+Specify the output header extension for active type filters. Name-only searches
+keep the existing header. When type filters are active, append only the active
+filters before the result count, for example:
+
+```
+// crate cargo_brief — search: "" in-params: "PathBuf" (7 results)
+// crate cargo_brief — search: "parse" in-params: "TokenStream -Option" in-returns: "Result" (2 results)
+```
 
 This phase exists because the external PR did no documentation pass before
 landing on the integration branch.
@@ -52,9 +81,10 @@ landing on the integration branch.
 Success criteria:
 
 - `ai-docs/spec/cli-surface.md` documents both flags and empty-name-pattern
-  behavior.
-- `ai-docs/spec/output-format.md` documents any output/header implications if
-  a type-filter-only search displays an empty search pattern.
+  behavior, including quote requirements for multi-token type patterns.
+- `ai-docs/spec/cli-surface.md` documents filter-scoped exclusion behavior and
+  the parameter-level subject for `--in-params`.
+- `ai-docs/spec/output-format.md` documents the active-filter header extension.
 - The ticket `spec:` frontmatter remains aligned with the final spec stems.
 
 ### Phase 2: Harden type-filter semantics and tests
@@ -66,7 +96,12 @@ method behavior, and any exclusion semantics chosen in Phase 1.
 Success criteria:
 
 - Type filters behave consistently in local and cross-crate search.
+- Type-filter exclusions apply to rendered type strings, not item paths.
+- `--in-params` accepts a function when one parameter type satisfies the full
+  parameter pattern, including exclusions.
 - Tests cover free functions and member methods, not only non-member functions.
+- Tests cover empty name pattern plus type filters, combined name/param/return
+  AND semantics, and active-filter output headers.
 - Remote or facade-style search coverage proves the new args are wired through
   `run_search_pipeline`, not only direct `search_cross_crate_index` calls.
 - `cargo test` passes.
@@ -79,5 +114,5 @@ is finalized.
 Success criteria:
 
 - README includes concise examples for finding functions by parameter and
-  return type.
+  return type, including a quoted exclusion example.
 - CHANGELOG records the new caller-visible search capability.
