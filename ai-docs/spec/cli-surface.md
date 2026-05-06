@@ -135,10 +135,21 @@ Subcommand-specific flags:
 | `--methods-of <TYPE>` | Show only items whose direct parent is `TYPE` (exact match) |
 | `--search-kind <KINDS>` | Comma-separated kind filter: `fn`, `struct`, `enum`, `trait`, `field`, `variant`, `const`, `static`, `type`, `macro`, `proc-macro`, `attr-macro`, `derive-macro`, `use` |
 | `--members` | Expand all members (fields, methods, trait impls) of matched types |
+| `--in-params <PATTERN>` | Show only functions with at least one parameter type matching `PATTERN` |
+| `--in-returns <PATTERN>` | Show only functions whose return type matches `PATTERN` |
 | `--at-package`, `--at-mod` | Visibility observer override |
 | `--manifest-path` | Path to `Cargo.toml` |
 
 Also accepts FilterArgs and GlobalArgs.
+
+`--in-params` and `--in-returns` narrow results to functions and methods. They
+can be used without a name pattern; in that case the name-matching stage is
+skipped and the type filters choose from all visible functions.
+
+When a name pattern, `--in-params`, and `--in-returns` are combined, the axes
+use AND semantics: the item path must satisfy the name pattern, one parameter
+type must satisfy the parameter filter if present, and the return type must
+satisfy the return filter if present.
 
 ### Pattern DSL {#260423-search-pattern-dsl}
 
@@ -155,6 +166,24 @@ Multiple tokens on the command line join with spaces (no quoting needed for mult
 Smart-case applies to all operators: an all-lowercase pattern is case-insensitive; any uppercase letter makes the match case-sensitive.
 
 Patterns beginning with `-` require `--` on the command line to prevent flag parsing.
+
+`--in-params` and `--in-returns` reuse the same token syntax, but the match
+subject changes from item path to rendered type string. Exclusions are scoped to
+the filter that owns them: name-pattern exclusions apply to item paths,
+`--in-params` exclusions apply to each candidate parameter type string, and
+`--in-returns` exclusions apply to the return type string.
+
+For `--in-params`, a function matches when one parameter type satisfies the
+whole filter pattern, including exclusions. Exclusions do not scan all
+parameters function-wide.
+
+Because type-filter flags accept one option value, multi-token type patterns
+must be quoted:
+
+```
+cargo brief search self "" --in-params "TokenStream -Option"
+cargo brief search self parse --in-returns "Result -Vec"
+```
 
 > [!note] Implementation Gap · 2026-04-23
 > Glob patterns are matched against the full item path, so `Camera*` returns zero results unless the crate name itself starts with `Camera`. The intended behavior is to match against the final `::` segment by default. Current workaround: use a substring pattern (`camera`) instead.

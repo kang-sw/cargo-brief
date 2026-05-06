@@ -353,6 +353,15 @@ Header:
 // crate <name> — search: "<pattern>" (N results)
 ```
 
+When signature type filters are active, the header includes only the active
+filters before the result count:
+
+```
+// crate <name> — search: "<pattern>" in-params: "<pattern>" (N results)
+// crate <name> — search: "<pattern>" in-returns: "<pattern>" (N results)
+// crate <name> — search: "<pattern>" in-params: "<pattern>" in-returns: "<pattern>" (N results)
+```
+
 Per-item line formats by kind:
 
 | Kind | Format |
