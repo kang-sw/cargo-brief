@@ -103,6 +103,10 @@ cargo brief search self "spawn async"
 # Show methods/fields of a type
 cargo brief search self --methods-of Handle
 
+# Find functions by signature shape
+cargo brief search self "" --in-params PathBuf
+cargo brief search self parse --in-returns "Result -Vec"
+
 # OR-match with comma
 cargo brief search self "EventReader,EventWriter"
 
@@ -116,6 +120,9 @@ cargo brief search self "=Router"
 - `w*ld` — glob (`*` = 0+ chars, `?` = 1 char)
 - `=Name` — exact final segment
 - `-term` — exclude (use `--` for patterns starting with `-`)
+
+`--in-params` and `--in-returns` reuse the same pattern syntax against rendered
+type strings. Quote multi-token type patterns such as `"TokenStream -Option"`.
 
 ### `summary` — module overview
 

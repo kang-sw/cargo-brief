@@ -4,6 +4,14 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Added
+
+- **Search signature type filters.** `cargo brief search` now accepts
+  `--in-params <PATTERN>` and `--in-returns <PATTERN>` to find functions by
+  rendered parameter or return types. The filters reuse the search pattern DSL,
+  including quoted exclusions such as `--in-returns "Result -Vec"`, and active
+  type filters are shown in the search output header.
+
 ## [0.12.0] - 2026-04-29
 
 ### Added
