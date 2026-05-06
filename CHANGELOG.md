@@ -4,6 +4,8 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [0.12.1] - 2026-05-06
+
 ### Added
 
 - **Search signature type filters.** `cargo brief search` now accepts
@@ -11,6 +13,15 @@ All notable changes to this project will be documented in this file.
   rendered parameter or return types. The filters reuse the search pattern DSL,
   including quoted exclusions such as `--in-returns "Result -Vec"`, and active
   type filters are shown in the search output header.
+
+### Fixed
+
+- **Renamed Rust library targets.** Rustdoc JSON lookup now accepts crates whose
+  Cargo package name differs from their `[lib] name`, such as packages that
+  generate `webpki.json` instead of `rustls_webpki.json`.
+- **Search result counts for cross-crate re-exports.** Search headers now include
+  appended cross-crate results in the displayed total instead of reporting only
+  local matches.
 
 ## [0.12.0] - 2026-04-29
 
