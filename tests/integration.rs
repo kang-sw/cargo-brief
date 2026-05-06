@@ -3195,6 +3195,69 @@ fn test_cross_crate_in_params_no_name_pattern_no_panic() {
     );
 }
 
+#[test]
+fn test_cross_crate_in_params_exclusion_is_parameter_scoped() {
+    let index = build_test_fixture_index();
+    let output = search::search_cross_crate_index(
+        &index,
+        "test_fixture",
+        "glob_source_fn",
+        &default_filter(),
+        None,
+        None,
+        None,
+        false,
+        Some("PathBuf -Option"),
+        None,
+    );
+    assert!(
+        output.contains("glob_source_fn"),
+        "cross-crate --in-params should accept when one parameter satisfies the full pattern:\n{output}"
+    );
+}
+
+#[test]
+fn test_cross_crate_in_returns_exclusion_filters_return_type() {
+    let index = build_test_fixture_index();
+    let output = search::search_cross_crate_index(
+        &index,
+        "test_fixture",
+        "glob_source_fn",
+        &default_filter(),
+        None,
+        None,
+        None,
+        false,
+        None,
+        Some("Result -String"),
+    );
+    assert!(
+        output.is_empty(),
+        "cross-crate --in-returns exclusions should reject matching return type strings:\n{output}"
+    );
+}
+
+#[test]
+fn test_cross_crate_in_returns_exclusion_does_not_match_item_path() {
+    let index = build_test_fixture_index();
+    let output = search::search_cross_crate_index(
+        &index,
+        "test_fixture",
+        "glob_source_fn",
+        &default_filter(),
+        None,
+        None,
+        None,
+        false,
+        None,
+        Some("Result -glob_source_fn"),
+    );
+    assert!(
+        output.contains("glob_source_fn"),
+        "cross-crate --in-returns exclusions should apply to return type strings, not item paths:\n{output}"
+    );
+}
+
 // === Leaf Item Resolution Tests ===
 
 #[test]
