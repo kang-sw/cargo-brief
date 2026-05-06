@@ -86,7 +86,7 @@ When a spec heading `{#slug}` changes, include `renamed-spec: <old-stem> -> <new
 - Before creating or editing tickets, load the write-ticket workflow skill for conventions.
 - Reference tickets by **stem only** (e.g., `260115-feat-foo-bar`), never by
   full path — stems stay stable across status moves.
-- Check `## Ticket Queue` in `ai-docs/_index.md` before starting a ticket.
+- Check `## Ticket Queue` in `ai-docs/_index.md` before starting implementation; it lists `ready/` work only.
 - To check ticket completion or prior phase results, use `git log --grep=<ticket-stem>`
   and look for `## Ticket Updates` sections in matching commits.
 - **Language:** All AI-authored artifacts — documents, plans, commit messages, ticket entries,
@@ -97,7 +97,7 @@ When a spec heading `{#slug}` changes, include `renamed-spec: <old-stem> -> <new
   Categories: `bug`, `feat`, `refactor`, `chore`, `research`.
   - Frontmatter requires `title` and `status`. Add `plans:` for phases with existing plan
     documents. Add `completed: YYYY-MM-DD` on move to `.done/`. Add `parent:` for epic sub-tickets where applicable.
-  - Active status is directory-based: `idea/` -> `todo/`. Archive status is `.done/` or `.dropped/`.
+  - Active status is directory-based: `idea/` -> `todo/` -> `ready/`. Archive status is `.done/` or `.dropped/`.
   - Phases requiring non-trivial design before coding are marked **(plan mode)** — use
     `EnterPlanMode`, explore + design, get user approval, then `ExitPlanMode` to implement.
   - After completing a ticket phase, append a `### Result (<short-hash>) - YY-MM-DD` subsection
@@ -107,4 +107,4 @@ When a spec heading `{#slug}` changes, include `renamed-spec: <old-stem> -> <new
      wrong results, it belongs here. Everything else goes in
      _index.md (context) or skills (process). -->
 
-<!-- Template Version: v0034 -->
+<!-- Template Version: v0035 -->

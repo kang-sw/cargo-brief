@@ -135,6 +135,7 @@ Domain docs in `ai-docs/mental-model/`:
 
 - **Tickets**: `ai-docs/tickets/<status>/YYMMDD-<category>-<name>.md`. Categories:
   `bug`, `feat`, `refactor`, `chore`, `research`. `YYMMDD` is creation date (never changes).
+  `ready/` is the implementation queue; `todo/` holds scoped work that is not ready to start.
 - **Plans**: `ai-docs/.plans/YYYY-MM/DD-hhmm.<name>.md`.
 - **Dependency docs**: use `ws-ask-api` / `ai-docs/.deps/`; legacy dependency notes live under `ai-docs/ref/` if present.
 
