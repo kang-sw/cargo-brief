@@ -6,6 +6,7 @@ spec:
   - 260423-search-output-format
 related-mental-model:
   - search
+completed: 2026-05-06
 ---
 
 # search: complete signature type filters from PR #5
@@ -87,6 +88,13 @@ Success criteria:
 - `ai-docs/spec/output-format.md` documents the active-filter header extension.
 - The ticket `spec:` frontmatter remains aligned with the final spec stems.
 
+### Result (b0e126d) - 2026-05-06
+
+Updated the CLI and output specs for `--in-params` and `--in-returns`.
+The spec now records empty-name-pattern behavior, filter-scoped exclusions,
+parameter-level matching for `--in-params`, quote requirements for multi-token
+type-filter patterns, and active-filter search headers.
+
 ### Phase 2: Harden type-filter semantics and tests
 
 Bring implementation and tests into line with the settled spec. Cover local and
@@ -106,6 +114,14 @@ Success criteria:
   `run_search_pipeline`, not only direct `search_cross_crate_index` calls.
 - `cargo test` passes.
 
+### Result (f5d9437) - 2026-05-06
+
+Implemented filter-scoped type-filter exclusions and active-filter search
+headers. Added help text that calls out quoted multi-token type-filter patterns.
+Expanded tests for local and cross-crate type-filter exclusions, parameter-level
+matching, member methods, empty name patterns, active-filter headers, and help
+text. write-code review completed clean after one test-coverage follow-up.
+
 ### Phase 3: Update user-facing release docs
 
 Update README and CHANGELOG entries for the new search flags after the behavior
@@ -116,3 +132,10 @@ Success criteria:
 - README includes concise examples for finding functions by parameter and
   return type, including a quoted exclusion example.
 - CHANGELOG records the new caller-visible search capability.
+
+### Result (9ef48e8) - 2026-05-06
+
+Updated README examples and the Unreleased changelog entry for search signature
+type filters, including quoted exclusion syntax. Updated the search mental model
+for rendered-type matching, filter-scoped exclusions, and `format_type_pub`
+coupling.

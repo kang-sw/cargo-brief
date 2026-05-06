@@ -158,7 +158,6 @@ Domain docs in `ai-docs/mental-model/`:
 1. `260423-bug-cfg-parse-implicit-and-fallback`
 2. `260423-feat-subcommand-quickguide-tables`
 3. `260423-feat-verbose-download-progress`
-4. `260505-feat-search-signature-type-filters` - complete PR #5 search signature type filters with specs, parity tests, README, and changelog updates.
 
 ## Session Notes
 
