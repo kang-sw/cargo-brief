@@ -272,6 +272,34 @@ fn token_matches(token: &TokenKind, path: &str) -> bool {
     }
 }
 
+fn pattern_matches_subject(parsed: &ParsedPattern, subject: &str) -> bool {
+    parsed
+        .or_groups
+        .iter()
+        .any(|group| group.iter().all(|tok| token_matches(tok, subject)))
+        && !parsed
+            .exclusions
+            .iter()
+            .any(|tok| token_matches(tok, subject))
+}
+
+fn search_header(
+    crate_name: &str,
+    pattern: &str,
+    in_params: Option<&str>,
+    in_returns: Option<&str>,
+    total: usize,
+) -> String {
+    let mut filters = String::new();
+    if let Some(pat) = in_params {
+        filters.push_str(&format!(" in-params: \"{pat}\""));
+    }
+    if let Some(pat) = in_returns {
+        filters.push_str(&format!(" in-returns: \"{pat}\""));
+    }
+    format!("// crate {crate_name} — search: \"{pattern}\"{filters} ({total} results)\n")
+}
+
 /// Run search mode: find all leaf items matching the pattern and render them.
 pub fn render_search(
     model: &CrateModel,
@@ -376,10 +404,7 @@ fn matches_type_filter(
         let any_param = f.sig.inputs.iter().any(|(_, ty)| {
             let s = render::format_type_pub(ty);
             let s = if *cs { s } else { s.to_lowercase() };
-            parsed
-                .or_groups
-                .iter()
-                .any(|g| g.iter().all(|tok| token_matches(tok, &s)))
+            pattern_matches_subject(parsed, &s)
         });
         if !any_param {
             return false;
@@ -391,11 +416,7 @@ fn matches_type_filter(
         };
         let s = render::format_type_pub(ret_ty);
         let s = if *cs { s } else { s.to_lowercase() };
-        if !parsed
-            .or_groups
-            .iter()
-            .any(|g| g.iter().all(|tok| token_matches(tok, &s)))
-        {
+        if !pattern_matches_subject(parsed, &s) {
             return false;
         }
     }
@@ -449,26 +470,25 @@ fn render_search_inner(
 
     // Positive pattern matching (OR of AND groups).
     // When no name pattern is given but a type filter is active, skip name filtering.
-    let mut matched: Vec<&LeafItem> = if parsed.or_groups.is_empty()
-        && (in_params.is_some() || in_returns.is_some())
-    {
-        leaves.iter().collect()
-    } else {
-        leaves
-            .iter()
-            .filter(|leaf| {
-                let path = if case_sensitive {
-                    leaf.path.clone()
-                } else {
-                    leaf.path.to_lowercase()
-                };
-                parsed
-                    .or_groups
-                    .iter()
-                    .any(|group| group.iter().all(|tok| token_matches(tok, &path)))
-            })
-            .collect()
-    };
+    let mut matched: Vec<&LeafItem> =
+        if parsed.or_groups.is_empty() && (in_params.is_some() || in_returns.is_some()) {
+            leaves.iter().collect()
+        } else {
+            leaves
+                .iter()
+                .filter(|leaf| {
+                    let path = if case_sensitive {
+                        leaf.path.clone()
+                    } else {
+                        leaf.path.to_lowercase()
+                    };
+                    parsed
+                        .or_groups
+                        .iter()
+                        .any(|group| group.iter().all(|tok| token_matches(tok, &path)))
+                })
+                .collect()
+        };
 
     // Global exclusions
     if !parsed.exclusions.is_empty() {
@@ -606,7 +626,7 @@ fn render_search_inner(
     let skipped_after = total - end;
 
     // Render
-    let mut output = format!("// crate {crate_name} — search: \"{pattern}\" ({total} results)\n",);
+    let mut output = search_header(crate_name, pattern, in_params, in_returns, total);
 
     if skipped_before > 0 {
         output.push_str(&format!("// (skipped {skipped_before} results)\n"));
@@ -1652,27 +1672,26 @@ pub fn search_cross_crate_index(
     }
 
     // Pattern matching. When no name pattern is given but a type filter is active, skip name filtering.
-    let mut filtered: Vec<(usize, &LeafItem)> = if parsed.or_groups.is_empty()
-        && (in_params.is_some() || in_returns.is_some())
-    {
-        matched.iter().map(|(ci, leaf)| (*ci, leaf)).collect()
-    } else {
-        matched
-            .iter()
-            .filter(|(_, leaf)| {
-                let path = if case_sensitive {
-                    leaf.path.clone()
-                } else {
-                    leaf.path.to_lowercase()
-                };
-                parsed
-                    .or_groups
-                    .iter()
-                    .any(|group| group.iter().all(|tok| token_matches(tok, &path)))
-            })
-            .map(|(ci, leaf)| (*ci, leaf))
-            .collect()
-    };
+    let mut filtered: Vec<(usize, &LeafItem)> =
+        if parsed.or_groups.is_empty() && (in_params.is_some() || in_returns.is_some()) {
+            matched.iter().map(|(ci, leaf)| (*ci, leaf)).collect()
+        } else {
+            matched
+                .iter()
+                .filter(|(_, leaf)| {
+                    let path = if case_sensitive {
+                        leaf.path.clone()
+                    } else {
+                        leaf.path.to_lowercase()
+                    };
+                    parsed
+                        .or_groups
+                        .iter()
+                        .any(|group| group.iter().all(|tok| token_matches(tok, &path)))
+                })
+                .map(|(ci, leaf)| (*ci, leaf))
+                .collect()
+        };
 
     // Global exclusions
     if !parsed.exclusions.is_empty() {

@@ -1,6 +1,6 @@
 use cargo_brief::cli::{
-    ApiArgs, CodeArgs, ExamplesArgs, FeaturesArgs, FilterArgs, GlobalArgs, RemoteOpts, SearchArgs,
-    SummaryArgs, TargetArgs, TsArgs,
+    ApiArgs, BriefDirect, CodeArgs, ExamplesArgs, FeaturesArgs, FilterArgs, GlobalArgs, RemoteOpts,
+    SearchArgs, SummaryArgs, TargetArgs, TsArgs,
 };
 use cargo_brief::model::{CrateModel, compute_reachable_set};
 use cargo_brief::render::{render_leaf_item, render_leaf_not_found, render_module_api};
@@ -8,6 +8,7 @@ use cargo_brief::resolve;
 use cargo_brief::rustdoc_json;
 use cargo_brief::search;
 use cargo_brief::summary;
+use clap::CommandFactory;
 
 /// Generate the model from the test fixture once (per test).
 fn fixture_model() -> CrateModel {
@@ -3733,6 +3734,29 @@ fn test_in_params_no_name_pattern_collects_all() {
 }
 
 #[test]
+fn test_in_params_exclusion_is_parameter_scoped() {
+    let model = fixture_model();
+    let output = search::render_search_filtered(
+        &model,
+        "*",
+        &default_filter(),
+        None,
+        None,
+        true,
+        None,
+        None,
+        None,
+        false,
+        Some("impl -Debug"),
+        None,
+    );
+    assert!(
+        output.contains("multi_impl_trait"),
+        "--in-params should accept a function when one parameter satisfies the full pattern:\n{output}"
+    );
+}
+
+#[test]
 fn test_in_returns_name_pattern_and_semantics() {
     let model = fixture_model();
     // Name pattern AND return type: only functions matching BOTH
@@ -3762,6 +3786,104 @@ fn test_in_returns_name_pattern_and_semantics() {
 }
 
 #[test]
+fn test_in_returns_exclusion_filters_return_type() {
+    let model = fixture_model();
+    let output = search::render_search_filtered(
+        &model,
+        "*",
+        &default_filter(),
+        None,
+        None,
+        true,
+        None,
+        None,
+        None,
+        false,
+        None,
+        Some("String -String"),
+    );
+    assert!(
+        output.contains("(0 results)"),
+        "--in-returns exclusions should reject matching return type strings:\n{output}"
+    );
+    assert!(
+        !output.contains("where_fn"),
+        "where_fn returns String and should be excluded by -String:\n{output}"
+    );
+}
+
+#[test]
+fn test_in_returns_exclusion_does_not_match_item_path() {
+    let model = fixture_model();
+    let output = search::render_search_filtered(
+        &model,
+        "*",
+        &default_filter(),
+        None,
+        None,
+        true,
+        None,
+        None,
+        None,
+        false,
+        None,
+        Some("String -where_fn"),
+    );
+    assert!(
+        output.contains("where_fn"),
+        "--in-returns exclusions should apply to return type strings, not item paths:\n{output}"
+    );
+}
+
+#[test]
+fn test_in_returns_matches_member_methods_with_methods_of() {
+    let model = fixture_model();
+    let output = search::render_search_filtered(
+        &model,
+        "pub_method",
+        &default_filter(),
+        None,
+        None,
+        true,
+        None,
+        Some("PubStruct"),
+        None,
+        false,
+        None,
+        Some("i32"),
+    );
+    assert!(
+        output.contains("pub_method"),
+        "--in-returns should filter impl methods as functions when --methods-of is active:\n{output}"
+    );
+}
+
+#[test]
+fn test_type_filter_header_lists_active_filters() {
+    let model = fixture_model();
+    let output = search::render_search_filtered(
+        &model,
+        "",
+        &default_filter(),
+        None,
+        None,
+        true,
+        None,
+        None,
+        None,
+        false,
+        Some("i32"),
+        Some("i32 -String"),
+    );
+    assert!(
+        output.starts_with(
+            "// crate test_fixture — search: \"\" in-params: \"i32\" in-returns: \"i32 -String\""
+        ),
+        "search header should describe active type filters:\n{output}"
+    );
+}
+
+#[test]
 fn test_in_returns_excludes_non_functions() {
     let model = fixture_model();
     let mut filter = default_filter();
@@ -3785,6 +3907,23 @@ fn test_in_returns_excludes_non_functions() {
     assert!(
         !output.contains("struct "),
         "--in-returns should exclude structs even if no_structs=false:\n{output}"
+    );
+}
+
+#[test]
+fn search_help_mentions_quoted_type_filter_exclusions() {
+    let mut cmd = BriefDirect::command();
+    let search_cmd = cmd
+        .find_subcommand_mut("search")
+        .expect("search subcommand should exist");
+    let help = search_cmd.render_long_help().to_string();
+    assert!(
+        help.contains("--in-params \"TokenStream -Option\""),
+        "search help should show quoted type-filter exclusions:\n{help}"
+    );
+    assert!(
+        help.contains("Quote multi-token"),
+        "search help should explain multi-token type-filter quoting:\n{help}"
     );
 }
 

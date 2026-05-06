@@ -162,6 +162,10 @@ EXAMPLES:
   cargo brief search bevy -- spawn -test              # -- needed for -prefix args
   cargo brief search bevy \"*Plugin*,*Resource* -test\"
 
+  # Signature type filters
+  cargo brief search self \"\" --in-params PathBuf
+  cargo brief search self parse --in-returns \"Result -Vec\"
+
 PATTERN SYNTAX:
   Smart-case: all-lowercase → case-insensitive, any uppercase → case-sensitive.
   Space = AND, comma = OR. Multiple args are joined with spaces.
@@ -172,7 +176,9 @@ PATTERN SYNTAX:
     =Name    exact — final path segment (after last ::) equals \"Name\"
     -term    exclude — remove matches (works with substring, glob, or -=exact)
 
-  Exclusions are global across all OR groups.")]
+  Exclusions are global across all OR groups.
+  Type filters use the same syntax against rendered type strings. Quote multi-token
+  filter values, e.g. --in-params \"TokenStream -Option\".")]
     Search(SearchArgs),
 
     /// Grep example/test/bench source files from a crate
@@ -631,11 +637,11 @@ pub struct SearchArgs {
     #[arg(long)]
     pub members: bool,
 
-    /// Filter functions by parameter type (substring/glob/exact pattern)
+    /// Filter functions by parameter type (quote multi-token patterns)
     #[arg(long, value_name = "PATTERN", help_heading = "Filtering")]
     pub in_params: Option<String>,
 
-    /// Filter functions by return type (substring/glob/exact pattern)
+    /// Filter functions by return type (quote multi-token patterns)
     #[arg(long, value_name = "PATTERN", help_heading = "Filtering")]
     pub in_returns: Option<String>,
 }
