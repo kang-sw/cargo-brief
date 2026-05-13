@@ -83,6 +83,7 @@ When a spec heading `{#slug}` changes, include `renamed-spec: <old-stem> -> <new
 ## Project Knowledge
 
 - Project state and cross-session context live in `ai-docs/`.
+- Workflow shape and plugin-less maintenance guidance live in `ai-docs/WORKFLOW.md`; it is explanatory and does not override ws runtime or MCP parser behavior.
 - Before creating or editing tickets, load the write-ticket workflow skill for conventions.
 - Reference tickets by **stem only** (e.g., `260115-feat-foo-bar`), never by
   full path — stems stay stable across status moves.
@@ -107,4 +108,4 @@ When a spec heading `{#slug}` changes, include `renamed-spec: <old-stem> -> <new
      wrong results, it belongs here. Everything else goes in
      _index.md (context) or skills (process). -->
 
-<!-- Template Version: v0035 -->
+<!-- Template Version: v0038 -->
